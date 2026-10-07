@@ -1,6 +1,7 @@
 """Private administrator registry and confirmed identity supplements."""
 
 from html import escape
+from typing import Any
 from uuid import uuid4
 
 from aiogram import Router
@@ -10,6 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from app import presentation as p
 from app.bot.callbacks import ScamAdmin
 from app.bot.keyboards import keyboard, pages
+from app.bot.scam_notices import registered_scam_text
 from app.bot.screens import clear_flow, flow_screen, preserved_source
 from app.bot.states import ScamAdminFlow
 from app.i18n import t
@@ -70,7 +72,11 @@ async def listing(message: Message, state: FSMContext, service: Service, page: i
 def register_scam_handlers(router: Router):
     @router.callback_query(ScamAdmin.filter())
     async def callback_handler(
-        callback: CallbackQuery, callback_data: ScamAdmin, state: FSMContext, service: Service
+        callback: CallbackQuery,
+        callback_data: ScamAdmin,
+        state: FSMContext,
+        service: Service,
+        session_factory: Any,
     ):
         message = callback.message
         if not isinstance(message, Message):
@@ -107,7 +113,7 @@ def register_scam_handlers(router: Router):
             await flow_screen(
                 message,
                 state,
-                t("sm.done") + "\n\n" + p.identity(record.target),
+                await registered_scam_text(callback.bot, service, session_factory, record),
                 reply_markup=controls(record, persistent=True),
                 persistent=True,
             )

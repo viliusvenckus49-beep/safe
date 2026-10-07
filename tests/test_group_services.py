@@ -94,10 +94,6 @@ async def test_recovery_rejects_invalid_invite(database, settings, url):
 
 
 async def test_claim_revalidation_and_exhausted_ban_rearm(database, settings):
-    from datetime import timedelta
-
-    from app.models import now
-
     async with database() as session:
         svc, groups = Service(settings, session), GroupService(settings, session)
         await groups.register_group(900, -100, "Grupė", True)
@@ -107,11 +103,7 @@ async def test_claim_revalidation_and_exhausted_ban_rearm(database, settings):
         await session.refresh(job)
         assert job.attempts == 8
         await groups.check_member(-100, 12)
-        assert await groups.claim_bans() == []
-        job.completed_at = now() - timedelta(minutes=2)
-        job.next_attempt_at = now() - timedelta(seconds=1)
-        await session.commit()
-        await groups.check_member(-100, 12)
+        # The first observed presence immediately retries a rejected preemptive ban.
         assert len(await groups.claim_bans()) == 1
         await svc.remove_scam(900, "12", "Patvirtintas pašalinimo sprendimas")
         assert not await groups.ban_eligible(job.id)

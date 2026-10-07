@@ -11,6 +11,7 @@ from sqlalchemy import select
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
 from app import presentation as p
+from app.bot.group_runtime import process_scam_bans
 from app.bot.navigation import error_navigation
 from app.bot.screens import flow_screen, panel_state, preserved_source, render
 from app.group_services import GroupService
@@ -91,7 +92,7 @@ class ServiceMiddleware(BaseMiddleware):
                                     chat_type=str(event.chat.type),
                                 )
                             else:
-                                await groups.disable_group(event.chat.id)
+                                await groups.note_group_permissions(event.chat.id, False)
                         except TelegramAPIError as error:
                             log.warning(
                                 "group_registration_failed", exception_type=type(error).__name__
@@ -107,6 +108,29 @@ class ServiceMiddleware(BaseMiddleware):
                                     event.chat.id, joined.id, joined.username, joined.full_name
                                 )
                                 await groups.check_member(event.chat.id, joined.id, fresh_join=True)
+                    ids = {actor.id} | {
+                        user.id for user in event.new_chat_members or [] if not user.is_bot
+                    }
+                    records = []
+                    for user_id in ids:
+                        known = await groups.core.repo.user_by_telegram(user_id)
+                        record = await groups.core.repo.active_scam(known.id) if known else None
+                        if record is not None:
+                            records.append(record.id)
+                    # End metadata reads before the executor performs Telegram calls.
+                    await group_session.commit()
+                if event.bot is not None:
+                    for record_id in records:
+                        try:
+                            await process_scam_bans(
+                                event.bot, self.settings, self.session_factory, record_id
+                            )
+                        except Exception as error:
+                            log.warning(
+                                "scam_ban_processing_deferred",
+                                scam_record_id=record_id,
+                                exception_type=type(error).__name__,
+                            )
             current = monotonic()
             if len(self.recent) > 10000:
                 self.recent = {
@@ -128,6 +152,7 @@ class ServiceMiddleware(BaseMiddleware):
                 service = Service(self.settings, session)
                 data["service"] = service
                 data["settings"] = self.settings
+                data["session_factory"] = self.session_factory
                 try:
                     if isinstance(event, CallbackQuery) and isinstance(event.message, Message):
                         restored_at = await session.scalar(
@@ -148,7 +173,21 @@ class ServiceMiddleware(BaseMiddleware):
                                 await event.answer(p.text("data_refreshed"), show_alert=True)
                                 log.info("callback_rejected_after_data_restore")
                                 return None
-                    await service.observe(actor.id, actor.username, actor.full_name)
+                    observed = await service.observe(actor.id, actor.username, actor.full_name)
+                    if not group_message and event.bot is not None:
+                        record = await service.repo.active_scam(observed.id)
+                        await session.commit()
+                        if record is not None:
+                            try:
+                                await process_scam_bans(
+                                    event.bot, self.settings, self.session_factory, record.id
+                                )
+                            except Exception as error:
+                                log.warning(
+                                    "scam_ban_processing_deferred",
+                                    scam_record_id=record.id,
+                                    exception_type=type(error).__name__,
+                                )
                     if getattr(chat, "type", None) == "private":
                         await GroupService(self.settings, session).mark_private_contact(actor.id)
                     result = await handler(event, data)

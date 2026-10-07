@@ -1,15 +1,17 @@
 """Managed groups, bot-observed member backup and consent-based recovery outboxes."""
 
 import re
+from dataclasses import dataclass
 from datetime import timedelta
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.models import (
+    AuditEvent,
     BanAction,
     ManagedGroup,
     ObservedMember,
@@ -24,7 +26,20 @@ from app.models import (
 from app.services import DomainError, Service
 
 
+@dataclass(frozen=True)
+class BanSummary:
+    """Live protected-group results; failed attempts remain part of pending."""
+
+    telegram_id: int | None
+    checked: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    pending: int = 0
+
+
 async def enqueue_scam_bans(session: AsyncSession, record: ScamRecord) -> int:
+    if record.status != "ACTIVE":
+        return 0
     user = await session.get(User, record.target_id)
     if user is None or user.telegram_id is None:
         return 0
@@ -34,7 +49,6 @@ async def enqueue_scam_bans(session: AsyncSession, record: ScamRecord) -> int:
                 select(ManagedGroup).where(
                     ManagedGroup.approved.is_(True),
                     ManagedGroup.enabled.is_(True),
-                    ManagedGroup.can_restrict_members.is_(True),
                 )
             )
         ).all()
@@ -48,7 +62,7 @@ async def enqueue_ban(
     session: AsyncSession, chat_id: int, telegram_id: int, scam_record_id: int
 ) -> None:
     group = await session.get(ManagedGroup, chat_id, populate_existing=True)
-    if group is None or not group.approved or not group.enabled or not group.can_restrict_members:
+    if group is None or not group.approved or not group.enabled:
         return
     if session.get_bind().dialect.name == "postgresql":
         from sqlalchemy.dialects.postgresql import insert
@@ -64,7 +78,16 @@ async def enqueue_ban(
             attempts=0,
             next_attempt_at=now(),
         )
-        .on_conflict_do_nothing(index_elements=["chat_id", "telegram_id", "scam_record_id"])
+        .on_conflict_do_update(
+            index_elements=["chat_id", "telegram_id", "scam_record_id"],
+            set_={
+                "status": "PENDING",
+                "attempts": 0,
+                "next_attempt_at": now(),
+                "completed_at": None,
+            },
+            where=BanAction.status == "OBSOLETE",
+        )
     )
 
 
@@ -118,39 +141,69 @@ class GroupService:
                 chat_type=chat_type,
                 title=title[:256],
                 approved=True,
-                enabled=can_restrict_members,
+                enabled=True,
                 can_restrict_members=can_restrict_members,
             )
             self.session.add(group)
         else:
             group.title, group.enabled, group.can_restrict_members = (
                 title[:256],
-                can_restrict_members,
+                True,
                 can_restrict_members,
             )
         group.approved = True
         group.chat_type = chat_type
         await self.session.flush()
+        rows = (
+            await self.session.execute(
+                select(ScamRecord.id, User.telegram_id)
+                .join(User, User.id == ScamRecord.target_id)
+                .where(ScamRecord.status == "ACTIVE", User.telegram_id.is_not(None))
+            )
+        ).all()
+        for record_id, telegram_id in rows:
+            await enqueue_ban(self.session, chat_id, telegram_id, record_id)
         if can_restrict_members:
-            rows = (
-                await self.session.execute(
-                    select(ScamRecord.id, User.telegram_id)
-                    .join(User, User.id == ScamRecord.target_id)
-                    .where(ScamRecord.status == "ACTIVE", User.telegram_id.is_not(None))
-                )
-            ).all()
-            for record_id, telegram_id in rows:
-                await enqueue_ban(self.session, chat_id, telegram_id, record_id)
             await self.session.execute(
                 update(BanAction)
-                .where(BanAction.chat_id == chat_id, BanAction.status == "FAILED")
+                .where(
+                    BanAction.chat_id == chat_id,
+                    BanAction.status == "FAILED",
+                    (BanAction.result_type != "TelegramRetryAfter")
+                    | (BanAction.next_attempt_at <= now()),
+                )
                 .values(status="PENDING", attempts=0, next_attempt_at=now())
             )
         self.core._audit(
-            actor, "group_registered", None, chat_id=chat_id, enabled=can_restrict_members
+            actor,
+            "group_registered",
+            None,
+            chat_id=chat_id,
+            enabled=True,
+            can_restrict_members=can_restrict_members,
         )
         await self.session.commit()
         return group
+
+    async def note_group_permissions(self, chat_id: int, can_restrict_members: bool) -> None:
+        """Rights loss is a retryable delivery problem, not owner withdrawal of protection."""
+        await self.core.repo.lock_identity_metadata()
+        group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
+        if group is not None:
+            group.can_restrict_members = can_restrict_members
+            if group.approved and group.enabled and can_restrict_members:
+                await self.session.execute(
+                    update(BanAction)
+                    .where(
+                        BanAction.chat_id == chat_id,
+                        BanAction.status == "FAILED",
+                        (BanAction.result_type != "TelegramRetryAfter")
+                        | (BanAction.next_attempt_at <= now()),
+                    )
+                    .values(status="PENDING", attempts=0, next_attempt_at=now(), completed_at=None)
+                    .execution_options(synchronize_session=False)
+                )
+        await self.session.commit()
 
     async def disable_group(self, chat_id: int) -> None:
         await self.session.execute(
@@ -208,13 +261,10 @@ class GroupService:
         await self.check_member(chat_id, tg_id)
 
     async def check_member(self, chat_id: int, tg_id: int, fresh_join: bool = False) -> None:
+        await self.core.repo.lock_identity_metadata()
         group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if (
-            group is None
-            or not group.approved
-            or not group.enabled
-            or not group.can_restrict_members
-        ):
+        if group is None or not group.approved or not group.enabled:
+            await self.session.commit()
             return
         record = await self.session.scalar(
             select(ScamRecord)
@@ -223,32 +273,60 @@ class GroupService:
         )
         if record:
             await enqueue_ban(self.session, chat_id, tg_id, record.id)
-            # A fresh member update can reveal that a successful ban was undone
-            # or permissions recovered. Bound rearming to one attempt per minute.
+            # Keep successful-ban repeat checks bounded. A first observed presence
+            # after a failed preemptive ban gets an immediate attempt; its audit
+            # marker prevents subsequent messages from repeatedly bypassing backoff.
             await self.session.execute(
                 update(BanAction)
                 .where(
                     BanAction.chat_id == chat_id,
                     BanAction.telegram_id == tg_id,
                     BanAction.scam_record_id == record.id,
+                    BanAction.status == "SUCCEEDED",
                     (
-                        (BanAction.status == "SUCCEEDED")
-                        & (
-                            True
-                            if fresh_join
-                            else BanAction.completed_at <= now() - timedelta(seconds=60)
-                        )
-                    )
-                    | (
-                        (BanAction.status == "FAILED")
-                        & (BanAction.attempts >= 8)
-                        & (BanAction.next_attempt_at <= now())
-                        & (BanAction.completed_at <= now() - timedelta(seconds=60))
+                        true()
+                        if fresh_join
+                        else BanAction.completed_at <= now() - timedelta(seconds=60)
                     ),
                 )
                 .values(status="PENDING", attempts=0, next_attempt_at=now(), completed_at=None)
                 .execution_options(synchronize_session=False)
             )
+            failed = await self.session.scalar(
+                select(BanAction)
+                .where(
+                    BanAction.chat_id == chat_id,
+                    BanAction.telegram_id == tg_id,
+                    BanAction.scam_record_id == record.id,
+                    BanAction.status == "FAILED",
+                    (BanAction.result_type != "TelegramRetryAfter")
+                    | (BanAction.next_attempt_at <= now()),
+                )
+                .execution_options(populate_existing=True)
+            )
+            if failed is not None:
+                recent = await self.session.scalar(
+                    select(AuditEvent.id)
+                    .where(
+                        AuditEvent.action == "scam_presence_retry",
+                        AuditEvent.actor_id == tg_id,
+                        AuditEvent.target_id == record.target_id,
+                        AuditEvent.details["chat_id"].as_integer() == chat_id,
+                        AuditEvent.details["record_id"].as_integer() == record.id,
+                        AuditEvent.created_at >= now() - timedelta(seconds=60),
+                    )
+                    .limit(1)
+                )
+                if fresh_join or recent is None:
+                    failed.status, failed.attempts = "PENDING", 0
+                    failed.next_attempt_at, failed.completed_at = now(), None
+                    self.core._audit(
+                        tg_id,
+                        "scam_presence_retry",
+                        record.target_id,
+                        chat_id=chat_id,
+                        record_id=record.id,
+                    )
         await self.session.commit()
 
     async def mark_private_contact(self, actor: int) -> None:
@@ -434,13 +512,64 @@ class GroupService:
         await self.session.commit()
         return {"campaign_id": campaign.id, "queued": len(recipients)}
 
-    async def claim_bans(self, limit: int = 20) -> list[BanAction]:
-        return await self._claim(BanAction, limit)
+    async def ban_summary(self, record_id: int) -> BanSummary:
+        record = await self.session.get(ScamRecord, record_id, populate_existing=True)
+        user = (
+            await self.session.get(User, record.target_id, populate_existing=True)
+            if record is not None
+            else None
+        )
+        if user is None or user.telegram_id is None:
+            return BanSummary(telegram_id=None)
+        if record is None or record.status != "ACTIVE":
+            return BanSummary(telegram_id=user.telegram_id)
+        results = list(
+            (
+                await self.session.execute(
+                    select(ManagedGroup.chat_id, BanAction.status)
+                    .outerjoin(
+                        BanAction,
+                        (BanAction.chat_id == ManagedGroup.chat_id)
+                        & (BanAction.telegram_id == user.telegram_id)
+                        & (BanAction.scam_record_id == record_id),
+                    )
+                    .where(ManagedGroup.approved.is_(True), ManagedGroup.enabled.is_(True))
+                )
+            ).all()
+        )
+        succeeded = sum(status == "SUCCEEDED" for _, status in results)
+        return BanSummary(
+            telegram_id=user.telegram_id,
+            checked=len(results),
+            succeeded=succeeded,
+            failed=sum(status == "FAILED" for _, status in results),
+            pending=len(results) - succeeded,
+        )
+
+    async def claim_bans(
+        self, limit: int = 20, *, scam_record_id: int | None = None
+    ) -> list[BanAction]:
+        return await self._claim(BanAction, limit, scam_record_id=scam_record_id)
+
+    async def has_ready_bans(self, record_id: int) -> bool:
+        """A rejected obsolete claim must not hide later due jobs for this record."""
+        ready = await self.session.scalar(
+            select(BanAction.id)
+            .where(
+                BanAction.scam_record_id == record_id,
+                BanAction.status.in_(["PENDING", "FAILED"]),
+                BanAction.next_attempt_at <= now(),
+                BanAction.attempts < 8,
+            )
+            .limit(1)
+        )
+        await self.session.commit()
+        return ready is not None
 
     async def claim_deliveries(self, limit: int = 20) -> list[RecoveryDelivery]:
         return await self._claim(RecoveryDelivery, limit)
 
-    async def _claim(self, model, limit):
+    async def _claim(self, model, limit, *, scam_record_id=None):
         await self.core.repo.lock_identity_metadata()
         stale = now() - timedelta(minutes=5)
         await self.session.execute(
@@ -462,6 +591,8 @@ class GroupService:
         )
         if model is RecoveryDelivery:
             query = query.options(selectinload(RecoveryDelivery.campaign))
+        elif scam_record_id is not None:
+            query = query.where(BanAction.scam_record_id == scam_record_id)
         rows = list((await self.session.scalars(query)).all())
         valid = []
         for row in rows:
@@ -470,13 +601,19 @@ class GroupService:
                     ScamRecord, row.scam_record_id, populate_existing=True
                 )
                 group = await self.session.get(ManagedGroup, row.chat_id, populate_existing=True)
+                target = (
+                    await self.session.get(User, record.target_id, populate_existing=True)
+                    if record is not None
+                    else None
+                )
                 eligible = (
                     record is not None
                     and record.status == "ACTIVE"
                     and group is not None
                     and group.approved
                     and group.enabled
-                    and group.can_restrict_members
+                    and target is not None
+                    and target.telegram_id == row.telegram_id
                 )
             else:
                 subscription = await self.session.get(
@@ -562,13 +699,19 @@ class GroupService:
             return False
         record = await self.session.get(ScamRecord, row.scam_record_id, populate_existing=True)
         group = await self.session.get(ManagedGroup, row.chat_id, populate_existing=True)
+        target = (
+            await self.session.get(User, record.target_id, populate_existing=True)
+            if record is not None
+            else None
+        )
         eligible = (
             record is not None
             and record.status == "ACTIVE"
             and group is not None
             and group.approved
             and group.enabled
-            and group.can_restrict_members
+            and target is not None
+            and target.telegram_id == row.telegram_id
         )
         if not eligible:
             row.status, row.completed_at = "OBSOLETE", now()

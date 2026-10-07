@@ -149,7 +149,7 @@ async def test_first_start_picker_selection_saved_and_second_start_home(
         assert user.language == lang
     await send(localized_bot, "/start")
     home = last_screen(localized_bot)
-    assert "<b>SAFECHECK</b>" in home.text
+    assert "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™" in home.text
     assert any(
         button.callback_data == Action(name="language").pack()
         for row in home.reply_markup.inline_keyboard
@@ -316,7 +316,7 @@ async def test_localized_profile_pending_rep_report_and_admin_permissions(
     await send(localized_bot, "/start")
     await click(localized_bot, f"language:{lang}")
     await send(localized_bot, "/profile")
-    assert "SAFECheck" in last_screen(localized_bot).text
+    assert "𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™" in last_screen(localized_bot).text
     assert "Tester" in last_screen(localized_bot).text
     await send(localized_bot, "+rep 42 Test comment")
     async with database() as session:

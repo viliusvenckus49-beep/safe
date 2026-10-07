@@ -1,8 +1,8 @@
 """Language selection, command descriptions and runtime fallback messages."""
 
-CATALOGS = {
+CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
-        "language.choose": "🌐 Pasirinkite kalbą / Choose your language / Выберите язык",
+        "language.choose": "◎ Pasirinkite kalbą / Choose your language / Выберите язык",
         "language.changed": "✅ Kalba pakeista į lietuvių.",
         "language.invalid": "⚠️ Pasirinkite vieną iš siūlomų kalbų.",
         "core.error": "⚠️ Veiksmo atlikti nepavyko. Bandyk dar kartą.",
@@ -23,10 +23,10 @@ CATALOGS = {
         "command.add_sc": "Pridėti SCAM įrašą",
         "command.del_sc": "Pašalinti SCAM statusą",
         "command.groups": "Grupės ir narių kopijos",
-        "core.help": "🛡 <b>SAFECheck pagalba</b>\n\n/ask @vartotojas arba ID — patikra\n/rep @vartotojas — reputacija\n/profile — mano profilis\n/top — TOP 10\n/scammers — SCAM registras\n/report — pateikti pranešimą\n/recovery — atkūrimo prenumeratos\n/language — kalba\n/cancel — uždaryti langą\n\nGrupėje atsakyk į žinutę su +rep arba -rep. Įvertinimą turi patvirtinti administratorius. Pranešimas savaime nesuteikia SCAM statuso. Įrašo nebuvimas nėra patikimumo garantija.",
+        "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>pagalba</b>\n\n/ask @vartotojas arba ID — patikra\n/rep @vartotojas — reputacija\n/profile — mano profilis\n/top — TOP 10\n/scammers — SCAM registras\n/report — pateikti pranešimą\n/recovery — atkūrimo prenumeratos\n/language — kalba\n/cancel — uždaryti langą\n\nGrupėje atsakyk į žinutę su +rep arba -rep. Įvertinimą turi patvirtinti administratorius. Pranešimas savaime nesuteikia SCAM statuso. Įrašo nebuvimas nėra patikimumo garantija.",
     },
     "en": {
-        "language.choose": "🌐 Pasirinkite kalbą / Choose your language / Выберите язык",
+        "language.choose": "◎ Pasirinkite kalbą / Choose your language / Выберите язык",
         "language.changed": "✅ Language changed to English.",
         "language.invalid": "⚠️ Please choose one of the available languages.",
         "core.error": "⚠️ We couldn't complete this action. Please try again.",
@@ -47,10 +47,10 @@ CATALOGS = {
         "command.add_sc": "Add a SCAM record",
         "command.del_sc": "Remove SCAM status",
         "command.groups": "Groups and member backups",
-        "core.help": "🛡 <b>SAFECheck help</b>\n\n/ask @username or ID — check a user\n/rep @username — reputation\n/profile — my profile\n/top — TOP 10\n/scammers — SCAM registry\n/report — submit a report\n/recovery — recovery subscriptions\n/language — language\n/cancel — close the panel\n\nIn a group, reply to a message with +rep or -rep. Ratings require administrator approval. Reports do not automatically grant SCAM status. No record does not mean a user is trustworthy.",
+        "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>help</b>\n\n/ask @username or ID — check a user\n/rep @username — reputation\n/profile — my profile\n/top — TOP 10\n/scammers — SCAM registry\n/report — submit a report\n/recovery — recovery subscriptions\n/language — language\n/cancel — close the panel\n\nIn a group, reply to a message with +rep or -rep. Ratings require administrator approval. Reports do not automatically grant SCAM status. No record does not mean a user is trustworthy.",
     },
     "ru": {
-        "language.choose": "🌐 Pasirinkite kalbą / Choose your language / Выберите язык",
+        "language.choose": "◎ Pasirinkite kalbą / Choose your language / Выберите язык",
         "language.changed": "✅ Язык изменён на русский.",
         "language.invalid": "⚠️ Выберите один из доступных языков.",
         "core.error": "⚠️ Не удалось выполнить действие. Попробуйте ещё раз.",
@@ -71,6 +71,6 @@ CATALOGS = {
         "command.add_sc": "Добавить запись SCAM",
         "command.del_sc": "Снять статус SCAM",
         "command.groups": "Группы и копии списка участников",
-        "core.help": "🛡 <b>Помощь SAFECheck</b>\n\n/ask @username или ID — проверка пользователя\n/rep @username — репутация\n/profile — мой профиль\n/top — ТОП-10\n/scammers — реестр SCAM\n/report — подать жалобу\n/recovery — подписки на восстановление\n/language — язык\n/cancel — закрыть окно\n\nВ группе ответьте на сообщение командой +rep или -rep. Оценки требуют одобрения администратора. Жалоба сама по себе не присваивает статус SCAM. Отсутствие записи не гарантирует надёжность пользователя.",
+        "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>Помощь</b>\n\n/ask @username или ID — проверка пользователя\n/rep @username — репутация\n/profile — мой профиль\n/top — ТОП-10\n/scammers — реестр SCAM\n/report — подать жалобу\n/recovery — подписки на восстановление\n/language — язык\n/cancel — закрыть окно\n\nВ группе ответьте на сообщение командой +rep или -rep. Оценки требуют одобрения администратора. Жалоба сама по себе не присваивает статус SCAM. Отсутствие записи не гарантирует надёжность пользователя.",
     },
 }

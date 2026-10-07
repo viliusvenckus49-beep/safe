@@ -244,7 +244,7 @@ async def test_rep_unknown_username_keyboard_self_and_cooldown(journey, database
         button.callback_data
         for row in markup.inline_keyboard
         for button in row
-        if "+REP" in button.text
+        if Action.unpack(button.callback_data).name == "vote+"
     )
     assert Action.unpack(callback).value.startswith("u:")
     await journey.click(callback)

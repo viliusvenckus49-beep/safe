@@ -93,6 +93,13 @@ class Service:
         # A username can be reassigned; current verified ownership replaces older metadata.
         if username:
             await self.repo.retire_other_username_owners(username, user.id)
+        # A trusted numeric observation may complete an existing ID association.
+        # Never transfer a username-only judgment to a newly observed account.
+        record = await self.repo.active_scam(user.id)
+        if record is not None:
+            from app.group_services import enqueue_scam_bans
+
+            await enqueue_scam_bans(self.session, record)
         await self.session.commit()
         return user
 

@@ -239,7 +239,7 @@ async def test_report_decision_returns_to_pending_reports(journey, database, set
             1, "42", "Detailed evidence and allegation", [], "navigation-report"
         )
     await journey.click(Moderation(action="reject", reference=report.reference).pack(), actor=900)
-    assert callbacks(last_message(journey).reply_markup) == [kb.action("pending")]
+    assert callbacks(last_message(journey).reply_markup) == [kb.action("pending", "receipt")]
     await journey.click(kb.action("pending"), actor=900)
     assert kb.action("rep_admin") in callbacks(last_message(journey).reply_markup)
 
