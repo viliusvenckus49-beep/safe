@@ -1,0 +1,43 @@
+name: SAFECheck encrypted transfer setup
+on:
+  push:
+    branches: [safecheck-2.13.1]
+    paths: ['.github/workflows/database-transfer-setup.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Inspect existing deployment without changing it
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
+          set -eu
+          sudo -n install -d -m 700 /var/lib/safecheck/data-transfer
+          sudo -n bash -c 'umask 077; test -f /var/lib/safecheck/data-transfer/receiver.pem || openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out /var/lib/safecheck/data-transfer/receiver.pem 2>/dev/null'
+          sudo -n openssl pkey -in /var/lib/safecheck/data-transfer/receiver.pem -pubout
+          REMOTE
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
