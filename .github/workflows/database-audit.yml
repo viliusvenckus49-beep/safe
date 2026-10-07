@@ -1,8 +1,5 @@
 name: SAFECheck database audit
 on:
-  push:
-    branches: [safecheck-2.13.1]
-    paths: ['.github/workflows/database-audit.yml']
   workflow_dispatch:
 permissions:
   contents: read

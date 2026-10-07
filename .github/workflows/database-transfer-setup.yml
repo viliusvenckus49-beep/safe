@@ -1,8 +1,5 @@
 name: SAFECheck encrypted transfer setup
 on:
-  push:
-    branches: [safecheck-2.13.1]
-    paths: ['.github/workflows/database-transfer-setup.yml']
   workflow_dispatch:
 permissions:
   contents: read

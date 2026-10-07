@@ -307,3 +307,5 @@ python3 tests/run_operations_acceptance.py
 `python -m app.health --check` tikrina paskutinius sėkmingus Telegram polling ir grupių worker ciklus; `python -m app.operations_status` pateikia tik agreguotus užduočių skaičius. Sveikatos patikra nereikalauja tokeno. Docker secrets paleidime statuso komandą vykdyk per `deploy/secret_entrypoint.py`, kaip nurodyta operacijų vadove.
 
 SCAM / TRUSTED veiksmų patvirtinimai ir administratoriaus teisių klaidos išlieka pokalbyje. Meniu ir vedlių langai keičiami įprastai; atšaukimas uždaro tik aktyvų langą.
+
+Database recovery in 2.13.2: legacy records merge transactionally into an existing VPS database with isolated PostgreSQL validation, verified backups, foreign-key remapping, and repeat-import protection. Buttons predating the import request a fresh `/start` menu. See [the verified recovery record](docs/RECOVERY_2_13_2.md).

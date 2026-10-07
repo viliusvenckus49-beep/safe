@@ -1,8 +1,5 @@
 name: SAFECheck legacy database merge
 on:
-  push:
-    branches: [safecheck-2.13.1]
-    paths: ['.github/workflows/database-merge.yml']
   workflow_dispatch:
     inputs:
       mode:
@@ -85,7 +82,7 @@ jobs:
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
-          MERGE_MODE: ${{ inputs.mode || 'apply' }}
+          MERGE_MODE: ${{ inputs.mode || 'plan' }}
         run: |
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
