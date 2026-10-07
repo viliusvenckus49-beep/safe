@@ -38,7 +38,7 @@ def test_100_long_names_fit_telegram_and_are_escaped(lang):
     ]
     with use_language(lang):
         rendered = users(rows)
-    assert rendered.count("👥") == 101
+    assert rendered.count("<code>") == 100
     assert "&lt;" in rendered and "&amp;" in rendered
     assert len(unescape(re.sub(r"<[^>]+>", "", rendered)).encode("utf-16-le")) // 2 < 4096
 
@@ -56,13 +56,13 @@ def test_user_list_shows_numeric_id_or_no_id():
             SimpleNamespace(username="unknown", telegram_id=None),
         ]
     )
-    assert "<code>👥 1. @example [42]</code>" in rendered
-    assert "<code>👥 2. @unknown [ID nežinomas]</code>" in rendered
+    assert "<code>1. @example [42]</code>" in rendered
+    assert "<code>2. @unknown [ID nežinomas]</code>" in rendered
 
 
 def test_user_list_numbers_continue_on_next_page():
     rendered = users([SimpleNamespace(username="example", telegram_id=42)], offset=100)
-    assert "👥 101." in rendered
+    assert "<code>101." in rendered
     assert "<code>" in rendered and "<a " not in rendered
 
 

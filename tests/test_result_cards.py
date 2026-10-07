@@ -62,9 +62,9 @@ def test_result_identity_and_status_are_factual(locale, known, status):
         assert t("p.profile_title") in result
         assert f"[<code>{42 if known else t('p.id_unknown')}</code>]" in result
         assert "━━━━━━━━━━━━━━━" in result
-        assert "＋REP" in result and "−REP" in result
+        assert "＋ REP" in result and "− REP" in result
         if status == "scam":
-            assert "<b>−4</b>" in result
+            assert " −4</b>" in result
             assert t("p.lookup_scam_status") in result
             assert "SC-00421" in result and "2026-10-05" in result
             assert "Fraud &lt;evidence&gt;" in result
@@ -106,7 +106,7 @@ def test_zero_score_and_missing_metadata_are_not_invented():
         trusted_source="manual",
     )
     result = p.profile(data)
-    assert "<b>+0</b>" in result
+    assert " +0</b>" in result
     assert "&lt;Name&gt; &amp; person" in result
     assert "STATUSAS ATNAUJINTAS" not in result
     assert "#SC-" not in result

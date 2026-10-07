@@ -104,6 +104,8 @@ async def process_scam_bans(
                 break
             bans = await service.claim_bans(limit=1, scam_record_id=record_id)
             if not bans:
+                if await service.has_ready_bans(record_id):
+                    continue
                 break
             await _execute_bans(bot, service, bans, timeout=min(BAN_API_TIMEOUT, remaining))
         return await service.ban_summary(record_id)

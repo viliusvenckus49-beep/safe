@@ -551,6 +551,21 @@ class GroupService:
     ) -> list[BanAction]:
         return await self._claim(BanAction, limit, scam_record_id=scam_record_id)
 
+    async def has_ready_bans(self, record_id: int) -> bool:
+        """A rejected obsolete claim must not hide later due jobs for this record."""
+        ready = await self.session.scalar(
+            select(BanAction.id)
+            .where(
+                BanAction.scam_record_id == record_id,
+                BanAction.status.in_(["PENDING", "FAILED"]),
+                BanAction.next_attempt_at <= now(),
+                BanAction.attempts < 8,
+            )
+            .limit(1)
+        )
+        await self.session.commit()
+        return ready is not None
+
     async def claim_deliveries(self, limit: int = 20) -> list[RecoveryDelivery]:
         return await self._claim(RecoveryDelivery, limit)
 

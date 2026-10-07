@@ -63,7 +63,7 @@ async def test_command_notices_survive_following_screens(
         elif kind == "scam":
             assert "@receiptuser" in item.text
         else:
-            assert "TRUSTED" in item.text
+            assert "𝗧𝗥𝗨𝗦𝗧𝗘𝗗 • 𝗩𝗘𝗥𝗜𝗙𝗜𝗘𝗗" in item.text
     assert (previous in [call.message_id for call in journey.transport.deletions]) == (
         kind != "denied"
     )
