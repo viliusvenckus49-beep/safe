@@ -85,7 +85,7 @@ jobs:
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
-          MERGE_MODE: ${{ inputs.mode || 'plan' }}
+          MERGE_MODE: ${{ inputs.mode || 'apply' }}
         run: |
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
@@ -99,6 +99,7 @@ jobs:
           sudo -n python3 "$release/deploy/restore_legacy.py" "$2" "$release/snapshot.sealed" c467f2999db754bd36c13c57e542a3931b8591bf2ad5adf86f0d86283609e769 </dev/null
           sudo -n docker inspect safecheck-bot-1 --format 'RunningImage={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
+          sudo -n docker exec safecheck-postgres-1 psql -U safecheck -d safecheck -Atc "SELECT json_build_object('users',(SELECT count(*) FROM users),'rep_events',(SELECT count(*) FROM reputation_events),'rep_requests',(SELECT count(*) FROM reputation_requests),'approved_rep_requests',(SELECT count(*) FROM reputation_requests WHERE status='APPROVED'),'today_rep_requests',(SELECT count(*) FROM reputation_requests WHERE created_at >= '2026-10-07'::timestamptz),'scam_records',(SELECT count(*) FROM scam_records),'active_scam',(SELECT count(*) FROM scam_records WHERE status='ACTIVE'),'removed_scam',(SELECT count(*) FROM scam_records WHERE status='REMOVED'),'trusted',(SELECT count(*) FROM trusted_designations),'admins',(SELECT count(*) FROM administrators),'groups',(SELECT count(*) FROM managed_groups),'observed_members',(SELECT count(*) FROM observed_members),'reports',(SELECT count(*) FROM reports),'legacy_import_markers',(SELECT count(*) FROM audit_events WHERE action='legacy_database_import'));"
           REMOTE
       - name: Remove runner key
         if: always()
