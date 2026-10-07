@@ -1,0 +1,61 @@
+name: SAFECheck SCAM diagnostic
+on:
+  push:
+    branches: [scam-ban-diagnosis-2.14.0]
+    paths: [.github/workflows/vps-scam-diagnose.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Read target ban states and sanitized Telegram errors
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
+          set -eu
+          date -u +DiagnosticTime=%FT%TZ
+          sudo -n docker inspect safecheck-bot-1 --format 'RunningImage={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-postgres-1 psql -X -v ON_ERROR_STOP=1 -U safecheck -d safecheck -At <<'SQL'
+          BEGIN READ ONLY;
+          SET LOCAL statement_timeout = '5s';
+          SELECT json_build_object('kind','target','record_id',s.id,'telegram_id',u.telegram_id,'username',u.username,'scam_status',s.status,'created_at',s.created_at) FROM scam_records s JOIN users u ON u.id=s.target_id WHERE u.telegram_id=8896102663 OR lower(u.username)='redsafeads' ORDER BY s.id DESC LIMIT 5;
+          SELECT json_build_object('kind','ban','record_id',b.scam_record_id,'chat_id',b.chat_id,'telegram_id',b.telegram_id,'status',b.status,'attempts',b.attempts,'result_type',b.result_type,'next_attempt_at',b.next_attempt_at,'claimed_at',b.claimed_at,'completed_at',b.completed_at,'approved',g.approved,'enabled',g.enabled,'can_restrict_members',g.can_restrict_members,'chat_type',g.chat_type) FROM ban_actions b LEFT JOIN managed_groups g ON g.chat_id=b.chat_id WHERE b.telegram_id=8896102663 ORDER BY b.scam_record_id DESC,b.id LIMIT 40;
+          SELECT json_build_object('kind','protected_groups','approved_enabled',count(*),'with_restrict_permission',count(*) FILTER (WHERE can_restrict_members)) FROM managed_groups WHERE approved AND enabled;
+          COMMIT;
+          SQL
+          sudo -n docker logs --since 6h --tail 15000 safecheck-bot-1 2>&1 | python3 -c 'import json,sys,collections; rows=[]; counts=collections.Counter()
+          for line in sys.stdin:
+              try: obj=json.loads(line)
+              except (ValueError,TypeError): continue
+              event=obj.get("event")
+              if event=="group_worker_failed" or (event in ("group_ban_result","scam_ban_processing_deferred") and obj.get("user_id")==8896102663):
+                  allowed=("event","timestamp","operation","chat_id","user_id","scam_record_id","success","pending","result","error_type","reason","exception_type")
+                  row={k:obj[k] for k in allowed if k in obj}; rows.append(row); counts[str(row.get("reason") or row.get("result") or row.get("exception_type"))]+=1
+          print("DiagnosticErrorCounts="+json.dumps(dict(counts),ensure_ascii=False))
+          for row in rows[-40:]: print("DiagnosticEvent="+json.dumps(row,ensure_ascii=False))'
+          REMOTE
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
