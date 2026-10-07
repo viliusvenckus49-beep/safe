@@ -2,7 +2,7 @@ name: SAFECheck VPS deploy
 on:
   push:
     branches: [safecheck-2.13.1]
-    paths: ['.github/workflows/vps-deploy.yml']
+    paths: ['.github/workflows/vps-deploy.yml', 'deploy/github_deploy.py']
   workflow_dispatch:
 permissions:
   contents: read
@@ -77,6 +77,8 @@ jobs:
           release="$HOME/safecheck-releases/$1"
           tar -xzf "$release/source.tar.gz" -C "$release"
           sudo -n python3 "$release/deploy/github_deploy.py" "$1"
+          sudo -n docker inspect safecheck-bot-1 --format 'RunningImage={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
           REMOTE
       - name: Remove runner key
         if: always()
