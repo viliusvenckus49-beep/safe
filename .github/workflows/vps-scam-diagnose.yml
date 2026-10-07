@@ -45,6 +45,14 @@ jobs:
                   row={k:o[k] for k in fields if k in o};rows.append(row);counts[str(row.get("reason") or row.get("exception_type") or row.get("result"))]+=1
           print("DiagnosticCounts="+json.dumps(dict(counts),ensure_ascii=False))
           for row in rows[-50:]:print("DiagnosticEvent="+json.dumps(row,ensure_ascii=False))'
+          sudo -n docker logs --since 8h --tail 15000 safecheck-postgres-1 2>&1 | python3 -c 'import sys,re;counts={}
+          for line in sys.stdin:
+              if "ERROR:" not in line:continue
+              reason=line.split("ERROR:",1)[1].strip()
+              reason=re.sub(r"\"[^\"]*\"", "[redacted]", reason)
+              reason=reason.split("DETAIL:",1)[0][:180]
+              if reason.startswith(("operator does not exist", "could not", "deadlock", "invalid input", "null value", "duplicate key", "value too long", "column", "relation", "syntax error", "current transaction", "cannot")):counts[reason]=counts.get(reason,0)+1
+          print("DatabaseErrorCounts="+str(counts))'
           REMOTE
       - name: Remove key
         if: always()
