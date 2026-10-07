@@ -53,6 +53,29 @@ jobs:
               reason=reason.split("DETAIL:",1)[0][:180]
               if reason.startswith(("operator does not exist", "could not", "deadlock", "invalid input", "null value", "duplicate key", "value too long", "column", "relation", "syntax error", "current transaction", "cannot")):counts[reason]=counts.get(reason,0)+1
           print("DatabaseErrorCounts="+str(counts))'
+          sudo -n docker exec -i safecheck-bot-1 python /run/configs/secret_entrypoint.py python - <<'PY'
+          import asyncio
+          from sqlalchemy import select, text, cast, BigInteger
+          from app.config import Settings
+          from app.db import create_database
+          from app.models import AuditEvent
+          async def run():
+              engine,sessions=create_database(Settings().database_url)
+              for fixed in (False, True):
+                  async with sessions() as session:
+                      await session.execute(text("SET TRANSACTION READ ONLY"))
+                      expr=cast(AuditEvent.details["chat_id"].as_string(),BigInteger) if fixed else AuditEvent.details["chat_id"].as_integer()
+                      try:
+                          await session.scalar(select(AuditEvent.id).where(expr==-1003976343267).limit(1))
+                          print("RetryQueryFixed="+str(fixed)+" Result=OK")
+                      except Exception as error:
+                          reason=str(getattr(error,"orig",""))
+                          category="int32_overflow" if ("out of int32 range" in reason or "integer out of range" in reason) else type(error).__name__
+                          print("RetryQueryFixed="+str(fixed)+" Result="+category)
+                      await session.rollback()
+              await engine.dispose()
+          asyncio.run(run())
+          PY
           REMOTE
       - name: Remove key
         if: always()
