@@ -1,0 +1,19 @@
+[Unit]
+Description=SAFECheck verified private PostgreSQL backup
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/etc/safecheck/compose.env
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/safecheck
+Environment=SAFECHECK_OPS_OPTIONS=
+EnvironmentFile=-/etc/safecheck/operations.env
+ExecStart=/usr/bin/python3 /opt/safecheck/deploy/ops.py $SAFECHECK_OPS_OPTIONS backup
+TimeoutStartSec=2h
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/safecheck /var/backups/safecheck

@@ -1,0 +1,26 @@
+[Unit]
+Description=SAFECheck polling services
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/safecheck/compose.env
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/safecheck
+Environment=SAFECHECK_OPS_OPTIONS=
+EnvironmentFile=-/etc/safecheck/operations.env
+ExecStart=/usr/bin/python3 /opt/safecheck/deploy/ops.py $SAFECHECK_OPS_OPTIONS start
+ExecStop=/usr/bin/python3 /opt/safecheck/deploy/ops.py $SAFECHECK_OPS_OPTIONS stop
+TimeoutStartSec=10min
+TimeoutStopSec=3min
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/safecheck /var/backups/safecheck
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,92 @@
+name: safecheck
+
+x-app: &app
+  image: ${SAFECHECK_IMAGE:-safecheck:2.13.1}
+  env_file: ${SAFECHECK_ENV_FILE:?Set SAFECHECK_ENV_FILE to the nonsecret runtime env file}
+  environment:
+    ENVIRONMENT: production
+  entrypoint: [python, /run/configs/secret_entrypoint.py]
+  configs:
+    - source: secret_entrypoint
+      target: /run/configs/secret_entrypoint.py
+  secrets: [runtime_env]
+  init: true
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: safecheck
+      POSTGRES_DB: safecheck
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U safecheck -d safecheck']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  redis:
+    image: redis:7.4.5-alpine
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec, --aclfile, /run/secrets/redis_acl]
+    secrets: [redis_acl, redis_password, redis_maintenance_password]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
+  migrate:
+    <<: *app
+    command: [alembic, upgrade, head]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: 'no'
+  bot:
+    <<: *app
+    command: [python, -m, app.main]
+    stop_grace_period: 45s
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -m, app.health, --check]
+      start_period: 120s
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+
+volumes:
+  postgres_data:
+  redis_data:
+
+configs:
+  secret_entrypoint:
+    file: ./deploy/secret_entrypoint.py
+secrets:
+  runtime_env:
+    file: ${SAFECHECK_SECRETS_DIR:?Set SAFECHECK_SECRETS_DIR}/runtime.env
+  postgres_password:
+    file: ${SAFECHECK_SECRETS_DIR}/postgres_password
+  redis_acl:
+    file: ${SAFECHECK_SECRETS_DIR}/redis_acl
+  redis_password:
+    file: ${SAFECHECK_SECRETS_DIR}/redis_password
+  redis_maintenance_password:
+    file: ${SAFECHECK_SECRETS_DIR}/redis_maintenance_password

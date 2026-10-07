@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "safecheck"
+version = "2.13.1"
+description = "Telegram reputation and moderated scam registry"
+requires-python = ">=3.12"
+dependencies = [
+ "aiogram>=3.20,<4", "SQLAlchemy>=2.0.40,<2.1", "aiosqlite>=0.21,<1",
+ "asyncpg>=0.30,<1", "alembic>=1.15,<2", "pydantic-settings>=2.8,<3",
+ "structlog>=25,<26", "redis>=5,<7", "aiohttp-socks>=0.10,<1",
+]
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "pytest-asyncio>=1,<2", "ruff>=0.11,<1", "mypy>=1.15,<2"]
+[project.scripts]
+safecheck = "app.main:run"
+[tool.setuptools.package-data]
+app = ["assets/*.jpg"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = ["legacy"]
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.12"
+files = ["app"]
+check_untyped_defs = true
+warn_unused_ignores = true
+ignore_missing_imports = true

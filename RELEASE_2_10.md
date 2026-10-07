@@ -1,0 +1,11 @@
+# SAFECheck 2.10.0 — administrator TRUSTED management
+
+Private /admin now includes Trusted users. Eight-row pages, escaped source/status cards, username/Telegram-ID search, contextual back/cancel controls and nonce-bound confirmation. Lists retained manual designations, explicit TOP inclusion and current roles, including inactive/superseded historical records for administrative cleanup; no identity merge. Role-only entries are read-only and explain /admins access management. Mixed role/manual entries warn before removal that role-based TRUSTED remains.
+
+Removal transaction clears the manual designation and excludes TOP, preserving reputation, evidence, historical events and administrator rights. Uses identity/user locks, fresh numeric-ID admin authorization, immutable TrustedAction/TopVisibilityAction request records and audit events. Replaying a consumed removal cannot clear a later grant. User interface rejects manipulated/stale confirmations; source is loaded server-side. Role access is never revoked by this panel.
+
+Architecture: app/trusted_management.py service, Repository.trusted_candidates query/count, app/trusted_presentation.py, central LT/EN/RU locale catalog, reusable trusted_keyboards.py, thin trusted.py handlers and structured TrustedAdmin callbacks/FSM. Existing commands and four-command discovery preserved. No schema changes; head0008.
+
+Validation:67 focused management/localization/navigation tests passed9.69s. Final full Docker PostgreSQL/Redis suite413 passed79.95s, no skips. Tests cover pagination/search, literal wildcard/unusual input, source isolation, permissions/group callback bypass, previews/cancel/stale nonce/double click, role preservation, reputation preservation, rollback and6 concurrent PostgreSQL removals with one action pair. Ruff check/format127 files, mypy43 modules, source TODO/FIXME/token-pattern scan, git diff check and Docker build passed.
+
+Live2.10.0 polling, menu entry and read-only list rendering verified; Alembic schema check and startup readiness passed. Private backup /tmp/safecheck-before-trusted-management-20261005.dump; stopped rollback safecheck-rollback-2-9-5 retained. No real-user TRUSTED removal executed during tests.
