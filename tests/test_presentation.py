@@ -143,7 +143,17 @@ def test_scam_receipt_reports_only_actual_ban_results(
         assert "@person_name" in result and "7681768804" in result
         assert ("𝗕𝗟𝗢𝗖𝗞𝗘𝗗" in result) is blocked
         assert ("𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in result) is not blocked
-        assert t(key, groups=groups, succeeded=succeeded, pending=pending) in result
+        assert (
+            t(
+                "p.ban_status" if groups else key,
+                groups=groups,
+                succeeded=succeeded,
+                banned=succeeded,
+                already_banned=0,
+                pending=pending,
+            )
+            in result
+        )
         assert result.endswith(t("p.brand"))
 
 
@@ -157,4 +167,22 @@ def test_scam_receipt_distinguishes_unknown_id_from_rejected_bans(lang):
         user.telegram_id = 123456789
         rejected = p.scam_registered(user, groups=5, succeeded=0, failed=5, pending=5)
         assert t("p.ban_inactive") not in rejected
-        assert t("p.ban_pending", pending=5) in rejected
+        assert "Queued  5" in rejected
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_requested_block_status_style_uses_actual_counts_and_numeric_fallback(lang):
+    user = SimpleNamespace(username=None, telegram_id=8933903466, display_name="Vartotojas")
+    with use_language(lang):
+        receipt = p.scam_registered(
+            user,
+            groups=5,
+            succeeded=2,
+            already_banned=2,
+            failed=3,
+            pending=3,
+        )
+    assert "👤 User 8933903466" in receipt
+    assert "🚷 𝗕𝗟𝗢𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦" in receipt
+    assert "Banned  0/5  •  Already banned  2  •  Queued  3" in receipt
+    assert "𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in receipt and "𝗕𝗟𝗢𝗖𝗞𝗘𝗗" not in receipt

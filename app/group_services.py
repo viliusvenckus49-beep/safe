@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select, true, update
+from sqlalchemy import BigInteger, cast, func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -35,6 +35,7 @@ class BanSummary:
     succeeded: int = 0
     failed: int = 0
     pending: int = 0
+    already_banned: int = 0
 
 
 async def enqueue_scam_bans(session: AsyncSession, record: ScamRecord) -> int:
@@ -273,6 +274,24 @@ class GroupService:
         )
         if record:
             await enqueue_ban(self.session, chat_id, tg_id, record.id)
+            presence = await self.session.scalar(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.action == "scam_member_present",
+                    AuditEvent.target_id == record.target_id,
+                    cast(AuditEvent.details["chat_id"].as_string(), BigInteger) == chat_id,
+                    AuditEvent.details["record_id"].as_integer() == record.id,
+                )
+                .limit(1)
+            )
+            if presence is None:
+                self.core._audit(
+                    tg_id,
+                    "scam_member_present",
+                    record.target_id,
+                    chat_id=chat_id,
+                    record_id=record.id,
+                )
             # Keep successful-ban repeat checks bounded. A first observed presence
             # after a failed preemptive ban gets an immediate attempt; its audit
             # marker prevents subsequent messages from repeatedly bypassing backoff.
@@ -311,7 +330,7 @@ class GroupService:
                         AuditEvent.action == "scam_presence_retry",
                         AuditEvent.actor_id == tg_id,
                         AuditEvent.target_id == record.target_id,
-                        AuditEvent.details["chat_id"].as_integer() == chat_id,
+                        cast(AuditEvent.details["chat_id"].as_string(), BigInteger) == chat_id,
                         AuditEvent.details["record_id"].as_integer() == record.id,
                         AuditEvent.created_at >= now() - timedelta(seconds=60),
                     )
@@ -526,7 +545,7 @@ class GroupService:
         results = list(
             (
                 await self.session.execute(
-                    select(ManagedGroup.chat_id, BanAction.status)
+                    select(ManagedGroup.chat_id, BanAction.status, BanAction.result_type)
                     .outerjoin(
                         BanAction,
                         (BanAction.chat_id == ManagedGroup.chat_id)
@@ -537,13 +556,17 @@ class GroupService:
                 )
             ).all()
         )
-        succeeded = sum(status == "SUCCEEDED" for _, status in results)
+        succeeded = sum(status == "SUCCEEDED" for _, status, _ in results)
         return BanSummary(
             telegram_id=user.telegram_id,
             checked=len(results),
             succeeded=succeeded,
-            failed=sum(status == "FAILED" for _, status in results),
+            failed=sum(status == "FAILED" for _, status, _ in results),
             pending=len(results) - succeeded,
+            already_banned=sum(
+                status == "SUCCEEDED" and result == "ALREADY_BANNED"
+                for _, status, result in results
+            ),
         )
 
     async def claim_bans(

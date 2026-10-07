@@ -38,4 +38,5 @@ async def registered_scam_text(
         succeeded=summary.succeeded,
         failed=summary.failed,
         pending=summary.pending,
+        already_banned=summary.already_banned,
     )

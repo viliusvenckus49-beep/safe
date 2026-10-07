@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
@@ -61,6 +62,7 @@ async def test_real_group_outcomes_and_failures_remain_pending(database, setting
     )
     assert summary.telegram_id == 22
     assert len(bot.calls) == 5
+
     assert all(user_id == 22 for _, user_id in bot.calls)
     attempts = [event for event in logs if event["event"] == "group_ban_result"]
     assert len(attempts) == 5
@@ -75,6 +77,42 @@ async def test_real_group_outcomes_and_failures_remain_pending(database, setting
     assert await process_group_jobs(bot, settings, database) == 0
     assert (await process_scam_bans(bot, settings, database, record_id)).succeeded == 5 - failures
     assert len(bot.calls) == 5
+
+
+async def test_already_banned_is_verified_by_telegram_and_not_rebanned(database, settings):
+    record_id = await prepare(database, settings)
+
+    class ExistingBanBot(BanBot):
+        async def get_chat_member(self, *, chat_id, user_id):
+            return SimpleNamespace(status="kicked" if chat_id in {-1000, -1001} else "left")
+
+    bot = ExistingBanBot(
+        {-1002: TelegramBadRequest, -1003: TelegramBadRequest, -1004: TelegramBadRequest}
+    )
+    summary = await process_scam_bans(bot, settings, database, record_id)
+    assert (summary.checked, summary.succeeded, summary.already_banned, summary.pending) == (
+        5,
+        2,
+        2,
+        3,
+    )
+    assert {chat_id for chat_id, _ in bot.calls} == {-1002, -1003, -1004}
+
+
+async def test_member_lookup_failure_still_attempts_preemptive_ban(database, settings):
+    record_id = await prepare(database, settings, groups=1)
+
+    class UnknownBot(BanBot):
+        async def get_chat_member(self, *, chat_id, user_id):
+            raise TelegramBadRequest(
+                method=BanChatMember(chat_id=chat_id, user_id=user_id),
+                message="USER_NOT_PARTICIPANT",
+            )
+
+    bot = UnknownBot()
+    summary = await process_scam_bans(bot, settings, database, record_id)
+    assert summary.succeeded == 1 and summary.already_banned == 0
+    assert bot.calls == [(-1000, 22)]
 
 
 async def test_unknown_id_never_issues_ban_and_admin_link_starts_all_groups(database, settings):

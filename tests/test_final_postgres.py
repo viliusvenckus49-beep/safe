@@ -3,15 +3,63 @@
 import asyncio
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest
+from test_ban_failure_notices import AlertBot
 from test_integration_contracts import postgres_contract as postgres_fixture
 
 from app.admin_services import AdminService
+from app.bot.group_runtime import process_scam_bans
+from app.bot.moderation_notices import notify_ban_failure
 from app.errors import DomainError
+from app.group_services import GroupService
 from app.scam_management import ScamManagement
 from app.services import Service
 
 postgres_contract = postgres_fixture
 pytestmark = pytest.mark.asyncio
+
+
+async def test_postgres_bigint_group_presence_retries_and_alerts_once(postgres_contract):
+    factory, settings = postgres_contract
+    settings = settings.model_copy(update={"group_owner_id": 900})
+    chat_id = -1000000000001
+    async with factory() as session:
+        await GroupService(settings, session).register_group(900, chat_id, "Test group", True)
+        record_id = (await Service(settings, session).add_scam(900, "22")).id
+    bot = AlertBot({chat_id: TelegramBadRequest})
+    await process_scam_bans(bot, settings, factory, record_id)
+    for _ in range(2):
+        async with factory() as session:
+            await GroupService(settings, session).check_member(chat_id, 22, fresh_join=True)
+        await process_scam_bans(bot, settings, factory, record_id)
+    assert len(bot.notices) == 1 and bot.notices[0][0] == 900
+    bot.failures.clear()
+    async with factory() as session:
+        await GroupService(settings, session).check_member(chat_id, 22, fresh_join=True)
+    assert (await process_scam_bans(bot, settings, factory, record_id)).succeeded == 1
+
+
+async def test_postgres_concurrent_failure_alerts_are_sent_only_once(postgres_contract):
+    factory, settings = postgres_contract
+    settings = settings.model_copy(update={"group_owner_id": 900})
+    chat_id = -1000000000002
+    async with factory() as session:
+        await GroupService(settings, session).register_group(900, chat_id, "Test group", True)
+        await Service(settings, session).add_scam(900, "22")
+    bot = AlertBot()
+
+    async def alert():
+        async with factory() as session:
+            await notify_ban_failure(
+                bot,
+                GroupService(settings, session),
+                chat_id,
+                22,
+                present=True,
+            )
+
+    await asyncio.gather(alert(), alert())
+    assert len(bot.notices) == 1 and bot.notices[0][0] == 900
 
 
 async def test_postgres_revocation_wins_before_waiting_privileged_write(postgres_contract):

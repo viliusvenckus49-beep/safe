@@ -14,8 +14,10 @@ from aiogram.exceptions import (
     TelegramForbiddenError,
     TelegramRetryAfter,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.group_presentation import recovery_notification
+from app.bot.moderation_notices import notify_ban_failure
 from app.config import Settings
 from app.group_services import BanSummary, GroupService, enqueue_scam_bans
 from app.i18n import t, use_language
@@ -33,6 +35,30 @@ def _api_reason(error: TelegramAPIError) -> str:
     return re.sub(r"[\x00-\x1f\x7f]", " ", reason)[:256]
 
 
+async def _attempt_ban(bot: Bot, job: BanAction, timeout: float) -> tuple[bool, str]:
+    lookup = getattr(bot, "get_chat_member", None)
+    if lookup is not None:
+        try:
+            member = await asyncio.wait_for(
+                lookup(chat_id=job.chat_id, user_id=job.telegram_id),
+                timeout=min(2.0, timeout / 2),
+            )
+            if getattr(member, "status", None) == "kicked":
+                return True, "ALREADY_BANNED"
+        except TelegramRetryAfter:
+            raise  # Respect Telegram's delay for reads as well as writes.
+        except (TelegramAPIError, TimeoutError, OSError) as error:
+            structlog.get_logger().info(
+                "group_ban_precheck_failed",
+                chat_id=job.chat_id,
+                user_id=job.telegram_id,
+                exception_type=type(error).__name__,
+            )
+            # A failed lookup does not prove a preemptive ban is impossible.
+    success = await bot.ban_chat_member(chat_id=job.chat_id, user_id=job.telegram_id) is True
+    return success, "BANNED" if success else "API_FALSE"
+
+
 async def _execute_bans(
     bot: Bot, service: GroupService, bans: list[BanAction], *, timeout: float = BAN_API_TIMEOUT
 ) -> int:
@@ -45,13 +71,9 @@ async def _execute_bans(
         retry_after, permanent = None, False
         reason = None
         try:
-            success = (
-                await asyncio.wait_for(
-                    bot.ban_chat_member(chat_id=job.chat_id, user_id=job.telegram_id),
-                    timeout=timeout,
-                )
-            ) is True
-            result = "BANNED" if success else "API_FALSE"
+            success, result = await asyncio.wait_for(
+                _attempt_ban(bot, job, timeout), timeout=timeout
+            )
         except TelegramRetryAfter as error:
             result, reason = "TelegramRetryAfter", _api_reason(error)
             retry_after = error.retry_after
@@ -82,6 +104,20 @@ async def _execute_bans(
             reason=reason,
         )
         processed += 1
+        if not success:
+            # Alert rollback must not expire the worker's other claimed ban jobs.
+            async with AsyncSession(
+                bind=service.session.bind, expire_on_commit=False
+            ) as alert_session:
+                await notify_ban_failure(
+                    bot,
+                    GroupService(service.settings, alert_session),
+                    job.chat_id,
+                    job.telegram_id,
+                    record_id=job.scam_record_id,
+                    result=result,
+                    reason=reason,
+                )
     return processed
 
 

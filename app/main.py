@@ -89,7 +89,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
                 chat_id=getattr(chat, "id", None),
             )
             try:
-                await error_response(event.update, sessions)
+                await error_response(event.update, sessions, settings)
             except Exception as error:
                 log.warning("error_response_failed", exception_type=type(error).__name__)
             return True

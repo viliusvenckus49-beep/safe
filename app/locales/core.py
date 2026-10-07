@@ -2,6 +2,12 @@
 
 CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
+        "ban_alert.message": "⚠️ <b>SCAM vartotojo užblokuoti nepavyko</b>\n\n👤 {name}\n🆔 <code>{telegram_id}</code>\nGrupė: {group}\nGrupės ID: <code>{chat_id}</code>\n\nPriežastis: {reason}\nVartotojas paliktas laukiančių blokavimo sąraše. Šis pranešimas siunčiamas vieną kartą šiam SCAM įrašui ir grupei.\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™",
+        "ban_alert.admin": "Telegram nurodo, kad vartotojas yra grupės administratorius.",
+        "ban_alert.rights": "Botui trūksta blokavimo teisių arba prieigos prie grupės.",
+        "ban_alert.unknown": "Telegram šio vartotojo dar neatpažįsta šioje grupėje.",
+        "ban_alert.rate_limit": "Telegram laikinai riboja užklausas; bandymas atidėtas.",
+        "ban_alert.temporary": "Laikina blokavimo arba patikros klaida. Išsamesnė priežastis užregistruota loguose.",
         "language.choose": "◎ Pasirinkite kalbą / Choose your language / Выберите язык",
         "language.changed": "✅ Kalba pakeista į lietuvių.",
         "language.invalid": "⚠️ Pasirinkite vieną iš siūlomų kalbų.",
@@ -26,6 +32,12 @@ CATALOGS: dict[str, dict[str, str]] = {
         "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>pagalba</b>\n\n/ask @vartotojas arba ID — patikra\n/rep @vartotojas — reputacija\n/profile — mano profilis\n/top — TOP 10\n/scammers — SCAM registras\n/report — pateikti pranešimą\n/recovery — atkūrimo prenumeratos\n/language — kalba\n/cancel — uždaryti langą\n\nGrupėje atsakyk į žinutę su +rep arba -rep. Įvertinimą turi patvirtinti administratorius. Pranešimas savaime nesuteikia SCAM statuso. Įrašo nebuvimas nėra patikimumo garantija.",
     },
     "en": {
+        "ban_alert.message": "⚠️ <b>Could not block a SCAM user</b>\n\n👤 {name}\n🆔 <code>{telegram_id}</code>\nGroup: {group}\nGroup ID: <code>{chat_id}</code>\n\nReason: {reason}\nThe user remains pending a ban. This alert is sent once per SCAM record and group.\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™",
+        "ban_alert.admin": "Telegram reports that the user is a group administrator.",
+        "ban_alert.rights": "The bot lacks ban permissions or access to the group.",
+        "ban_alert.unknown": "Telegram does not yet recognize this user in the group.",
+        "ban_alert.rate_limit": "Telegram temporarily limits requests; the attempt is deferred.",
+        "ban_alert.temporary": "A temporary ban or verification error occurred. Details are recorded in the logs.",
         "language.choose": "◎ Pasirinkite kalbą / Choose your language / Выберите язык",
         "language.changed": "✅ Language changed to English.",
         "language.invalid": "⚠️ Please choose one of the available languages.",
@@ -50,6 +62,12 @@ CATALOGS: dict[str, dict[str, str]] = {
         "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>help</b>\n\n/ask @username or ID — check a user\n/rep @username — reputation\n/profile — my profile\n/top — TOP 10\n/scammers — SCAM registry\n/report — submit a report\n/recovery — recovery subscriptions\n/language — language\n/cancel — close the panel\n\nIn a group, reply to a message with +rep or -rep. Ratings require administrator approval. Reports do not automatically grant SCAM status. No record does not mean a user is trustworthy.",
     },
     "ru": {
+        "ban_alert.message": "⚠️ <b>Не удалось заблокировать пользователя SCAM</b>\n\n👤 {name}\n🆔 <code>{telegram_id}</code>\nГруппа: {group}\nID группы: <code>{chat_id}</code>\n\nПричина: {reason}\nБлокировка остаётся в ожидании. Уведомление отправляется один раз для этой записи SCAM и группы.\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™",
+        "ban_alert.admin": "Telegram сообщает, что пользователь — администратор группы.",
+        "ban_alert.rights": "У бота нет прав на блокировку или доступа к группе.",
+        "ban_alert.unknown": "Telegram пока не распознаёт этого пользователя в группе.",
+        "ban_alert.rate_limit": "Telegram временно ограничивает запросы; попытка отложена.",
+        "ban_alert.temporary": "Временная ошибка блокировки или проверки. Подробности сохранены в логах.",
         "language.choose": "◎ Pasirinkite kalbą / Choose your language / Выберите язык",
         "language.changed": "✅ Язык изменён на русский.",
         "language.invalid": "⚠️ Выберите один из доступных языков.",
