@@ -1,9 +1,15 @@
-name: SAFECheck VPS deploy
+name: SAFECheck legacy database merge
 on:
   push:
     branches: [safecheck-2.13.1]
-    paths: ['.github/workflows/vps-deploy.yml']
+    paths: ['.github/workflows/database-merge.yml']
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan validates in isolation; apply merges after a fresh backup'
+        type: choice
+        default: plan
+        options: [plan, apply]
 permissions:
   contents: read
 concurrency:
@@ -44,7 +50,7 @@ jobs:
   deploy:
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,20 +69,34 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
           git archive --format=tar.gz HEAD > "$RUNNER_TEMP/safecheck-source.tar.gz"
-      - name: Upload and deploy tested source
+      - name: Download sealed snapshot (ciphertext only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --retry 3 -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/viliusvenckus49-beep/safe/git/blobs/ce282b7a1b96cd600b93c72b1493525f23ec4a0e > "$RUNNER_TEMP/sealed-blob.json"
+          python - <<'PYCODE'
+          import base64, json, os
+          from pathlib import Path
+          obj = json.loads((Path(os.environ['RUNNER_TEMP']) / 'sealed-blob.json').read_text())
+          assert obj['sha'] == 'ce282b7a1b96cd600b93c72b1493525f23ec4a0e'
+          (Path(os.environ['RUNNER_TEMP']) / 'snapshot.sealed').write_bytes(base64.b64decode(obj['content']))
+          PYCODE
+      - name: Stage or merge without replacing current records
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
+          MERGE_MODE: ${{ inputs.mode || 'plan' }}
         run: |
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
           ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "mkdir -p \"\$HOME/safecheck-releases/$GITHUB_SHA\""
           scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/safecheck-source.tar.gz" "$REMOTE_USER@$HOST:safecheck-releases/$GITHUB_SHA/source.tar.gz"
-          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "bash -se -- $GITHUB_SHA" <<'REMOTE'
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/snapshot.sealed" "$REMOTE_USER@$HOST:safecheck-releases/$GITHUB_SHA/snapshot.sealed"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "bash -se -- $GITHUB_SHA $MERGE_MODE" <<'REMOTE'
           set -eu
           release="$HOME/safecheck-releases/$1"
           tar -xzf "$release/source.tar.gz" -C "$release"
-          sudo -n python3 "$release/deploy/github_deploy.py" "$1" </dev/null
+          sudo -n python3 "$release/deploy/restore_legacy.py" "$2" "$release/snapshot.sealed" c467f2999db754bd36c13c57e542a3931b8591bf2ad5adf86f0d86283609e769 </dev/null
           sudo -n docker inspect safecheck-bot-1 --format 'RunningImage={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
           REMOTE

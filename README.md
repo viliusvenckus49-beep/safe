@@ -1,4 +1,4 @@
-# 🛡 SAFECheck 2.13.1
+# 🛡 SAFECheck 2.13.2
 
 SAFECheck is a Telegram reputation service with Lithuanian, English and Russian interfaces and moderated scam registry. User reports are private moderation requests; they do **not** label a person a confirmed scammer. An absent scam record is never a guarantee of reliability.
 
@@ -147,7 +147,7 @@ Compose starts PostgreSQL/Redis, runs migrations as a separate one-shot service 
 Behind a TLS-intercepting build proxy, supply the CA as a BuildKit secret without copying it into the image:
 
 ```sh
-docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t safecheck:2.13.1 .
+docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t safecheck:2.13.2 .
 ```
 
 ## Migrations
@@ -298,7 +298,7 @@ Sausas paleidimas nekeičia failų, neprisijungia prie Docker ir nesiunčia Tele
 
 ```sh
 # Reikalauja vietinio Docker, Compose ir šių trijų paruoštų image:
-# safecheck:2.13.1, postgres:17.6-alpine, redis:7.4.5-alpine
+# safecheck:2.13.2, postgres:17.6-alpine, redis:7.4.5-alpine
 python3 tests/run_operations_acceptance.py
 ```
 

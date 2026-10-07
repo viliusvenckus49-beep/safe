@@ -33,7 +33,7 @@ The parent `secrets` directory stays root-owned `0700`. UID 70 and UID 999 corre
 Build the reviewed application and obtain the selected infrastructure images before initializing:
 
 ```sh
-docker build -t safecheck:2.13.1 .
+docker build -t safecheck:2.13.2 .
 docker pull postgres:17.6-alpine
 docker pull redis:7.4.5-alpine
 sudo python3 deploy/ops.py --dry-run initialize
