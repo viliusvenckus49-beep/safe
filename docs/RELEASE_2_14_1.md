@@ -9,3 +9,5 @@ SCAM receipts retain their existing command routes and use the requested BLOCK S
 No database migration or data-service change is required. Existing SCAM, TRUSTED, reputation, group records and production volumes are retained. Deployment uses the existing tested, backup-verified code-only workflow.
 
 Regression coverage includes large PostgreSQL chat IDs, presence retries, concurrent private-alert claims, restart deduplication, localized escaped notifications, silent group errors, exact receipt formatting, existing bans and failed membership lookups.
+
+Validation: source commit `886b134581eb5ac65a979ef4cdf6d79a019e2fc2` passed 714 tests against disposable PostgreSQL/Redis services, Ruff, format checks, mypy, SQLite upgrade and Docker build in [GitHub quality](https://github.com/viliusvenckus49-beep/safe/actions/runs/37695267205). The read-only production diagnostic reproduced the old int32 overflow and verified that the BIGINT replacement succeeds without writing production data.
