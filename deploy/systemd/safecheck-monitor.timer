@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor SAFECheck every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=10s
+Unit=safecheck-monitor.service
+
+[Install]
+WantedBy=timers.target

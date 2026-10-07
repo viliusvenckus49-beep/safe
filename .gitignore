@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.db
+*.db-*
+*.sqlite*
+*.egg-info/
+build/
+dist/
+
+.buildx/
+
+# Private operational artifacts
+*.dump
+*.dump.sha256
+backups/
+secrets/

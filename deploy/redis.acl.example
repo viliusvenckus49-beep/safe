@@ -1,0 +1,4 @@
+# Use the same generated hex password as redis_password and REDIS_URL.
+user default on >REPLACE_WITH_SEPARATE_HEX_PASSWORD ~* &* +@all -config -flushdb -flushall -shutdown -module -debug -acl
+# Used only by the operator restore command to clear stale FSM state.
+user maintenance on >REPLACE_WITH_THIRD_HEX_PASSWORD ~* &* +ping +flushdb

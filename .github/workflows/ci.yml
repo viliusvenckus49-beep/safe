@@ -1,0 +1,43 @@
+name: SAFECheck quality
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: safecheck
+          POSTGRES_DB: safecheck_test
+          POSTGRES_PASSWORD: ci_only_disposable_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U safecheck -d safecheck_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      # Disposable CI credentials, unrelated to production.
+      TEST_POSTGRES_URL: postgresql+asyncpg://safecheck:ci_only_disposable_password@localhost:5432/safecheck_test
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: |
+          pip install -r requirements.lock
+          pip install --no-deps -e .
+      - run: pytest -q
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+      - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic upgrade head
+      - run: docker build -t safecheck:ci .

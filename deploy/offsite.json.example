@@ -1,0 +1,5 @@
+{
+  "rclone_binary": "/usr/bin/rclone",
+  "rclone_config": "/var/lib/safecheck/rclone.conf",
+  "remote_prefix": "REPLACE_WITH_CONFIGURED_REMOTE:REPLACE_WITH_PRIVATE_BACKUP_PREFIX"
+}
