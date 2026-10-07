@@ -41,6 +41,7 @@ jobs:
           sudo -n docker inspect safecheck-postgres-1 --format 'PostgresHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
+          sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
           df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
