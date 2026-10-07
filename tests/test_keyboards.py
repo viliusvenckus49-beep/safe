@@ -1,5 +1,7 @@
 from app.bot import keyboards
 from app.bot.callbacks import Action, ReportStep
+from app.bot.group_keyboards import GroupAction
+from app.i18n import use_language
 
 
 def callbacks(markup):
@@ -19,6 +21,47 @@ def test_home_has_all_product_routes_and_admin_visibility():
         for value in callbacks(keyboards.home(True))
         if value.startswith("sc|")
     }
+
+
+def test_crimson_lithuanian_home_layout_preserves_callbacks():
+    with use_language("lt"):
+        rows = keyboards.home().inline_keyboard
+        assert [[button.text for button in row] for row in rows] == [
+            ["◈ TIKRINTI"],
+            ["＋ ĮVERTINTI", "△ PRANEŠTI"],
+            ["♛ TOP 10", "⛨ SCAM REGISTRAS"],
+            ["◇ PROFILIS", "ⓘ INFORMACIJA"],
+            ["↻ GRUPĖS ATKŪRIMAS"],
+            ["◎ KALBA"],
+            ["× UŽDARYTI"],
+        ]
+        assert [[button.callback_data for button in row] for row in rows] == [
+            [keyboards.action("lookup")],
+            [keyboards.action("rep"), keyboards.action("report")],
+            [keyboards.action("top"), keyboards.action("scams", "0")],
+            [keyboards.action("profile"), keyboards.action("info")],
+            [GroupAction(action="subscriptions").pack()],
+            [keyboards.action("language")],
+            [keyboards.action("close")],
+        ]
+
+
+def test_group_menu_keeps_existing_private_route_boundaries():
+    values = callbacks(keyboards.home(private=False))
+    assert keyboards.action("scams", "0") not in values
+    assert GroupAction(action="subscriptions").pack() not in values
+    assert {keyboards.action(name) for name in ("lookup", "rep", "profile", "top")} <= set(values)
+
+
+def test_reputation_buttons_keep_original_vote_routes_in_all_languages():
+    for lang in ("lt", "en", "ru"):
+        with use_language(lang):
+            row = keyboards.result("u:42").inline_keyboard[1]
+            assert [button.text for button in row] == ["＋ REP", "− REP"]
+            assert [button.callback_data for button in row] == [
+                keyboards.action("vote+", "u:42"),
+                keyboards.action("vote-", "u:42"),
+            ]
 
 
 def test_report_navigation_and_nonce_are_consistent():

@@ -1,14 +1,18 @@
 from types import SimpleNamespace
 
+import pytest
+
 from app import presentation as p
+from app.i18n import t, use_language
 
 
 def test_action_style_uses_telegram_identity_and_lithuanian():
     user = SimpleNamespace(username="typicalsterling", telegram_id=8803241151, display_name="")
-    assert (
-        p.scam_action(user, True)
-        == "⛔️ <b>@typicalsterling</b> [<code>8803241151</code>] įtrauktas į SCAM registrą."
-    )
+    added = p.scam_action(user, True)
+    assert "𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in added
+    assert "@typicalsterling" in added and "8803241151" in added
+    assert t("p.ban_unconfirmed") in added
+    assert "𝗕𝗟𝗢𝗖𝗞𝗘𝗗" not in added
     assert "pašalintas" in p.scam_action(user, False)
     assert "skirtas +REP" in p.reputation_action(user, 1)
     assert "skirtas -REP" in p.reputation_action(user, -1)
@@ -40,25 +44,24 @@ def test_legacy_retry_and_unverified_reputation_review_are_safe():
     assert "Laukia sprendimo" in p.reputation_review(request)
 
 
-def test_leaderboard_fixed_columns_and_ten_rows():
-    from html import unescape
-
+def test_leaderboard_has_ten_rows_without_space_alignment_or_ids():
     rows = [
         {"user": SimpleNamespace(display_name="", username=name), "score": score}
         for name, score in [("notoriouslyreborn", 1), ("short", 120)]
     ]
     output = p.leaderboard(rows)
-    lines = unescape(output.split("<pre>")[1].split("</pre>")[0]).splitlines()
+    lines = output.split("\n\n")[-1].splitlines()
     assert len(lines) == 10
-    assert len({line.rindex("┃") for line in lines}) == 1
-    assert len({len(line) for line in lines}) == 1
-    assert lines[0].startswith("01 ┃") and lines[-1].startswith("10 ┃")
+    assert lines[0] == "1. @notoriouslyreborn · <b>+1</b>"
+    assert lines[1] == "2. @short · <b>+120</b>"
+    assert lines[-1] == "10. — · <b>—</b>"
+    assert "<pre>" not in output and "  " not in output
     assert p.submitted("SC-2026-000001") == "📨 <b>Pranešimas pateiktas</b>"
 
 
-def test_table_long_name_is_bounded_and_html_escaped():
-    assert p._table_width(p._table_name("A" * 100)) == 18
-    assert p._table_name("A" * 100).endswith("…")
+def test_top_long_name_is_bounded_and_html_escaped():
+    long_user = SimpleNamespace(display_name="A" * 1000, username="example")
+    assert "A" * 79 + "…" in p.leaderboard([{"user": long_user, "score": 1}])
     user = SimpleNamespace(display_name="<b>Name</b>", username="example")
     assert "&lt;b&gt;Name&lt;/b&gt;" in p.leaderboard([{"user": user, "score": 1}])
 
@@ -97,5 +100,61 @@ def test_symbol_only_top_name_falls_back_to_username():
             result = p.leaderboard([{"user": user, "score": 0}])
             assert "@cart3lis" in result
             assert p.t("p.user") not in result
-            assert p._table_name("™", fallback="@example") == "@example"
-            assert p._table_name("™") == p.t("p.user")
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_trusted_receipt_preserves_identity_and_localizes_body(lang):
+    user = SimpleNamespace(username="ordinary_username", telegram_id=78654739, display_name="")
+    with use_language(lang):
+        result = p.trusted_granted(user)
+        assert result.startswith("✅ 𝗧𝗥𝗨𝗦𝗧𝗘𝗗 • 𝗩𝗘𝗥𝗜𝗙𝗜𝗘𝗗")
+        assert "👤 @ordinary_username\n🆔 <code>78654739</code>" in result
+        assert result.endswith(t("p.brand"))
+        assert t("p.receipt_identity_unknown") not in result
+        user.username = None
+        user.display_name = "Alice <Bob> & 😀"
+        assert "Alice &lt;Bob&gt; &amp; 😀" in p.trusted_granted(user)
+        user.telegram_id = None
+        unknown = p.trusted_granted(user)
+        assert "𝗩𝗘𝗥𝗜𝗙𝗜𝗘𝗗" not in unknown
+        assert "𝗨𝗡𝗞𝗡𝗢𝗪𝗡" in unknown
+        assert t("p.receipt_identity_unknown") in unknown
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+@pytest.mark.parametrize(
+    "groups,succeeded,failed,pending,key,blocked",
+    [
+        (5, 5, 0, 0, "p.ban_complete", True),
+        (5, 3, 2, 2, "p.ban_partial", False),
+        (5, 0, 5, 5, "p.ban_pending", False),
+        (5, 0, 0, 5, "p.ban_pending", False),
+        (0, 0, 0, 0, "p.ban_no_groups", False),
+    ],
+)
+def test_scam_receipt_reports_only_actual_ban_results(
+    lang, groups, succeeded, failed, pending, key, blocked
+):
+    user = SimpleNamespace(username="person_name", telegram_id=7681768804, display_name="")
+    with use_language(lang):
+        result = p.scam_registered(
+            user, groups=groups, succeeded=succeeded, failed=failed, pending=pending
+        )
+        assert "@person_name" in result and "7681768804" in result
+        assert ("𝗕𝗟𝗢𝗖𝗞𝗘𝗗" in result) is blocked
+        assert ("𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in result) is not blocked
+        assert t(key, groups=groups, succeeded=succeeded, pending=pending) in result
+        assert result.endswith(t("p.brand"))
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_scam_receipt_distinguishes_unknown_id_from_rejected_bans(lang):
+    user = SimpleNamespace(username="not_yet_identified", telegram_id=None, display_name="")
+    with use_language(lang):
+        unknown = p.scam_registered(user, groups=5, succeeded=0, failed=5, pending=5)
+        assert "𝗨𝗡𝗞𝗡𝗢𝗪𝗡" in unknown and t("p.ban_inactive") in unknown
+        assert "𝗕𝗟𝗢𝗖𝗞𝗘𝗗" not in unknown
+        user.telegram_id = 123456789
+        rejected = p.scam_registered(user, groups=5, succeeded=0, failed=5, pending=5)
+        assert t("p.ban_inactive") not in rejected
+        assert t("p.ban_pending", pending=5) in rejected

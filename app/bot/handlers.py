@@ -34,6 +34,7 @@ from app.bot.scam_admin import (
 from app.bot.scam_admin import (
     register_scam_handlers,
 )
+from app.bot.scam_notices import registered_scam_text
 from app.bot.screens import clear_flow, close_panel, flow_screen, preserved_source, render
 from app.bot.states import AdminRepFlow, InputFlow, ReportFlow
 from app.bot.trusted import open_panel as open_trusted_panel
@@ -315,7 +316,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         await flow_screen(
             message,
             state,
-            t("p." + key, user=p.identity(data["user"])),
+            p.trusted_granted(data["user"])
+            if key == "trusted_added"
+            else t("p." + key, user=p.identity(data["user"])),
             persistent=True,
         )
 
@@ -332,6 +335,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             identity = f"u:{user.id}"
             if operation == "add_sc":
                 record = await service.add_scam(actor_id(message), identity, reason)
+                receipt = await registered_scam_text(message.bot, service, session_factory, record)
             else:
                 removed = await service.remove_scam(actor_id(message), identity, reason)
                 if not removed:
@@ -342,17 +346,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                         reply_markup=kb.back("admin") if message.chat.type == "private" else None,
                     )
                     return
+                receipt = p.scam_action(user, False)
             await flow_screen(
                 message,
                 state,
-                p.scam_action(user, operation == "add_sc")
-                + (
-                    "\n\n" + p.text("scam_id_unknown")
-                    if operation == "add_sc"
-                    and user.telegram_id is None
-                    and message.chat.type == "private"
-                    else ""
-                ),
+                receipt,
                 reply_markup=scam_controls(record, persistent=True)
                 if operation == "add_sc" and message.chat.type == "private"
                 else kb.back("admin", "receipt")
@@ -389,8 +387,10 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await callback.answer(p.text("admin_private"), show_alert=True)
             return
         await callback.answer()
-        if name == "admin" and value == "receipt":
+        if name in {"admin", "pending"} and value == "receipt":
             preserved_source.set(message.message_id)
+            if name == "pending":
+                value = ""
         else:
             await state.update_data(screen_message_id=message.message_id)
         if name == "language":
@@ -614,7 +614,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
 
     @router.callback_query(Moderation.filter())
     async def moderate(
-        callback: CallbackQuery, callback_data: Moderation, service: Service
+        callback: CallbackQuery, callback_data: Moderation, state: FSMContext, service: Service
     ) -> None:
         if not await service.is_admin(callback.from_user.id):
             await callback.answer(p.text("denied"), show_alert=True)
@@ -645,12 +645,23 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await service.moderate(
                 callback.from_user.id, callback_data.reference, callback_data.action == "approve"
             )
-            await render(
+            receipt = p.moderation_action(
+                details["target"], callback_data.reference, callback_data.action == "approve"
+            )
+            if callback_data.action == "approve":
+                active = await service.repo.active_scam(details["target"].id)
+                if active is not None:
+                    record = await service.repo.scam_by_id(active.id)
+                    if record is not None:
+                        receipt = await registered_scam_text(
+                            callback.bot, service, session_factory, record
+                        )
+            await flow_screen(
                 callback.message,
-                p.moderation_action(
-                    details["target"], callback_data.reference, callback_data.action == "approve"
-                ),
-                reply_markup=kb.back("pending"),
+                state,
+                receipt,
+                reply_markup=kb.back("pending", "receipt"),
+                persistent=True,
             )
         else:
             await callback.message.answer(p.text("stale"))
@@ -777,8 +788,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await flow_screen(
                 message,
                 state,
-                p.scam_action(user, True)
-                + ("\n\n" + p.text("scam_id_unknown") if user.telegram_id is None else ""),
+                await registered_scam_text(message.bot, service, session_factory, record),
                 reply_markup=scam_controls(record, persistent=True),
                 persistent=True,
             )
@@ -810,18 +820,22 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             return
         data = await state.get_data()
         if data.get("operation") == "add_sc":
-            await service.add_scam(actor_id(message), data["target_identity"], reason)
+            record = await service.add_scam(actor_id(message), data["target_identity"], reason)
+            receipt = await registered_scam_text(message.bot, service, session_factory, record)
             key = "added"
         else:
             removed = await service.remove_scam(actor_id(message), data["target_identity"], reason)
             key = "removed" if removed else "not_active"
+            receipt = (
+                p.text(key)
+                if key == "not_active"
+                else p.scam_action(await service.resolve(data["target_identity"]), False)
+            )
         await clear_flow(state)
         await flow_screen(
             message,
             state,
-            p.text(key)
-            if key == "not_active"
-            else p.scam_action(await service.resolve(data["target_identity"]), key == "added"),
+            receipt,
             reply_markup=kb.back("admin", "receipt"),
             persistent=True,
         )

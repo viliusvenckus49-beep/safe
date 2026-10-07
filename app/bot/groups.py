@@ -3,6 +3,7 @@
 import secrets
 from typing import Any
 
+import structlog
 from aiogram import F, Router
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.filters import Command
@@ -12,6 +13,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, ChatMemberUpdated, M
 from app.bot import group_keyboards as kb
 from app.bot import group_presentation as p
 from app.bot.group_authorization import verify_group
+from app.bot.group_runtime import process_scam_bans
 from app.bot.screens import clear_flow, flow_screen, render
 from app.bot.states import RecoveryFlow
 from app.config import Settings
@@ -36,8 +38,10 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
         )
         async with sessions() as session:
             service = GroupService(settings, session)
-            if not allowed:
+            if member.status in {ChatMemberStatus.LEFT, ChatMemberStatus.KICKED}:
                 await service.disable_group(event.chat.id)
+            elif not allowed:
+                await service.note_group_permissions(event.chat.id, False)
             elif event.from_user.id == settings.group_owner:
                 await service.stage_group(
                     event.from_user.id,
@@ -45,6 +49,9 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
                     event.chat.title or "SAFECheck",
                     chat_type=str(event.chat.type),
                 )
+                await service.note_group_permissions(event.chat.id, True)
+            else:
+                await service.note_group_permissions(event.chat.id, True)
 
     @router.chat_member()
     async def member_update(event: ChatMemberUpdated) -> None:
@@ -63,6 +70,22 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
             service = GroupService(settings, session)
             await service.observe_member(event.chat.id, user.id, user.username, user.full_name)
             await service.check_member(event.chat.id, user.id, fresh_join=True)
+            known = await service.core.repo.user_by_telegram(user.id)
+            record = await service.core.repo.active_scam(known.id) if known is not None else None
+            record_id = record.id if record is not None else None
+            await session.commit()
+        if record_id is not None and event.bot is not None:
+            try:
+                await process_scam_bans(event.bot, settings, sessions, record_id)
+            except Exception as error:
+                structlog.get_logger().warning(
+                    "scam_ban_processing_deferred",
+                    operation="ban_chat_member",
+                    chat_id=event.chat.id,
+                    user_id=user.id,
+                    scam_record_id=record_id,
+                    exception_type=type(error).__name__,
+                )
 
     @router.message(Command("groups"))
     async def groups_command(message: Message, state: FSMContext) -> None:

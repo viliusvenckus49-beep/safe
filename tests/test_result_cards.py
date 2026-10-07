@@ -153,7 +153,7 @@ def test_simple_input_prompts_keep_their_existing_style():
     with use_language("lt"):
         assert (
             p.text("target")
-            == "🔎 <b>Patikrinti vartotoją</b>\n\nĮvesk @vartotoją arba skaitinį Telegram ID."
+            == "◈ <b>Patikrinti vartotoją</b>\n\nĮvesk @vartotoją arba skaitinį Telegram ID."
         )
         for key in ("target", "admin_target", "admin_reason", "reason_invalid", "cooldown"):
             assert "━━━━━━━━" not in p.text(key)

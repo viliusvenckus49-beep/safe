@@ -2,7 +2,6 @@
 
 from html import escape
 from typing import Any
-from unicodedata import category, east_asian_width
 
 from app.i18n import t
 
@@ -101,14 +100,68 @@ def identity(user: Any, *, max_units: int | None = None) -> str:
     return f"<b>{label(user, max_units=max_units)}</b> [<code>{escape(telegram_id_label(user))}</code>]"
 
 
+def trusted_granted(user: Any) -> str:
+    known = getattr(user, "telegram_id", None) is not None
+    return t(
+        "p.receipt_trusted",
+        heading=t("p.receipt_trusted_verified" if known else "p.receipt_trusted_registered"),
+        name=label(user, max_units=120),
+        telegram_id=(
+            f"<code>{escape(telegram_id_label(user))}</code>" if known else t("p.receipt_unknown")
+        ),
+        identity_note="" if known else "\n" + t("p.receipt_identity_unknown"),
+    )
+
+
+def scam_registered(
+    user: Any,
+    *,
+    groups: int | None = None,
+    succeeded: int = 0,
+    failed: int = 0,
+    pending: int = 0,
+) -> str:
+    """Render confirmed ban results; FAILED jobs remain part of the pending outbox."""
+    known = getattr(user, "telegram_id", None) is not None
+    completed = (
+        known
+        and groups is not None
+        and groups > 0
+        and succeeded == groups
+        and failed == pending == 0
+    )
+    if not known:
+        outcome = t("p.ban_inactive")
+    elif groups is None:
+        outcome = t("p.ban_unconfirmed")
+    elif groups == 0:
+        outcome = t("p.ban_no_groups")
+    else:
+        outcome = t(
+            "p.ban_complete" if completed else "p.ban_partial" if succeeded else "p.ban_pending",
+            succeeded=succeeded,
+            groups=groups,
+            pending=pending,
+        )
+    return t(
+        "p.receipt_scam",
+        heading=t("p.receipt_scam_blocked" if completed else "p.receipt_scam_registered"),
+        name=label(user, max_units=120),
+        telegram_id=(
+            f"<code>{escape(telegram_id_label(user))}</code>" if known else t("p.receipt_unknown")
+        ),
+        outcome=outcome,
+    )
+
+
 def scam_action(user: Any, added: bool) -> str:
-    return t("p.scam_action_add" if added else "p.scam_action_remove", user=identity(user))
+    return scam_registered(user) if added else t("p.scam_action_remove", user=identity(user))
 
 
 def reputation_action(user: Any, value: int) -> str:
     return t(
         "p.rep_action",
-        icon="👍" if value > 0 else "👎",
+        icon="＋" if value > 0 else "−",
         user=identity(user),
         value="+REP" if value > 0 else "-REP",
     )
@@ -210,53 +263,20 @@ def report_card(details: dict[str, Any]) -> str:
     )
 
 
-def _table_name(name: str, limit: int = 18, *, fallback: str | None = None) -> str:
-    # Emoji/control sequences have platform-dependent widths; use readable text.
-    name = " ".join(
-        "".join(
-            c
-            for c in name
-            if category(c)[0] in {"L", "N", "P", "Z"} or (c.isascii() and c.isprintable())
-        ).split()
-    )
-    if not name:
-        return _table_name(fallback or t("p.user"), limit)
-    if _table_width(name) <= limit:
-        return name
-    result = ""
-    width = 0
-    for char in name:
-        size = 2 if east_asian_width(char) in {"W", "F"} else 1
-        if width + size > limit - 1:
-            return result.rstrip() + "…"
-        result += char
-        width += size
-    return result
-
-
-def _table_width(value: str) -> int:
-    return sum(2 if east_asian_width(c) in {"W", "F"} else 1 for c in value)
-
-
 def leaderboard(rows: list[dict[str, Any]]) -> str:
-    entries = [
-        (
-            _table_name(
-                display_name(row["user"]),
-                fallback=f"@{row['user'].username}" if row["user"].username else None,
-            ),
-            f"{row['score']:+d}",
-        )
-        for row in rows[:10]
-    ]
+    entries = []
+    for row in rows[:10]:
+        user = row["user"]
+        name = display_name(user)
+        if not any(char.isalnum() for char in name) and user.username:
+            name = f"@{user.username}"
+        entries.append((display_text(" ".join(name.split()), 80), reputation_score(row["score"])))
     entries += [("—", "—")] * (10 - len(entries))
-    name_width = max(_table_width(name) for name, _ in entries)
-    score_width = max(len(score) for _, score in entries)
     lines = [
-        f"{index:02d} ┃ {name}{' ' * (name_width - _table_width(name))} ┃ {score:>{score_width}}"
+        f"{index}. {escape(name)} · <b>{score}</b>"
         for index, (name, score) in enumerate(entries, 1)
     ]
-    return t("p.leaderboard_title") + "\n\n<pre>" + escape("\n".join(lines)) + "</pre>"
+    return t("p.leaderboard_title") + "\n\n" + "\n".join(lines)
 
 
 def scams(rows: list[Any]) -> str:
@@ -267,7 +287,7 @@ def scams(rows: list[Any]) -> str:
             card += "\n" + t("p.scam_admin_confirmation")
         elif row.reason:
             card += "\n" + escape(display_text(row.reason, 450))
-        card += f"\n📅 {row.created_at:%Y-%m-%d}"
+        card += f"\n{row.created_at:%Y-%m-%d}"
         cards.append(card)
     return (
         t("p.scams_title")
@@ -284,7 +304,7 @@ def stats(data: dict[str, Any]) -> str:
         t("p.stats_title")
         + "\n\n"
         + "\n".join(
-            f"{t('stat.' + key) if key in names else escape(key)}  <b>{escape(str(value))}</b>"
+            f"{t('stat.' + key) if key in names else escape(key)}: <b>{escape(str(value))}</b>"
             for key, value in data.items()
         )
     )
@@ -339,7 +359,7 @@ def users(rows: list[Any], *, offset: int = 0) -> str:
     if not rows:
         return title + "\n\n" + t("p.users_empty")
     identifiers = [telegram_id_label(user) for user in rows]
-    prefixes = [f"👥 {offset + index}. " for index in range(1, len(rows) + 1)]
+    prefixes = [f"{offset + index}. " for index in range(1, len(rows) + 1)]
     suffixes = [f" [{identifier}]" for identifier in identifiers]
 
     def units(value: str) -> int:

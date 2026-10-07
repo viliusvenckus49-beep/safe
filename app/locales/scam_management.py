@@ -1,8 +1,8 @@
-CATALOGS = {
+CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
-        "p.lookup_username_match": "🟡 <b>YRA ĮRAŠAS PAGAL USERNAME</b>",
+        "p.lookup_username_match": "△ <b>YRA ĮRAŠAS PAGAL USERNAME</b>",
         "p.lookup_username_match_description": "SCAM registre yra įrašas pagal šį @username, tačiau įrašo Telegram ID nežinomas. Ryšys su tikrinama paskyra nepatvirtintas — username galėjo pakeisti savininką. Šiam Telegram ID patvirtintas SCAM statusas nesuteiktas.",
-        "sm.title": "🚨 <b>SAFECHECK · SCAM REGISTRAS</b>",
+        "sm.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n⛨ <b>SCAM REGISTRAS</b>",
         "sm.id": "🆔 Pridėti ID",
         "sm.username": "👤 Pridėti username",
         "sm.prompt_id": "🆔 Įvesk šio vartotojo skaitinį Telegram ID.",
@@ -13,9 +13,9 @@ CATALOGS = {
         "error.sm_conflict": "⚠️ Duomenys jau užpildyti arba prieštarauja kitam įrašui. Patikrink tapatybę SCAM registre.",
     },
     "en": {
-        "p.lookup_username_match": "🟡 <b>USERNAME RECORD FOUND</b>",
+        "p.lookup_username_match": "△ <b>USERNAME RECORD FOUND</b>",
         "p.lookup_username_match_description": "The SCAM registry contains a record for this @username, but that record has no Telegram ID. Its connection to this account is unconfirmed; usernames can change owners. This Telegram ID has no confirmed SCAM status.",
-        "sm.title": "🚨 <b>SAFECHECK · SCAM REGISTRY</b>",
+        "sm.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n⛨ <b>SCAM REGISTRY</b>",
         "sm.id": "🆔 Add ID",
         "sm.username": "👤 Add username",
         "sm.prompt_id": "🆔 Enter this person's numeric Telegram ID.",
@@ -26,9 +26,9 @@ CATALOGS = {
         "error.sm_conflict": "⚠️ These details are already set or conflict with another record. Check the identity in the SCAM registry.",
     },
     "ru": {
-        "p.lookup_username_match": "🟡 <b>НАЙДЕНА ЗАПИСЬ ПО USERNAME</b>",
+        "p.lookup_username_match": "△ <b>НАЙДЕНА ЗАПИСЬ ПО USERNAME</b>",
         "p.lookup_username_match_description": "В реестре SCAM есть запись для этого @username, но Telegram ID в ней неизвестен. Связь с проверяемой учётной записью не подтверждена: username мог перейти другому владельцу. Для этого Telegram ID статус SCAM не подтверждён.",
-        "sm.title": "🚨 <b>SAFECHECK · РЕЕСТР SCAM</b>",
+        "sm.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n⛨ <b>РЕЕСТР SCAM</b>",
         "sm.id": "🆔 Добавить ID",
         "sm.username": "👤 Добавить username",
         "sm.prompt_id": "🆔 Введите числовой Telegram ID этого пользователя.",

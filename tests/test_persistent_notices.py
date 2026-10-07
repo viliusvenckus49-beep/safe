@@ -7,7 +7,7 @@ from aiogram.methods import SendMessage, SendPhoto
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 from test_telegram import journey as telegram_journey
 
-from app.bot.callbacks import Action, ScamAdmin, TrustedAdmin
+from app.bot.callbacks import Action, Moderation, ScamAdmin, TrustedAdmin
 from app.bot.screens import preserved_source
 from app.bot.states import ScamAdminFlow
 from app.i18n import t, use_language
@@ -139,6 +139,35 @@ async def test_scam_removal_receipt_admin_back_preserves_history(journey):
     await click_message(journey, back, removed)
     deleted = [call.message_id for call in journey.transport.deletions]
     assert previous in deleted and added not in deleted and removed not in deleted
+    assert preserved_source.get() is None
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+@pytest.mark.parametrize("decision", ["approve", "reject"])
+async def test_report_decision_receipt_and_back_preserve_chat_history(
+    journey, database, settings, lang, decision
+):
+    async with database() as session:
+        core = Service(settings, session)
+        await core.set_language(900, lang)
+        report = await core.submit_report(
+            1, "42", "Reviewed payment evidence", [], "receipt-report"
+        )
+        reference = report.reference
+    await journey.click(Action(name="pending").pack(), actor=900)
+    panel, _ = last_sent(journey)
+    await click_message(journey, Moderation(action=decision, reference=reference).pack(), panel)
+    receipt, item = last_sent(journey)
+    assert (await journey.data(900))["screen_message_id"] is None
+    if decision == "approve":
+        assert "𝗦𝗖𝗔𝗠 • 𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in item.text
+    back = item.reply_markup.inline_keyboard[0][0].callback_data
+    assert Action.unpack(back).name == "pending"
+    await journey.send("/profile", actor=900)
+    previous, _ = last_sent(journey)
+    await click_message(journey, back, receipt)
+    deleted = [call.message_id for call in journey.transport.deletions]
+    assert panel in deleted and previous in deleted and receipt not in deleted
     assert preserved_source.get() is None
 
 

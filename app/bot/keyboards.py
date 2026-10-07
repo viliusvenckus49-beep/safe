@@ -35,11 +35,11 @@ def home(admin: bool = False, *, private: bool = True) -> InlineKeyboardMarkup:
     rows = [
         [(t("button.lookup"), action("lookup"))],
         [(t("button.rep"), action("rep")), (t("button.report"), action("report"))],
-        [(t("button.top"), action("top"))],
+        [(t("button.top"), action("top"))]
+        + ([(t("button.scams"), action("scams", "0"))] if private else []),
         [(t("button.profile"), action("profile")), (t("button.info"), action("info"))],
     ]
     if private:
-        rows.insert(3, [(t("button.scams"), action("scams", "0"))])
         rows.append([(t("button.recovery"), GroupAction(action="subscriptions").pack())])
     rows.append([(t("button.language"), action("language"))])
     rows.append([(t("button.close"), action("close"))])
@@ -135,9 +135,9 @@ def pages(page: int, total: int, *, admin: bool = False) -> InlineKeyboardMarkup
     return keyboard(
         [
             [
-                ("◀️", action(route, str(max(0, page - 1)))),
+                ("‹", action(route, str(max(0, page - 1)))),
                 (f"{page + 1} / {last + 1}", action("noop")),
-                ("▶️", action(route, str(min(last, page + 1)))),
+                ("›", action(route, str(min(last, page + 1)))),
             ],
             [(t("button.search"), action("lookup", f"{route}:{page}"))],
             [(t("button.back"), action("admin" if admin else "home"))],
@@ -150,9 +150,9 @@ def admin_pages(name: str, page: int, total: int, *, page_size: int = 5) -> Inli
     return keyboard(
         [
             [
-                ("◀️", action(name, str(max(0, page - 1)))),
+                ("‹", action(name, str(max(0, page - 1)))),
                 (f"{page + 1} / {last + 1}", action("noop")),
-                ("▶️", action(name, str(min(last, page + 1)))),
+                ("›", action(name, str(min(last, page + 1)))),
             ],
             [(t("button.back"), action("admin"))],
         ]
@@ -211,7 +211,7 @@ def reputation_queue(rows: list[Any], page: int, total: int) -> InlineKeyboardMa
     builder = InlineKeyboardBuilder()
     for request in rows:
         builder.button(
-            text=f"⭐ {request.reference}", callback_data=action("rep_review", request.reference)
+            text=f"＋ {request.reference}", callback_data=action("rep_review", request.reference)
         )
     builder.adjust(1)
     navigation = admin_pages("rep_pending", page, total)
@@ -288,10 +288,10 @@ def administrator_menu(rows, page: int, total: int, owner: int | None) -> Inline
     pages = max(1, (total + 7) // 8)
     navigation = []
     if page > 0:
-        navigation.append(("◀️", AdminAccess(action="list", value=str(page - 1)).pack()))
+        navigation.append(("‹", AdminAccess(action="list", value=str(page - 1)).pack()))
     navigation.append((f"{page + 1} / {pages}", action("noop")))
     if page + 1 < pages:
-        navigation.append(("▶️", AdminAccess(action="list", value=str(page + 1)).pack()))
+        navigation.append(("›", AdminAccess(action="list", value=str(page + 1)).pack()))
     buttons.append(navigation)
     buttons.append([(t("button.back"), action("admin"))])
     return keyboard(buttons)

@@ -28,7 +28,7 @@ for name, data in files.items():
     p.chmod(0o444)  # Disposable fake secrets only; production permissions differ.
 (BASE / "runtime.env").write_text("ADMIN_IDS=900\nGROUP_OWNER_ID=900\nLOG_LEVEL=INFO\n")
 (BASE / "compose.env").write_text(
-    f"SAFECHECK_IMAGE=safecheck:2.13.2\nSAFECHECK_ENV_FILE={BASE}/runtime.env\nSAFECHECK_SECRETS_DIR={sec}\n"
+    f"SAFECHECK_IMAGE=safecheck:2.14.0\nSAFECHECK_ENV_FILE={BASE}/runtime.env\nSAFECHECK_SECRETS_DIR={sec}\n"
 )
 runner = BASE / "fake_telegram.py"
 runner.write_text("""import asyncio

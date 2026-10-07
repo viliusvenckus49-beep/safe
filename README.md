@@ -1,4 +1,4 @@
-# 🛡 SAFECheck 2.13.2
+# 🛡 CRIMSON SAFECHECK™ 2.14.0
 
 SAFECheck is a Telegram reputation service with Lithuanian, English and Russian interfaces and moderated scam registry. User reports are private moderation requests; they do **not** label a person a confirmed scammer. An absent scam record is never a guarantee of reliability.
 
@@ -64,7 +64,9 @@ Ordinary group messages do not trigger menus. Callback navigation edits the exis
 
 Give the bot Telegram administrator permission to restrict users. Only the numeric SAFECheck owner can stage a group by promoting the bot or sending `/start`; explicit approval in private `/groups` verifies current Telegram rights before activation. Group `/start` opens the ordinary home menu. Slash command menus contain only `/start`, `/ask`, `/rep`, `/report`; other commands remain usable manually.
 
-Confirmed ACTIVE scam records with known Telegram IDs schedule bans in registered enabled groups, including preemptive bans where Telegram allows them. New member events and messages recheck known IDs. Reports alone never trigger bans. Durable ban jobs retry transient failures with backoff, respect Telegram RetryAfter, revalidate current SCAM/group status before requests, and record outcomes. Username-only records cannot safely cause numeric-ID bans. Removing SCAM status does not automatically unban someone. Bots cannot ban group owners or bypass Telegram permission rules. Permanent/preemptive protection requires a supergroup; basic-group behavior is more limited and the panel warns about this.
+Confirmed ACTIVE scam records with reliable Telegram IDs immediately initiate the existing durable ban executor in every approved, enabled protected group, including preemptive bans where Telegram allows them. This applies to `/add_sc`, administrator ID supplements, approved reports and trusted numeric observations of existing SCAM identities. No separate ban approval is required. A username coincidence alone never transfers a legacy SCAM judgment to a newly observed account.
+
+Receipts use actual Telegram results: `BLOCKED` requires successful responses in all active protected groups; partial or rejected bans remain `REGISTERED` with accurate pending counts. Rights loss preserves group protection and pending work. Member joins and group messages retry failed protection, while respecting Telegram RetryAfter and message pacing. Reports alone never trigger bans. Durable jobs revalidate the current SCAM record, numeric identity and group status before requests. Removing SCAM status does not automatically unban someone. Bots cannot ban group owners or bypass Telegram permission rules. Permanent/preemptive protection requires a supergroup; basic-group behavior is more limited and the panel warns about this.
 
 The group administration panel exports a readable UTF-8 TXT member list containing names, usernames and Telegram IDs the bot has observed. **It is not an enumeration of every group member.** Telegram privacy mode/update delivery can limit visibility. No Telethon user-account scraper or mass-inviting service is configured.
 
@@ -147,7 +149,7 @@ Compose starts PostgreSQL/Redis, runs migrations as a separate one-shot service 
 Behind a TLS-intercepting build proxy, supply the CA as a BuildKit secret without copying it into the image:
 
 ```sh
-docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t safecheck:2.13.2 .
+docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t safecheck:2.14.0 .
 ```
 
 ## Migrations
@@ -298,7 +300,7 @@ Sausas paleidimas nekeičia failų, neprisijungia prie Docker ir nesiunčia Tele
 
 ```sh
 # Reikalauja vietinio Docker, Compose ir šių trijų paruoštų image:
-# safecheck:2.13.2, postgres:17.6-alpine, redis:7.4.5-alpine
+# safecheck:2.14.0, postgres:17.6-alpine, redis:7.4.5-alpine
 python3 tests/run_operations_acceptance.py
 ```
 
@@ -309,3 +311,5 @@ python3 tests/run_operations_acceptance.py
 SCAM / TRUSTED veiksmų patvirtinimai ir administratoriaus teisių klaidos išlieka pokalbyje. Meniu ir vedlių langai keičiami įprastai; atšaukimas uždaro tik aktyvų langą.
 
 Database recovery in 2.13.2: legacy records merge transactionally into an existing VPS database with isolated PostgreSQL validation, verified backups, foreign-key remapping, and repeat-import protection. Buttons predating the import request a fresh `/start` menu. See [the verified recovery record](docs/RECOVERY_2_13_2.md).
+
+Version 2.14.0 adds the localized CRIMSON SAFECHECK™ interface and immediate, truthful SCAM ban receipts. It reuses `ban_actions`; no schema migration or database recovery/import is needed. REP calculations, moderation, cooldown, self-vote checks, registry history and callback payloads remain compatible.
