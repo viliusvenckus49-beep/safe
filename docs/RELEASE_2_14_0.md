@@ -30,6 +30,8 @@ The complete test suite contains 695 cases, including isolated PostgreSQL and Re
 
 Additional checks cover Ruff lint/format, mypy, imports, SQLite migration readiness and Docker image build. A separate baseline comparison verified 57 callback payload combinations in all three languages; existing payloads remain unchanged. New report-decision receipt Back buttons carry the existing Action schema's `receipt` marker to preserve chat history.
 
+Verified CI run [37688364451](https://github.com/viliusvenckus49-beep/safe/actions/runs/37688364451) passed all 695 tests in 115.77 seconds, lint/format, mypy, SQLite migration and Docker build. Deployment run [37688833511](https://github.com/viliusvenckus49-beep/safe/actions/runs/37688833511) independently passed 695 tests, dependency checks and backup-first activation. The active image is `safecheck:2.14.0-a479d7a95d9f`; bot, PostgreSQL and Redis health were verified after activation. Deployment workflows return to manual-only after the controlled update; no further production preparation is required for this code-only release.
+
 ## Telegram limits
 
 Telegram can reject bans because the bot lacks rights, the target is a group owner/administrator or the group does not support that operation. Such results remain pending and are never displayed as successful bans. Telegram privacy/update delivery can limit observed member data. Numeric identity updates require trusted Telegram objects or administrator input; changing a username cannot erase numeric-ID protection.
