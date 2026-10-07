@@ -30,6 +30,15 @@ class ServiceMiddleware(BaseMiddleware):
     async def __call__(
         self, handler: Callable[..., Awaitable[Any]], event: TelegramObject, data: dict[str, Any]
     ) -> Any:
+        message = event.message if isinstance(event, CallbackQuery) else event
+        chat = getattr(message, "chat", None)
+        if chat is not None and getattr(chat, "type", None) in {"group", "supergroup"}:
+            async with self.session_factory() as session:
+                removed = await GroupService(self.settings, session).is_removed_group(chat.id)
+            if removed:
+                if isinstance(event, CallbackQuery):
+                    await event.answer()
+                return None
         actor = getattr(event, "from_user", None)
         async with self.session_factory() as session:
             selected = (

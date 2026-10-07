@@ -39,6 +39,7 @@ def group(chat_id: int, *, approved: bool = True) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [button(t("button.group_approve"), "approve", chat_id)],
+                [button(t("button.group_remove"), "remove", chat_id)],
                 [button(t("button.back"), "list")],
             ]
         )
@@ -47,6 +48,7 @@ def group(chat_id: int, *, approved: bool = True) -> InlineKeyboardMarkup:
             [button(t("button.group_rights"), "approve", chat_id)],
             [button(t("button.members"), "export", chat_id)],
             [button(t("button.recovery_link"), "recover", chat_id)],
+            [button(t("button.group_remove"), "remove", chat_id)],
             [button(t("button.back"), "list")],
         ]
     )
@@ -58,6 +60,15 @@ def consent(chat_id: int) -> InlineKeyboardMarkup:
             [button(t("button.subscribe"), "subscribe", chat_id)],
             [button(t("button.unsubscribe"), "unsubscribe", chat_id)],
             [button(t("button.back"), "subscriptions")],
+        ]
+    )
+
+
+def remove_confirmation(chat_id: int, nonce: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [button(t("button.group_remove_confirm"), "remove_confirm", chat_id, nonce)],
+            [button(t("button.back"), "group", chat_id)],
         ]
     )
 

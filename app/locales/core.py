@@ -2,6 +2,12 @@
 
 CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
+        "button.group_remove": "× Pašalinti grupę",
+        "button.group_remove_confirm": "× Patvirtinti pašalinimą",
+        "group.REMOVE_CONFIRM": "<b>Pašalinti grupę?</b>\n\n{title}\n\nBotas paliks grupę ir joje nebeveiks. Grupė dings iš administravimo ir atkūrimo sąrašų visiems vartotojams.",
+        "group.REMOVED": "✅ Grupė <b>{title}</b> pašalinta. Botas joje nebeveikia; grupė neberodoma administravimo ir atkūrimo sąrašuose.",
+        "group.LEAVE_FAILED": "Telegram neleido botui išeiti iš grupės. SAFECheck veikla joje jau išjungta; botą gali pašalinti grupės administratorius.",
+        "audit.group_removed": "Grupė pašalinta",
         "ban_alert.message": "⚠️ <b>SCAM vartotojo užblokuoti nepavyko</b>\n\n👤 {name}\n🆔 <code>{telegram_id}</code>\nGrupė: {group}\nGrupės ID: <code>{chat_id}</code>\n\nPriežastis: {reason}\nVartotojas paliktas laukiančių blokavimo sąraše. Šis pranešimas siunčiamas vieną kartą šiam SCAM įrašui ir grupei.\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™",
         "ban_alert.admin": "Telegram nurodo, kad vartotojas yra grupės administratorius.",
         "ban_alert.rights": "Botui trūksta blokavimo teisių arba prieigos prie grupės.",
@@ -32,6 +38,12 @@ CATALOGS: dict[str, dict[str, str]] = {
         "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>pagalba</b>\n\n/ask @vartotojas arba ID — patikra\n/rep @vartotojas — reputacija\n/profile — mano profilis\n/top — TOP 10\n/scammers — SCAM registras\n/report — pateikti pranešimą\n/recovery — atkūrimo prenumeratos\n/language — kalba\n/cancel — uždaryti langą\n\nGrupėje atsakyk į žinutę su +rep arba -rep. Įvertinimą turi patvirtinti administratorius. Pranešimas savaime nesuteikia SCAM statuso. Įrašo nebuvimas nėra patikimumo garantija.",
     },
     "en": {
+        "button.group_remove": "× Remove group",
+        "button.group_remove_confirm": "× Confirm removal",
+        "group.REMOVE_CONFIRM": "<b>Remove this group?</b>\n\n{title}\n\nThe bot will leave and stop working in this group. The group will disappear from management and recovery lists for everyone.",
+        "group.REMOVED": "✅ Group <b>{title}</b> removed. The bot no longer works there; the group is hidden from management and recovery lists.",
+        "group.LEAVE_FAILED": "Telegram did not let the bot leave. SAFECheck activity is already disabled; a group administrator can remove the bot.",
+        "audit.group_removed": "Group removed",
         "ban_alert.message": "⚠️ <b>Could not block a SCAM user</b>\n\n👤 {name}\n🆔 <code>{telegram_id}</code>\nGroup: {group}\nGroup ID: <code>{chat_id}</code>\n\nReason: {reason}\nThe user remains pending a ban. This alert is sent once per SCAM record and group.\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™",
         "ban_alert.admin": "Telegram reports that the user is a group administrator.",
         "ban_alert.rights": "The bot lacks ban permissions or access to the group.",
@@ -62,6 +74,12 @@ CATALOGS: dict[str, dict[str, str]] = {
         "core.help": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\nⓘ <b>help</b>\n\n/ask @username or ID — check a user\n/rep @username — reputation\n/profile — my profile\n/top — TOP 10\n/scammers — SCAM registry\n/report — submit a report\n/recovery — recovery subscriptions\n/language — language\n/cancel — close the panel\n\nIn a group, reply to a message with +rep or -rep. Ratings require administrator approval. Reports do not automatically grant SCAM status. No record does not mean a user is trustworthy.",
     },
     "ru": {
+        "button.group_remove": "× Удалить группу",
+        "button.group_remove_confirm": "× Подтвердить удаление",
+        "group.REMOVE_CONFIRM": "<b>Удалить группу?</b>\n\n{title}\n\nБот покинет группу и перестанет работать в ней. Группа исчезнет из списков управления и восстановления для всех пользователей.",
+        "group.REMOVED": "✅ Группа <b>{title}</b> удалена. Бот больше не работает в ней; группа скрыта из списков управления и восстановления.",
+        "group.LEAVE_FAILED": "Telegram не позволил боту выйти. SAFECheck уже отключён в группе; администратор группы может удалить бота.",
+        "audit.group_removed": "Группа удалена",
         "ban_alert.message": "⚠️ <b>Не удалось заблокировать пользователя SCAM</b>\n\n👤 {name}\n🆔 <code>{telegram_id}</code>\nГруппа: {group}\nID группы: <code>{chat_id}</code>\n\nПричина: {reason}\nБлокировка остаётся в ожидании. Уведомление отправляется один раз для этой записи SCAM и группы.\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™",
         "ban_alert.admin": "Telegram сообщает, что пользователь — администратор группы.",
         "ban_alert.rights": "У бота нет прав на блокировку или доступа к группе.",

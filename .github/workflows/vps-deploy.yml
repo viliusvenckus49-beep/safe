@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: ['scam-ban-diagnosis-2.14.0']
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read

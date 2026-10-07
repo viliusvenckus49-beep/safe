@@ -32,6 +32,10 @@ class RecoveryFlow(StatesGroup):
     preview = State()
 
 
+class GroupRemovalFlow(StatesGroup):
+    confirm = State()
+
+
 class TrustedAdminFlow(StatesGroup):
     search = State()
     preview = State()
