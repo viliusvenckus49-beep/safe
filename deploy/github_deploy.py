@@ -72,6 +72,7 @@ def main():
         )
         module.private_write(selector, args.env_file.read_text())
         args.env_file = selector
+        candidate = module.Operations(args)
         try:
             candidate.persist_image(image)
             # Compare resolved data service configurations without displaying secret values.
