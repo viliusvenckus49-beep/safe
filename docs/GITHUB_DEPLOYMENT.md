@@ -1,0 +1,11 @@
+# GitHub deployment to the existing VPS
+
+The repository has SSH preflight and backup-first deployment workflows. The SSH host key is pinned from the server's public key; strict checking stays enabled. The private deployment key is stored only in the repository's `VPS_SSH_KEY` secret. `VPS_HOST` and `VPS_USER` select the existing server account. Bot and database credentials remain in the server's existing private files; the workflow never reads them into Actions logs.
+
+The initial connection and deployment are initiated by changes to their workflow files on the `safecheck-2.13.1` branch. After merging the workflows into the default branch, a maintainer can select **Actions → SAFECheck VPS deploy → Run workflow**. Normal code commits do not silently deploy. Deployments share a concurrency group and a server maintenance lock. Do not cancel an active deployment during the maintenance phase.
+
+Every deployment runs the complete PostgreSQL/Redis test suite, Ruff, type checks and dependency checks before SSH access. The tested source is archived without credentials, uploaded into a new release directory and built on the VPS. The existing Compose project is reused. PostgreSQL/Redis definitions must match the running deployment, and migration files must be identical: this route deliberately refuses schema changes. A future schema release requires a separately reviewed migration procedure.
+
+The production operations CLI stops the bot gracefully, creates a private PostgreSQL dump, validates its checksum and restores it into a disposable isolated verifier, then checks and starts the candidate. The previously selected image is restored when deployment fails. Successful deployment persists the image in `/etc/safecheck/compose.env`. Existing data volumes and private configuration are retained.
+
+The deployment account currently uses `ubuntu` with passwordless sudo, as confirmed by preflight. This is broad server access, not a restricted forced-command deployment identity. Limit repository collaborators and Secrets access; a dedicated constrained deployment account is a separate hardening step. Retain the server's scheduled operations and external backups; GitHub deployment does not itself install timers or offsite storage.
