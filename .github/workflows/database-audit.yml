@@ -1,0 +1,47 @@
+name: SAFECheck database audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Inspect existing deployment without changing it
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
+          set -eu
+          deployment_root=$(sudo -n docker inspect safecheck-bot-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')
+          sudo -n python3 "$deployment_root/deploy/ops.py" --root "$deployment_root" backup </dev/null
+          sudo -n docker exec safecheck-postgres-1 psql -U safecheck -d safecheck -Atc "SELECT json_build_object('users',(SELECT count(*) FROM users),'rep_events',(SELECT count(*) FROM reputation_events),'rep_requests',(SELECT count(*) FROM reputation_requests),'adjustments',(SELECT count(*) FROM reputation_adjustments),'scam_records',(SELECT count(*) FROM scam_records),'trusted',(SELECT count(*) FROM trusted_designations),'admins',(SELECT count(*) FROM administrators),'groups',(SELECT count(*) FROM managed_groups),'observed_members',(SELECT count(*) FROM observed_members),'reports',(SELECT count(*) FROM reports),'oldest_user',(SELECT min(created_at) FROM users),'latest_user',(SELECT max(created_at) FROM users));"
+          sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec safecheck-bot-1 python -c 'import app; print("VerifiedVersion=" + app.__version__)'
+          plan_result=$(sudo -n python3 "$deployment_root/deploy/restore_legacy.py" plan "$deployment_root/snapshot.sealed" c467f2999db754bd36c13c57e542a3931b8591bf2ad5adf86f0d86283609e769 </dev/null)
+          printf '%s\n' "$plan_result"
+          case "$plan_result" in *'"already_imported": true'*) echo 'Repeat import is idempotent: verified';; *) exit 1;; esac
+          sudo -n docker volume ls --format '{{.Name}}'
+          sudo -n find /var/backups/safecheck /home/ubuntu -maxdepth 3 -type f \( -name '*.dump' -o -name '*.db' -o -name '*.sqlite' \) -printf '%p %s bytes\n'
+          REMOTE
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"

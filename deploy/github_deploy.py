@@ -5,6 +5,7 @@ import importlib.util
 import os
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 
@@ -60,7 +61,10 @@ def main():
         raise module.OperationError("Schema differs: code-only deployment refused")
     original_args = module.parser().parse_args(["--root", str(old_root), "deploy"])
     original = module.Operations(original_args)
-    image = "safecheck:2.13.1-" + sha[:12]
+    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        raise module.OperationError("Invalid release version")
+    image = "safecheck:" + version + "-" + sha[:12]
     candidate.run(["docker", "build", "-t", image, str(root)])
     print("Candidate Docker build passed.", flush=True)
     selector = args.state_dir / "github-candidate.env"

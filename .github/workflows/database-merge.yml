@@ -1,0 +1,103 @@
+name: SAFECheck legacy database merge
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'plan validates in isolation; apply merges after a fresh backup'
+        type: choice
+        default: plan
+        options: [plan, apply]
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: safecheck
+          POSTGRES_DB: safecheck_test
+          POSTGRES_PASSWORD: ci_only_disposable_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U safecheck -d safecheck_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_POSTGRES_URL: postgresql+asyncpg://safecheck:ci_only_disposable_password@localhost:5432/safecheck_test
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.lock && pip install --no-deps -e .
+      - run: pytest -q && ruff check . && ruff format --check . && mypy && pip check
+  deploy:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned SSH access and release archive
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/safecheck-source.tar.gz"
+      - name: Download sealed snapshot (ciphertext only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl --fail --silent --show-error --retry 3 -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/viliusvenckus49-beep/safe/git/blobs/ce282b7a1b96cd600b93c72b1493525f23ec4a0e > "$RUNNER_TEMP/sealed-blob.json"
+          python - <<'PYCODE'
+          import base64, json, os
+          from pathlib import Path
+          obj = json.loads((Path(os.environ['RUNNER_TEMP']) / 'sealed-blob.json').read_text())
+          assert obj['sha'] == 'ce282b7a1b96cd600b93c72b1493525f23ec4a0e'
+          (Path(os.environ['RUNNER_TEMP']) / 'snapshot.sealed').write_bytes(base64.b64decode(obj['content']))
+          PYCODE
+      - name: Stage or merge without replacing current records
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+          MERGE_MODE: ${{ inputs.mode || 'plan' }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "mkdir -p \"\$HOME/safecheck-releases/$GITHUB_SHA\""
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/safecheck-source.tar.gz" "$REMOTE_USER@$HOST:safecheck-releases/$GITHUB_SHA/source.tar.gz"
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/snapshot.sealed" "$REMOTE_USER@$HOST:safecheck-releases/$GITHUB_SHA/snapshot.sealed"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "bash -se -- $GITHUB_SHA $MERGE_MODE" <<'REMOTE'
+          set -eu
+          release="$HOME/safecheck-releases/$1"
+          tar -xzf "$release/source.tar.gz" -C "$release"
+          sudo -n python3 "$release/deploy/restore_legacy.py" "$2" "$release/snapshot.sealed" c467f2999db754bd36c13c57e542a3931b8591bf2ad5adf86f0d86283609e769 </dev/null
+          sudo -n docker inspect safecheck-bot-1 --format 'RunningImage={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
+          sudo -n docker exec safecheck-postgres-1 psql -U safecheck -d safecheck -Atc "SELECT json_build_object('users',(SELECT count(*) FROM users),'rep_events',(SELECT count(*) FROM reputation_events),'rep_requests',(SELECT count(*) FROM reputation_requests),'approved_rep_requests',(SELECT count(*) FROM reputation_requests WHERE status='APPROVED'),'today_rep_requests',(SELECT count(*) FROM reputation_requests WHERE created_at >= '2026-10-07'::timestamptz),'scam_records',(SELECT count(*) FROM scam_records),'active_scam',(SELECT count(*) FROM scam_records WHERE status='ACTIVE'),'removed_scam',(SELECT count(*) FROM scam_records WHERE status='REMOVED'),'trusted',(SELECT count(*) FROM trusted_designations),'admins',(SELECT count(*) FROM administrators),'groups',(SELECT count(*) FROM managed_groups),'observed_members',(SELECT count(*) FROM observed_members),'reports',(SELECT count(*) FROM reports),'legacy_import_markers',(SELECT count(*) FROM audit_events WHERE action='legacy_database_import'));"
+          REMOTE
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"

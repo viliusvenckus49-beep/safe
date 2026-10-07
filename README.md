@@ -1,4 +1,4 @@
-# 🛡 SAFECheck 2.13.1
+# 🛡 SAFECheck 2.13.2
 
 SAFECheck is a Telegram reputation service with Lithuanian, English and Russian interfaces and moderated scam registry. User reports are private moderation requests; they do **not** label a person a confirmed scammer. An absent scam record is never a guarantee of reliability.
 
@@ -147,7 +147,7 @@ Compose starts PostgreSQL/Redis, runs migrations as a separate one-shot service 
 Behind a TLS-intercepting build proxy, supply the CA as a BuildKit secret without copying it into the image:
 
 ```sh
-docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t safecheck:2.13.1 .
+docker build --secret id=proxy_ca,src=/path/to/combined-ca-bundle.pem -t safecheck:2.13.2 .
 ```
 
 ## Migrations
@@ -298,7 +298,7 @@ Sausas paleidimas nekeičia failų, neprisijungia prie Docker ir nesiunčia Tele
 
 ```sh
 # Reikalauja vietinio Docker, Compose ir šių trijų paruoštų image:
-# safecheck:2.13.1, postgres:17.6-alpine, redis:7.4.5-alpine
+# safecheck:2.13.2, postgres:17.6-alpine, redis:7.4.5-alpine
 python3 tests/run_operations_acceptance.py
 ```
 
@@ -307,3 +307,5 @@ python3 tests/run_operations_acceptance.py
 `python -m app.health --check` tikrina paskutinius sėkmingus Telegram polling ir grupių worker ciklus; `python -m app.operations_status` pateikia tik agreguotus užduočių skaičius. Sveikatos patikra nereikalauja tokeno. Docker secrets paleidime statuso komandą vykdyk per `deploy/secret_entrypoint.py`, kaip nurodyta operacijų vadove.
 
 SCAM / TRUSTED veiksmų patvirtinimai ir administratoriaus teisių klaidos išlieka pokalbyje. Meniu ir vedlių langai keičiami įprastai; atšaukimas uždaro tik aktyvų langą.
+
+Database recovery in 2.13.2: legacy records merge transactionally into an existing VPS database with isolated PostgreSQL validation, verified backups, foreign-key remapping, and repeat-import protection. Buttons predating the import request a fresh `/start` menu. See [the verified recovery record](docs/RECOVERY_2_13_2.md).

@@ -271,7 +271,7 @@ class Operations:
         self.dc("config", "--quiet")
         raw = self.dc("config", "--format", "json")
         if self.args.dry_run:
-            return "safecheck:2.13.1"
+            return "safecheck:2.13.2"
         config = json.loads(raw)
         images = [service["image"] for service in config["services"].values()]
         if any(not pinned_image(image) for image in images):

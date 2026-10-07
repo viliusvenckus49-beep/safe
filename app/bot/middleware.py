@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from datetime import UTC
 from time import monotonic
 from typing import Any
 
@@ -6,6 +7,7 @@ import structlog
 from aiogram import BaseMiddleware
 from aiogram.exceptions import TelegramAPIError
 from aiogram.types import CallbackQuery, Message, TelegramObject
+from sqlalchemy import select
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
 from app import presentation as p
@@ -13,6 +15,7 @@ from app.bot.navigation import error_navigation
 from app.bot.screens import flow_screen, panel_state, preserved_source, render
 from app.group_services import GroupService
 from app.i18n import use_language
+from app.models import AuditEvent
 from app.repositories import Repository
 from app.services import DomainError, Service
 
@@ -126,6 +129,25 @@ class ServiceMiddleware(BaseMiddleware):
                 data["service"] = service
                 data["settings"] = self.settings
                 try:
+                    if isinstance(event, CallbackQuery) and isinstance(event.message, Message):
+                        restored_at = await session.scalar(
+                            select(AuditEvent.created_at)
+                            .where(AuditEvent.action == "legacy_database_import")
+                            .order_by(AuditEvent.created_at.desc())
+                            .limit(1)
+                        )
+                        if restored_at is not None:
+                            restored_at = (
+                                restored_at
+                                if restored_at.tzinfo
+                                else restored_at.replace(tzinfo=UTC)
+                            )
+                            if int(event.message.date.timestamp()) < int(restored_at.timestamp()):
+                                if data.get("state") is not None:
+                                    await data["state"].clear()
+                                await event.answer(p.text("data_refreshed"), show_alert=True)
+                                log.info("callback_rejected_after_data_restore")
+                                return None
                     await service.observe(actor.id, actor.username, actor.full_name)
                     if getattr(chat, "type", None) == "private":
                         await GroupService(self.settings, session).mark_private_contact(actor.id)
