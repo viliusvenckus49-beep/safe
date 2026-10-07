@@ -43,3 +43,18 @@ async def test_database_failure_still_has_safe_localized_error_response():
     await error_response(SimpleNamespace(callback_query=None, message=message), unavailable)
     message.answer.assert_awaited_once_with(t("p.error", "en"))
     assert "PASSWORD_SENTINEL" not in str(message.answer.await_args)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chat_type", ["group", "supergroup"])
+async def test_group_failure_never_posts_generic_error_even_if_database_is_down(chat_type):
+    def unavailable():
+        raise RuntimeError("DATABASE_PASSWORD_SENTINEL")
+
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(type=chat_type),
+        answer=AsyncMock(),
+    )
+    await error_response(SimpleNamespace(callback_query=None, message=message), unavailable)
+    message.answer.assert_not_awaited()

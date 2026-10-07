@@ -243,7 +243,7 @@ async def test_failed_telegram_bans_are_pending_and_never_reported_blocked(
     await crimson.send("/add_sc 42", actor=900)
     receipt = crimson.last_text()
     assert REGISTERED in receipt and BLOCKED not in receipt
-    assert f"Laukiama blokavimo: {pending}" in receipt
+    assert f"Queued  {pending}" in receipt
     assert "Automatinis blokavimas neaktyvus" not in receipt
     assert "USER_NOT_PARTICIPANT" not in receipt and "Traceback" not in receipt
     if succeeded:

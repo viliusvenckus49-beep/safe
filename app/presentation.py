@@ -120,6 +120,7 @@ def scam_registered(
     succeeded: int = 0,
     failed: int = 0,
     pending: int = 0,
+    already_banned: int = 0,
 ) -> str:
     """Render confirmed ban results; FAILED jobs remain part of the pending outbox."""
     known = getattr(user, "telegram_id", None) is not None
@@ -138,15 +139,19 @@ def scam_registered(
         outcome = t("p.ban_no_groups")
     else:
         outcome = t(
-            "p.ban_complete" if completed else "p.ban_partial" if succeeded else "p.ban_pending",
-            succeeded=succeeded,
+            "p.ban_status",
+            banned=max(0, succeeded - already_banned),
+            already_banned=already_banned,
             groups=groups,
             pending=pending,
         )
+    name = label(user, max_units=120)
+    if known and not user.username and (user.display_name or "") in {"", "Vartotojas"}:
+        name = f"User {user.telegram_id}"
     return t(
         "p.receipt_scam",
         heading=t("p.receipt_scam_blocked" if completed else "p.receipt_scam_registered"),
-        name=label(user, max_units=120),
+        name=name,
         telegram_id=(
             f"<code>{escape(telegram_id_label(user))}</code>" if known else t("p.receipt_unknown")
         ),
