@@ -85,6 +85,19 @@ jobs:
           try:asyncio.run(main())
           except Exception as e:print('DiagnosticError='+type(e).__name__);raise SystemExit(1)
           PYDIAG
+          sudo -n docker logs --since 30m safecheck-bot-1 2>&1 | python3 -c 'import sys,json,re
+          latest={}
+          for line in sys.stdin:
+           try:row=json.loads(line)
+           except ValueError:continue
+           if row.get("user_id")!=8805206375 or row.get("event")!="group_ban_result":continue
+           safe={k:row.get(k) for k in ["event","operation","user_id","chat_id","scam_record_id","success","result","reason","timestamp"]}
+           if safe["reason"]:
+            safe["reason"]=re.sub(r"https?://\S+|\b\d{5,}:[A-Za-z0-9_-]{20,}\b","[redacted]",safe["reason"])
+           latest[row.get("chat_id")]=safe
+          print("TargetBanLogCount="+str(len(latest)))
+          for row in latest.values():print("TargetBanLog="+json.dumps(row))
+          '
           REMOTE
       - name: Remove runner key
         if: always()
