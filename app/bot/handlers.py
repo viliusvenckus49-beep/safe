@@ -197,7 +197,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         if (message.text or "").split()[0].split("@")[0] == "/profile" and not target:
             target = str(actor_id(message))
         if target:
-            data = await service.profile(target)
+            data = await service.profile(target, refresh_identity=True)
             await flow_screen(
                 message,
                 state,
@@ -218,6 +218,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     async def scammers(message: Message, service: Service, state: FSMContext) -> None:
         if message.chat.type != "private":
             await flow_screen(message, state, p.text("scams_private"))
+            return
+        if await service.is_admin(actor_id(message)):
+            await scam_listing(message, state, service)
             return
         await clear_flow(state)
         rows, total = await service.scams(0)
@@ -460,6 +463,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             if not value.isascii() or not value.isdigit() or len(value) > 6:
                 await render(message, p.text("stale"))
                 return
+            if await service.is_admin(actor):
+                await scam_listing(message, state, service, int(value))
+                return
             await clear_flow(state)
             page = int(value)
             rows, total = await service.scams(page)
@@ -665,7 +671,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                             callback.bot, service, session_factory, record
                         )
                         receipt_markup.inline_keyboard.extend(
-                            scam_refresh_controls(record).inline_keyboard
+                            scam_refresh_controls(record, allow_remove=True).inline_keyboard
                         )
             await flow_screen(
                 callback.message,
@@ -758,7 +764,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 message, state, p.text("invalid"), reply_markup=kb.navigation(parent, parent_value)
             )
             return
-        data = await service.profile(target)
+        data = await service.profile(target, refresh_identity=True)
         await flow_screen(
             message,
             state,

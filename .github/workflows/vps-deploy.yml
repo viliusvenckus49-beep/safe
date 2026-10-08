@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: [scam-registry-remove-2.15.3]
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -89,6 +92,57 @@ jobs:
           printf 'DataAfter=%s\n' "$after_counts"
           python3 -c 'import json,sys; before,after=map(json.loads,sys.argv[1:]); assert all(after[key] >= value for key,value in before.items()), "Preserved data count decreased"; print("Preserved data counts verified.")' "$before_counts" "$after_counts"
           sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-bot-1 python - <<'IDENTITY_CHECK'
+          import asyncio
+          import os
+          import runpy
+          import sqlite3
+          import tempfile
+          from pathlib import Path
+          from telethon import TelegramClient
+          from app.config import Settings
+          from app.db import create_database
+          from app.mtproto_relay import GroupHelpRelay, private_configuration, set_relay
+          from app.services import Service
+          
+          async def verify():
+              runpy.run_path('/run/configs/secret_entrypoint.py')['load_secrets']()
+              settings = Settings()
+              config = private_configuration(Path(settings.group_help_state_dir))
+              os.umask(0o077)
+              engine, sessions = create_database(settings.database_url)
+              try:
+                  with tempfile.TemporaryDirectory(prefix='safecheck-identity-check-') as directory:
+                      copied = str(Path(directory) / 'account.session')
+                      original = Path(settings.group_help_state_dir) / 'account.session'
+                      with sqlite3.connect(f'file:{original}?mode=ro', uri=True) as source:
+                          with sqlite3.connect(copied) as destination:
+                              source.backup(destination)
+                      client = TelegramClient(copied, config['api_id'], config['api_hash'],
+                          flood_sleep_threshold=0, request_retries=1, connection_retries=1,
+                          timeout=5, receive_updates=False)
+                      try:
+                          await asyncio.wait_for(client.connect(), 15)
+                          assert await client.is_user_authorized()
+                          set_relay(GroupHelpRelay(settings, sessions, client, None))
+                          async with sessions() as session:
+                              profile = await Service(settings, session).profile(
+                                  '@truevakum', refresh_identity=True)
+                              user, record = profile['user'], profile['scam']
+                              print('LiveIdentityRefresh user_id=' + str(user.telegram_id)
+                                  + ' username=' + str(user.username)
+                                  + ' scam_record_id=' + str(record.id if record else None))
+                      finally:
+                          set_relay(None)
+                          await client.disconnect()
+              finally:
+                  await engine.dispose()
+          
+          try:
+              asyncio.run(verify())
+          except Exception as error:
+              print('LiveIdentityRefreshError=' + type(error).__name__)
+          IDENTITY_CHECK
           REMOTE
       - name: Remove runner key
         if: always()

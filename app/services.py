@@ -158,14 +158,16 @@ class Service:
                 await self.session.refresh(user)
         return user
 
-    async def _resolve_public_username(self, username: str) -> User | None:
+    async def _resolve_public_username(
+        self, username: str, *, refresh: bool = False
+    ) -> User | None:
         from app.mtproto_relay import active_relay
 
         relay = active_relay() if self.settings.group_help_enabled else None
         if relay is None:
             return None
         try:
-            observed = await asyncio.wait_for(relay.lookup_username(username), 6)
+            observed = await asyncio.wait_for(relay.lookup_username(username, refresh=refresh), 6)
         except (TimeoutError, OSError) as error:
             structlog.get_logger().info(
                 "mtproto_username_lookup_failed",
@@ -178,7 +180,9 @@ class Service:
         name = " ".join(part for part in (observed.first_name, observed.last_name) if part)
         return await self.observe(observed.id, observed.username, name or "User")
 
-    async def resolve(self, identifier: str, *, _retried: bool = False) -> User:
+    async def resolve(
+        self, identifier: str, *, refresh_identity: bool = False, _retried: bool = False
+    ) -> User:
         identifier = identifier.strip()
         if not identifier or len(identifier) > 64:
             raise DomainError("invalid_target")
@@ -189,7 +193,7 @@ class Service:
             # Network work precedes identity locking. All public target inputs
             # share this path; numeric IDs and pinned callbacks are never redirected.
             if not _retried:
-                observed = await self._resolve_public_username(username)
+                observed = await self._resolve_public_username(username, refresh=refresh_identity)
                 if observed is not None:
                     return observed
         await self.repo.lock_identity_metadata()
@@ -241,7 +245,7 @@ class Service:
             and user.telegram_id is None
             and user.username
         ):
-            observed = await self._resolve_public_username(user.username)
+            observed = await self._resolve_public_username(user.username, refresh=refresh_identity)
             if observed is not None:
                 if observed.id == user.id:
                     return observed
@@ -270,8 +274,10 @@ class Service:
             return False
         return (now() - timestamp.replace(tzinfo=UTC)).total_seconds() < seconds
 
-    async def profile(self, target: str) -> dict:
-        return await self._profile_user(await self.resolve(target))
+    async def profile(self, target: str, *, refresh_identity: bool = False) -> dict:
+        return await self._profile_user(
+            await self.resolve(target, refresh_identity=refresh_identity)
+        )
 
     async def _profile_user(self, user: User) -> dict:
         score, positive, negative = await self.repo.rep_stats(user.id)
@@ -495,13 +501,24 @@ class Service:
             await self.session.rollback()
             raise
 
-    async def remove_scam(self, actor: int, target: str, reason: str) -> bool:
+    async def remove_scam(
+        self, actor: int, target: str, reason: str, *, record_id: int | None = None
+    ) -> bool:
         await self.require_admin(actor)
         reason = self._reason(reason)
-        user = await self.resolve(target)
+        # Registry buttons pin the selected activation. Do not resolve usernames
+        # during removal or let an old button remove a later SCAM activation.
+        user = await self.resolve(target) if record_id is None else None
         await self._admin_write_lock(actor)
+        selected = await self.repo.scam_by_id(record_id) if record_id is not None else None
+        if record_id is not None:
+            if selected is None or selected.status != "ACTIVE":
+                await self.session.commit()
+                return False
+            user = selected.target
+        assert user is not None
         await self._lock(user)
-        record = await self.repo.active_scam(user.id)
+        record = selected if selected is not None else await self.repo.active_scam(user.id)
         if record is None:
             await self.session.commit()
             return False

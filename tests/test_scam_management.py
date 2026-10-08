@@ -13,6 +13,118 @@ journey = telegram_journey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["42", "@unknownscam"])
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_registry_remove_is_direct_and_preserves_history(
+    journey, database, settings, target, lang
+):
+    async with database() as session:
+        core = Service(settings, session)
+        await core.set_language(900, lang)
+        await core.admin_adjust_rep(900, target, 3, "Reviewed reputation evidence", "remove-rep")
+        await core.set_trusted(900, target, True, "remove-trusted")
+        record = await core.add_scam(900, target)
+        record_id, target_id = record.id, record.target_id
+    await journey.click(Action(name="scams", value="0").pack(), actor=900)
+    assert any(
+        button.callback_data == ScamAdmin(action="view", value=str(record_id)).pack()
+        for call in journey.transport.calls
+        for row in getattr(getattr(call, "reply_markup", None), "inline_keyboard", [])
+        for button in row
+    )
+    await journey.click(ScamAdmin(action="view", value=str(record_id)).pack(), actor=900)
+    markup = journey.transport.calls[-1].reply_markup
+    remove = ScamAdmin(action="remove", value=str(record_id)).pack()
+    assert remove in [button.callback_data for row in markup.inline_keyboard for button in row]
+    await journey.click(remove, actor=900)
+    assert await journey.state(900) is None
+    async with database() as session:
+        core = Service(settings, session)
+        archived = await core.repo.scam_by_id(record_id)
+        assert archived.status == "REMOVED" and archived.removed_by == 900
+        assert archived.removed_at and archived.removal_reason
+        assert archived.target_id == target_id
+        assert (await core.repo.rep_stats(target_id))[0] == 3
+        assert (await core.repo.trusted_designation(target_id)).active
+        assert await session.scalar(select(func.count()).select_from(ScamRecord)) == 1
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(AuditEvent.action == "scam_removed")
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["remove", "remove_receipt"])
+async def test_remove_callback_requires_private_admin(journey, database, settings, action):
+    async with database() as session:
+        record = await Service(settings, session).add_scam(900, "42")
+        record_id = record.id
+    callback = ScamAdmin(action=action, value=str(record_id)).pack()
+    await journey.click(callback, actor=1)
+    await journey.click(callback, actor=900, chat=-123)
+    async with database() as session:
+        assert (await Service(settings, session).repo.scam_by_id(record_id)).status == "ACTIVE"
+    await journey.click(callback, actor=900)
+    async with database() as session:
+        assert (await Service(settings, session).repo.scam_by_id(record_id)).status == "REMOVED"
+
+
+@pytest.mark.asyncio
+async def test_pinned_removal_does_not_resolve_or_remove_new_activation(
+    database, settings, monkeypatch
+):
+    async with database() as session:
+        core = Service(settings, session)
+        unknown = await core.add_scam(900, "@unknownscam")
+        target = f"u:{unknown.target_id}"
+        original = core.resolve
+
+        async def forbidden_lookup(*args, **kwargs):
+            raise AssertionError("Removal must not resolve a username or initiate bans")
+
+        monkeypatch.setattr(core, "resolve", forbidden_lookup)
+        assert await core.remove_scam(900, target, "Registry removal", record_id=unknown.id)
+        monkeypatch.setattr(core, "resolve", original)
+        latest = await core.add_scam(900, target)
+        assert latest.id != unknown.id
+        monkeypatch.setattr(core, "resolve", forbidden_lookup)
+        assert not await core.remove_scam(900, target, "Registry removal", record_id=unknown.id)
+        assert (await core.repo.scam_by_id(latest.id)).status == "ACTIVE"
+
+
+@pytest.mark.asyncio
+async def test_removal_stops_pending_bans(database, settings):
+    from app.group_services import GroupService
+
+    async with database() as session:
+        core = Service(settings, session)
+        groups = GroupService(settings, session)
+        await groups.register_group(900, -1000, "Protected", True)
+        record = await core.add_scam(900, "42")
+        jobs = await groups.claim_bans(scam_record_id=record.id)
+        assert len(jobs) == 1
+        assert await core.remove_scam(900, "42", "Registry removal", record_id=record.id)
+        assert not await groups.ban_eligible(jobs[0].id)
+
+
+def test_group_receipts_keep_refresh_only():
+    from types import SimpleNamespace
+
+    from app.bot.scam_admin import refresh_controls
+
+    callbacks = [
+        button.callback_data
+        for row in refresh_controls(SimpleNamespace(id=42)).inline_keyboard
+        for button in row
+    ]
+    assert callbacks == [ScamAdmin(action="retry_receipt", value="42").pack()]
+
+
+@pytest.mark.asyncio
 async def test_identity_binding_preserves_record_history_and_rep(database, settings):
     async with database() as session:
         core = Service(settings, session)

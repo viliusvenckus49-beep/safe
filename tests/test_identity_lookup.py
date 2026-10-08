@@ -233,3 +233,50 @@ async def test_lookup_cache_expires_and_simultaneous_requests_share_one_query(
     client.user_id = 33
     assert (await relay.lookup_username("scammer")).id == 33
     assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_ask_rechecks_cached_failure_links_existing_scam_and_enqueues(
+    journey, database, settings
+):
+    enabled, client, _ = connect(database)
+    settings.group_help_enabled = True
+    settings.group_help_bot_id = enabled.group_help_bot_id
+    settings.group_help_scope_ids = enabled.group_help_scope_ids
+    legacy = settings.model_copy(update={"group_help_enabled": False})
+    async with database() as session:
+        core = Service(legacy, session)
+        await GroupService(settings, session).register_group(900, -1000, "Protected", True)
+        record = await core.add_scam(900, "@scammer")
+        record_id, target_id = record.id, record.target_id
+    client.error = OSError("Unavailable")
+    await journey.send("/ask @scammer")
+    client.error = None
+    await journey.send("/ask @scammer")
+    async with database() as session:
+        core = Service(settings, session)
+        record = await core.repo.scam_by_id(record_id)
+        assert record.target_id == target_id and record.target.telegram_id == 22
+        jobs = list((await session.scalars(select(BanAction))).all())
+        assert len(jobs) == 1 and jobs[0].telegram_id == 22
+    assert len(client.calls) == 2
+    client.user_id = 33
+    await journey.send("/ask @scammer")
+    async with database() as session:
+        core = Service(settings, session)
+        assert (await core.repo.user_by_username("scammer")).telegram_id == 33
+        assert (await core.repo.scam_by_id(record_id)).target.telegram_id == 22
+    assert len(client.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_explicit_refresh_still_respects_telegram_flood_wait(database):
+    from telethon.errors import FloodWaitError
+
+    settings, client, _ = connect(database)
+    client.error = FloodWaitError(request=None, capture=120)
+    async with database() as session:
+        core = Service(settings, session)
+        assert (await core.profile("@scammer", refresh_identity=True))["user"].telegram_id is None
+        assert (await core.profile("@scammer", refresh_identity=True))["user"].telegram_id is None
+    assert len(client.calls) == 1

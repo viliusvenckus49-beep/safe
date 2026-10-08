@@ -134,7 +134,7 @@ async def test_error_notifications_no_cancel_without_active_flow(journey, monkey
     await journey.send("/add_trusted 42")
     assert last_message(journey).reply_markup is None
 
-    async def unavailable(self, target):
+    async def unavailable(self, target, *, refresh_identity=False):
         raise DomainError("not_found")
 
     monkeypatch.setattr(Service, "profile", unavailable)
