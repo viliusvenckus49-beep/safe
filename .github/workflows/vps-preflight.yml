@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: [safecheck-2.13.1]
+    branches: [scam-ban-diagnosis-2.14.0]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -42,7 +42,54 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          df -h /home/ubuntu
+          sudo -n docker exec -i safecheck-bot-1 python - <<'PYCHECK'
+          import asyncio, dataclasses, importlib.util, json
+          from aiogram import Bot
+          from sqlalchemy import select
+          from app.config import Settings
+          from app.db import create_database
+          from app.group_services import GroupService
+          from app.models import BanAction, ManagedGroup, ScamRecord, User
+          from app.services import Service
+          loader=importlib.util.spec_from_file_location('secret_loader','/run/configs/secret_entrypoint.py')
+          module=importlib.util.module_from_spec(loader);loader.loader.exec_module(module);module.load_secrets()
+          async def main():
+           settings=Settings()
+           print('RelayRuntime='+json.dumps({'enabled':settings.group_help_enabled,'staff_id':settings.group_help_staff_id,'scope_count':len(settings.group_help_scope)}),flush=True)
+           engine,sessions=create_database(settings.database_url)
+           bot=Bot(settings.bot_token.get_secret_value())
+           try:
+            async with sessions() as session:
+             groups=list((await session.scalars(select(ManagedGroup).where(ManagedGroup.approved.is_(True),ManagedGroup.enabled.is_(True)))).all())
+             for user_id in (8805206375,5108847812):
+              record=await session.scalar(select(ScamRecord).join(User).where(User.telegram_id==user_id,ScamRecord.status=='ACTIVE').order_by(ScamRecord.id.desc()).limit(1))
+              if record:
+               summary=await GroupService(Service(session,settings)).ban_summary(record.id)
+               print('LiveBanSummary='+json.dumps({'record_id':record.id,**dataclasses.asdict(summary)}),flush=True)
+               actions=list((await session.scalars(select(BanAction).where(BanAction.scam_record_id==record.id))).all())
+               for action in actions:
+                print('LiveBanAction='+json.dumps({'user_id':user_id,'chat_id':action.chat_id,'status':action.status,'attempts':action.attempts,'result_type':action.result_type}),flush=True)
+              for group in groups:
+               try:
+                member=await bot.get_chat_member(group.chat_id,user_id)
+                print('LiveMembership='+json.dumps({'user_id':user_id,'chat_id':group.chat_id,'status':str(member.status)}),flush=True)
+               except Exception as error:
+                reason=getattr(error,'message','')
+                code=next((c for c in ('PARTICIPANT_ID_INVALID','USER_NOT_PARTICIPANT','CHAT_ADMIN_REQUIRED','USER_IS_AN_ADMIN','CHAT_NOT_FOUND') if c in reason.upper()),None)
+                print('LiveMembership='+json.dumps({'user_id':user_id,'chat_id':group.chat_id,'error_type':type(error).__name__,'error_code':code}),flush=True)
+           finally:
+            await bot.session.close();await engine.dispose()
+          try:asyncio.run(main())
+          except Exception as error:
+           print('LiveCheckError='+type(error).__name__,flush=True);raise SystemExit(1)
+          PYCHECK
+          sudo -n docker logs --since 45m safecheck-bot-1 2>&1 | python3 -c 'import json,sys; allowed={"event","user_id","chat_id","account_id","staff_id","scope_count","success","pending","result","exception_type","scam_record_id","error_type","reason"}; count=0
+          for line in sys.stdin:
+           try: item=json.loads(line)
+           except ValueError: continue
+           if item.get("event") in {"group_help_connected","group_help_command_submitted","group_help_command_failed","scam_observed_identity_linked","scam_observed_identity_link_failed","mtproto_scam_identity_linked","group_worker_failed"} or (item.get("event")=="group_ban_result" and item.get("user_id")==8805206375):
+            print("RelayRuntimeLog="+json.dumps({k:v for k,v in item.items() if k in allowed}));count+=1
+            if count>=80:break'
           REMOTE
       - name: Remove runner key
         if: always()
