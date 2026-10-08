@@ -131,20 +131,14 @@ def scam_registered(
         and succeeded == groups
         and failed == pending == 0
     )
-    if not known:
-        outcome = t("p.ban_inactive")
-    elif groups is None:
-        outcome = t("p.ban_unconfirmed")
-    elif groups == 0:
-        outcome = t("p.ban_no_groups")
-    else:
-        outcome = t(
-            "p.ban_status",
-            banned=max(0, succeeded - already_banned),
-            already_banned=already_banned,
-            groups=groups,
-            pending=pending,
-        )
+    counted = known and groups is not None and groups > 0
+    outcome = t(
+        "p.ban_status",
+        banned=max(0, succeeded - already_banned) if counted else 0,
+        already_banned=already_banned if counted else 0,
+        groups=groups if counted else 0,
+        pending=pending if counted else 0,
+    )
     name = label(user, max_units=120)
     if known and not user.username and (user.display_name or "") in {"", "Vartotojas"}:
         name = f"User {user.telegram_id}"

@@ -1,5 +1,8 @@
 CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
+        "sm.need_id": "Blokavimui reikia Telegram ID. Pridėk jį SCAM registre.",
+        "sm.refresh": "↻ ATNAUJINTI",
+        "sm.retry": "↻ PAKARTOTI BLOKAVIMĄ",
         "p.lookup_username_match": "△ <b>YRA ĮRAŠAS PAGAL USERNAME</b>",
         "p.lookup_username_match_description": "SCAM registre yra įrašas pagal šį @username, tačiau įrašo Telegram ID nežinomas. Ryšys su tikrinama paskyra nepatvirtintas — username galėjo pakeisti savininką. Šiam Telegram ID patvirtintas SCAM statusas nesuteiktas.",
         "sm.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n⛨ <b>SCAM REGISTRAS</b>",
@@ -13,6 +16,9 @@ CATALOGS: dict[str, dict[str, str]] = {
         "error.sm_conflict": "⚠️ Duomenys jau užpildyti arba prieštarauja kitam įrašui. Patikrink tapatybę SCAM registre.",
     },
     "en": {
+        "sm.need_id": "Blocking requires a Telegram ID. Add it in the SCAM registry.",
+        "sm.refresh": "↻ REFRESH",
+        "sm.retry": "↻ RETRY BLOCKING",
         "p.lookup_username_match": "△ <b>USERNAME RECORD FOUND</b>",
         "p.lookup_username_match_description": "The SCAM registry contains a record for this @username, but that record has no Telegram ID. Its connection to this account is unconfirmed; usernames can change owners. This Telegram ID has no confirmed SCAM status.",
         "sm.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n⛨ <b>SCAM REGISTRY</b>",
@@ -26,6 +32,9 @@ CATALOGS: dict[str, dict[str, str]] = {
         "error.sm_conflict": "⚠️ These details are already set or conflict with another record. Check the identity in the SCAM registry.",
     },
     "ru": {
+        "sm.need_id": "Для блокировки нужен Telegram ID. Добавьте его в реестре SCAM.",
+        "sm.refresh": "↻ ОБНОВИТЬ",
+        "sm.retry": "↻ ПОВТОРИТЬ БЛОКИРОВКУ",
         "p.lookup_username_match": "△ <b>НАЙДЕНА ЗАПИСЬ ПО USERNAME</b>",
         "p.lookup_username_match_description": "В реестре SCAM есть запись для этого @username, но Telegram ID в ней неизвестен. Связь с проверяемой учётной записью не подтверждена: username мог перейти другому владельцу. Для этого Telegram ID статус SCAM не подтверждён.",
         "sm.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n⛨ <b>РЕЕСТР SCAM</b>",

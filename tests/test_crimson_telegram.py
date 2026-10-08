@@ -405,12 +405,12 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
     ]
     if lang == "lt":
         assert [[button.text for button in row] for row in markup.inline_keyboard] == [
-            ["◈ TIKRINTI"],
-            ["＋ ĮVERTINTI", "△ PRANEŠTI"],
-            ["♛ TOP 10", "⛨ SCAM REGISTRAS"],
+            ["🔍 TIKRINTI"],
+            ["＋ ĮVERTINTI", "🚨 PRANEŠTI"],
+            ["🏆 TOP 10", "⛨ SCAM REGISTRAS"],
             ["◇ PROFILIS", "ⓘ INFORMACIJA"],
             ["↻ GRUPĖS ATKŪRIMAS"],
-            ["◎ KALBA"],
+            ["🌐 KALBA"],
             ["× UŽDARYTI"],
         ]
     for callback in [value for row in rows[:-1] for value in row]:

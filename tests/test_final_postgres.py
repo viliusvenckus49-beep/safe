@@ -19,6 +19,23 @@ postgres_contract = postgres_fixture
 pytestmark = pytest.mark.asyncio
 
 
+async def test_postgres_group_removal_bigint_and_list_filters(postgres_contract):
+    factory, settings = postgres_contract
+    settings = settings.model_copy(update={"group_owner_id": 900})
+    chat_id = -1000000000001
+    async with factory() as session:
+        groups = GroupService(settings, session)
+        await groups.register_group(900, chat_id, "Group", True)
+        await groups.mark_private_contact(21)
+        await groups.observe_member(chat_id, 21, "member_name", "Member")
+        assert len(await groups.groups(900)) == 1
+        assert len(await groups.groups_for_subscription(21)) == 1
+        await groups.remove_group(900, chat_id)
+        assert await groups.is_removed_group(chat_id)
+        assert await groups.groups(900) == []
+        assert await groups.groups_for_subscription(21) == []
+
+
 async def test_postgres_bigint_group_presence_retries_and_alerts_once(postgres_contract):
     factory, settings = postgres_contract
     settings = settings.model_copy(update={"group_owner_id": 900})

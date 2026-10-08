@@ -32,6 +32,9 @@ from app.bot.scam_admin import (
     offer as scam_offer,
 )
 from app.bot.scam_admin import (
+    refresh_controls as scam_refresh_controls,
+)
+from app.bot.scam_admin import (
     register_scam_handlers,
 )
 from app.bot.scam_notices import registered_scam_text
@@ -330,6 +333,8 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         operation = (message.text or "").split()[0].split("@")[0][1:]
         await clear_flow(state)
         target, reason = await target_from_message(message, service)
+        if target and operation == "del_sc" and not reason.strip():
+            reason = "Administrator removal via /del_sc"
         if target and (operation == "add_sc" or 10 <= len(reason.strip()) <= 1500):
             user = await service.resolve(target)
             identity = f"u:{user.id}"
@@ -353,6 +358,8 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 receipt,
                 reply_markup=scam_controls(record, persistent=True)
                 if operation == "add_sc" and message.chat.type == "private"
+                else scam_refresh_controls(record)
+                if operation == "add_sc"
                 else kb.back("admin", "receipt")
                 if message.chat.type == "private"
                 else None,
@@ -648,6 +655,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             receipt = p.moderation_action(
                 details["target"], callback_data.reference, callback_data.action == "approve"
             )
+            receipt_markup = kb.back("pending", "receipt")
             if callback_data.action == "approve":
                 active = await service.repo.active_scam(details["target"].id)
                 if active is not None:
@@ -656,11 +664,14 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                         receipt = await registered_scam_text(
                             callback.bot, service, session_factory, record
                         )
+                        receipt_markup.inline_keyboard.extend(
+                            scam_refresh_controls(record).inline_keyboard
+                        )
             await flow_screen(
                 callback.message,
                 state,
                 receipt,
-                reply_markup=kb.back("pending", "receipt"),
+                reply_markup=receipt_markup,
                 persistent=True,
             )
         else:
@@ -836,7 +847,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             message,
             state,
             receipt,
-            reply_markup=kb.back("admin", "receipt"),
+            reply_markup=scam_controls(record, persistent=True)
+            if data.get("operation") == "add_sc"
+            else kb.back("admin", "receipt"),
             persistent=True,
         )
 

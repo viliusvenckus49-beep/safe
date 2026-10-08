@@ -11,7 +11,7 @@ def test_action_style_uses_telegram_identity_and_lithuanian():
     added = p.scam_action(user, True)
     assert "𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in added
     assert "@typicalsterling" in added and "8803241151" in added
-    assert t("p.ban_unconfirmed") in added
+    assert "Banned  0/0  •  Already banned  0  •  Queued  0" in added
     assert "𝗕𝗟𝗢𝗖𝗞𝗘𝗗" not in added
     assert "pašalintas" in p.scam_action(user, False)
     assert "skirtas +REP" in p.reputation_action(user, 1)
@@ -123,17 +123,17 @@ def test_trusted_receipt_preserves_identity_and_localizes_body(lang):
 
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
 @pytest.mark.parametrize(
-    "groups,succeeded,failed,pending,key,blocked",
+    "groups,succeeded,failed,pending,blocked",
     [
-        (5, 5, 0, 0, "p.ban_complete", True),
-        (5, 3, 2, 2, "p.ban_partial", False),
-        (5, 0, 5, 5, "p.ban_pending", False),
-        (5, 0, 0, 5, "p.ban_pending", False),
-        (0, 0, 0, 0, "p.ban_no_groups", False),
+        (5, 5, 0, 0, True),
+        (5, 3, 2, 2, False),
+        (5, 0, 5, 5, False),
+        (5, 0, 0, 5, False),
+        (0, 0, 0, 0, False),
     ],
 )
 def test_scam_receipt_reports_only_actual_ban_results(
-    lang, groups, succeeded, failed, pending, key, blocked
+    lang, groups, succeeded, failed, pending, blocked
 ):
     user = SimpleNamespace(username="person_name", telegram_id=7681768804, display_name="")
     with use_language(lang):
@@ -145,7 +145,7 @@ def test_scam_receipt_reports_only_actual_ban_results(
         assert ("𝗥𝗘𝗚𝗜𝗦𝗧𝗘𝗥𝗘𝗗" in result) is not blocked
         assert (
             t(
-                "p.ban_status" if groups else key,
+                "p.ban_status",
                 groups=groups,
                 succeeded=succeeded,
                 banned=succeeded,
@@ -162,7 +162,10 @@ def test_scam_receipt_distinguishes_unknown_id_from_rejected_bans(lang):
     user = SimpleNamespace(username="not_yet_identified", telegram_id=None, display_name="")
     with use_language(lang):
         unknown = p.scam_registered(user, groups=5, succeeded=0, failed=5, pending=5)
-        assert "𝗨𝗡𝗞𝗡𝗢𝗪𝗡" in unknown and t("p.ban_inactive") in unknown
+        assert "𝗨𝗡𝗞𝗡𝗢𝗪𝗡" in unknown
+        assert "🚷 𝗕𝗟𝗢𝗖𝗞 𝗦𝗧𝗔𝗧𝗨𝗦" in unknown
+        assert "Banned  0/0  •  Already banned  0  •  Queued  0" in unknown
+        assert t("p.ban_inactive") not in unknown
         assert "𝗕𝗟𝗢𝗖𝗞𝗘𝗗" not in unknown
         user.telegram_id = 123456789
         rejected = p.scam_registered(user, groups=5, succeeded=0, failed=5, pending=5)

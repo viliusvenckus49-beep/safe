@@ -1,11 +1,14 @@
 """Private group controls, explicit recovery consent, and trusted membership updates."""
 
+import asyncio
 import secrets
+from html import escape
 from typing import Any
 
 import structlog
 from aiogram import F, Router
 from aiogram.enums import ChatMemberStatus, ChatType
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, ChatMemberUpdated, Message
@@ -15,9 +18,10 @@ from app.bot import group_presentation as p
 from app.bot.group_authorization import verify_group
 from app.bot.group_runtime import process_scam_bans
 from app.bot.screens import clear_flow, flow_screen, render
-from app.bot.states import RecoveryFlow
+from app.bot.states import GroupRemovalFlow, RecoveryFlow
 from app.config import Settings
 from app.group_services import GroupService
+from app.i18n import t
 from app.services import DomainError
 
 
@@ -68,6 +72,8 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
             return
         async with sessions() as session:
             service = GroupService(settings, session)
+            if await service.is_removed_group(event.chat.id):
+                return
             await service.observe_member(event.chat.id, user.id, user.username, user.full_name)
             await service.check_member(event.chat.id, user.id, fresh_join=True)
             known = await service.core.repo.user_by_telegram(user.id)
@@ -195,6 +201,45 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
                         chosen.title, chosen.enabled, chosen.chat_type, approved=chosen.approved
                     ),
                     kb.group(chosen.chat_id, approved=chosen.approved),
+                )
+            elif action == "remove":
+                await clear_flow(state)
+                nonce = secrets.token_hex(8)
+                await state.set_state(GroupRemovalFlow.confirm)
+                await state.set_data({"group_chat_id": chosen.chat_id, "nonce": nonce})
+                await _render(
+                    query,
+                    t("group.REMOVE_CONFIRM", title=escape(chosen.title)),
+                    kb.remove_confirmation(chosen.chat_id, nonce),
+                )
+            elif action == "remove_confirm":
+                draft = await state.get_data()
+                if (
+                    await state.get_state() != GroupRemovalFlow.confirm.state
+                    or draft.get("group_chat_id") != chosen.chat_id
+                    or not callback_data.nonce
+                    or draft.get("nonce") != callback_data.nonce
+                ):
+                    raise DomainError("stale_callback")
+                await service.remove_group(actor, chosen.chat_id)
+                await clear_flow(state)
+                left = False
+                try:
+                    assert query.bot is not None
+                    left = await asyncio.wait_for(query.bot.leave_chat(chosen.chat_id), 10) is True
+                except (TelegramAPIError, TimeoutError, OSError) as error:
+                    structlog.get_logger().warning(
+                        "group_leave_failed",
+                        operation="leave_chat",
+                        chat_id=chosen.chat_id,
+                        exception_type=type(error).__name__,
+                    )
+                groups = await service.groups(actor)
+                await _render(
+                    query,
+                    t("group.REMOVED", title=escape(chosen.title))
+                    + ("" if left else "\n\n" + p.text("LEAVE_FAILED")),
+                    kb.menu(groups, admin=True),
                 )
             elif action == "export":
                 records = await service.export_members(actor, chosen.chat_id)

@@ -97,9 +97,104 @@ class GroupService:
         self.settings, self.session = settings, session
         self.core = Service(settings, session)
 
+    async def retry_scam_bans(self, actor: int, record_id: int) -> None:
+        """Recheck active protection without bypassing leases or Telegram flood waits."""
+        try:
+            await self.core.require_admin(actor)
+            await self.core.repo.lock_identity_metadata()
+            await self.core.require_admin(actor)
+            record = await self.core.repo.scam_by_id(record_id)
+            if record is None or record.status != "ACTIVE":
+                raise DomainError("stale_callback")
+            if record.target.telegram_id is None:
+                raise DomainError("invalid_target")
+            recent = await self.session.scalar(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.action == "scam_manual_retry",
+                    AuditEvent.target_id == record.target_id,
+                    AuditEvent.created_at >= now() - timedelta(seconds=60),
+                )
+                .limit(1)
+            )
+            if recent is not None:
+                raise DomainError("cooldown")
+            await enqueue_scam_bans(self.session, record)
+            active_groups = select(ManagedGroup.chat_id).where(
+                ManagedGroup.approved.is_(True), ManagedGroup.enabled.is_(True)
+            )
+            await self.session.execute(
+                update(BanAction)
+                .where(
+                    BanAction.scam_record_id == record.id,
+                    BanAction.chat_id.in_(active_groups),
+                    BanAction.status.in_(["SUCCEEDED", "FAILED"]),
+                    (BanAction.result_type != "TelegramRetryAfter")
+                    | BanAction.result_type.is_(None)
+                    | (BanAction.next_attempt_at <= now()),
+                )
+                .values(status="PENDING", attempts=0, next_attempt_at=now(), completed_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            self.core._audit(actor, "scam_manual_retry", record.target_id, record_id=record.id)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
+
     def require_owner(self, actor: int) -> None:
         if self.settings.group_owner is None or actor != self.settings.group_owner:
             raise DomainError("forbidden")
+
+    @staticmethod
+    def removed_group(chat_id):
+        return (
+            select(AuditEvent.id)
+            .where(
+                AuditEvent.action == "group_removed",
+                cast(AuditEvent.details["chat_id"].as_string(), BigInteger) == chat_id,
+            )
+            .exists()
+        )
+
+    async def is_removed_group(self, chat_id: int) -> bool:
+        return bool(await self.session.scalar(select(self.removed_group(chat_id))))
+
+    async def remove_group(self, actor: int, chat_id: int) -> None:
+        """Withdraw all group activity while retaining historical rows and audit records."""
+        self.require_owner(actor)
+        await self.core.repo.lock_identity_metadata()
+        group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
+        if group is None or await self.is_removed_group(chat_id):
+            await self.session.rollback()
+            raise DomainError("stale_callback")
+        group.approved = group.enabled = group.can_restrict_members = False
+        await self.session.execute(
+            update(RecoverySubscription)
+            .where(RecoverySubscription.chat_id == chat_id)
+            .values(consent=False)
+        )
+        await self.session.execute(
+            update(BanAction)
+            .where(
+                BanAction.chat_id == chat_id,
+                BanAction.status.in_(["PENDING", "FAILED", "PROCESSING"]),
+            )
+            .values(status="OBSOLETE", completed_at=now(), claimed_at=None)
+            .execution_options(synchronize_session=False)
+        )
+        campaigns = select(RecoveryCampaign.id).where(RecoveryCampaign.chat_id == chat_id)
+        await self.session.execute(
+            update(RecoveryDelivery)
+            .where(
+                RecoveryDelivery.campaign_id.in_(campaigns),
+                RecoveryDelivery.status.in_(["PENDING", "FAILED", "PROCESSING"]),
+            )
+            .values(status="OBSOLETE", completed_at=now(), claimed_at=None)
+            .execution_options(synchronize_session=False)
+        )
+        self.core._audit(actor, "group_removed", None, chat_id=chat_id)
+        await self.session.commit()
 
     async def stage_group(
         self, actor: int, chat_id: int, title: str, chat_type: str = "supergroup"
@@ -109,6 +204,11 @@ class GroupService:
             raise DomainError("invalid_input")
         await self.core.repo.lock_identity_metadata()
         group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
+        if await self.is_removed_group(chat_id):
+            await self.session.commit()
+            if group is None:
+                raise DomainError("not_found")
+            return group
         if group is None:
             group = ManagedGroup(
                 chat_id=chat_id,
@@ -135,6 +235,9 @@ class GroupService:
         if chat_id >= 0 or chat_type not in ("group", "supergroup"):
             raise DomainError("invalid_input")
         await self.core.repo.lock_identity_metadata()
+        if await self.is_removed_group(chat_id):
+            await self.session.rollback()
+            raise DomainError("stale_callback")
         group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
         if group is None:
             group = ManagedGroup(
@@ -189,6 +292,9 @@ class GroupService:
     async def note_group_permissions(self, chat_id: int, can_restrict_members: bool) -> None:
         """Rights loss is a retryable delivery problem, not owner withdrawal of protection."""
         await self.core.repo.lock_identity_metadata()
+        if await self.is_removed_group(chat_id):
+            await self.session.commit()
+            return
         group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
         if group is not None:
             group.can_restrict_members = can_restrict_members
@@ -395,7 +501,13 @@ class GroupService:
     async def groups(self, actor: int) -> list[ManagedGroup]:
         self.require_owner(actor)
         return list(
-            (await self.session.scalars(select(ManagedGroup).order_by(ManagedGroup.chat_id))).all()
+            (
+                await self.session.scalars(
+                    select(ManagedGroup)
+                    .where(~self.removed_group(ManagedGroup.chat_id))
+                    .order_by(ManagedGroup.chat_id)
+                )
+            ).all()
         )
 
     async def available_groups(self, actor: int) -> list[ManagedGroup]:
@@ -404,7 +516,7 @@ class GroupService:
     async def export_members(self, actor: int, chat_id: int) -> list[dict]:
         self.require_owner(actor)
         group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if group is None or not group.approved:
+        if group is None or not group.approved or await self.is_removed_group(chat_id):
             raise DomainError("not_found")
         excluded = (
             select(ScamRecord.id)
@@ -690,17 +802,29 @@ class GroupService:
         row = await self.session.get(model, action_id)
         if row is None or row.status != "PROCESSING":
             return
-        row.status = "SUCCEEDED" if success else "FAILED"
+        values: dict[str, object] = {
+            "status": "SUCCEEDED" if success else "FAILED",
+            "result_type": re.sub(r"[^A-Za-z0-9_]", "", result_type)[:64],
+            "completed_at": now(),
+            "next_attempt_at": now()
+            + timedelta(
+                seconds=max(1, retry_after)
+                if retry_after is not None
+                else min(3600, 2**row.attempts * 5)
+            ),
+        }
         if permanent and not success:
-            row.attempts = 8
-        row.result_type = re.sub(r"[^A-Za-z0-9_]", "", result_type)[:64]
-        row.completed_at = now()
-        row.next_attempt_at = now() + timedelta(
-            seconds=max(1, retry_after)
-            if retry_after is not None
-            else min(3600, 2**row.attempts * 5)
+            values["attempts"] = 8
+        # A group removal may have invalidated this claim during its Telegram call.
+        # Never replace that committed withdrawal with a stale worker result.
+        await self.session.execute(
+            update(model)
+            .where(model.id == action_id, model.status == "PROCESSING")
+            .values(**values)
+            .execution_options(synchronize_session=False)
         )
         await self.session.commit()
+        await self.session.refresh(row)
 
     async def groups_for_subscription(self, actor: int) -> list[ManagedGroup]:
         if await self.session.get(PrivateContact, actor) is None:
@@ -710,7 +834,11 @@ class GroupService:
                 await self.session.scalars(
                     select(ManagedGroup)
                     .join(ObservedMember, ObservedMember.chat_id == ManagedGroup.chat_id)
-                    .where(ObservedMember.telegram_id == actor, ManagedGroup.approved.is_(True))
+                    .where(
+                        ObservedMember.telegram_id == actor,
+                        ManagedGroup.approved.is_(True),
+                        ~self.removed_group(ManagedGroup.chat_id),
+                    )
                     .order_by(ManagedGroup.chat_id)
                 )
             ).all()

@@ -122,3 +122,19 @@ def test_information_explains_lookup_and_private_report(lang):
     with use_language(lang):
         text = CATALOGS[lang]["p.info"]
         assert "/ask @username" in text and "/ask 123456789" in text and "/report" in text
+
+
+def test_retry_control_uses_numeric_record_and_requires_known_id():
+    from types import SimpleNamespace
+
+    from app.bot.callbacks import ScamAdmin
+    from app.bot.scam_admin import controls
+
+    record = SimpleNamespace(
+        id=44, target=SimpleNamespace(telegram_id=5108847812, username="brodvejus")
+    )
+    callbacks = [button.callback_data for row in controls(record).inline_keyboard for button in row]
+    assert ScamAdmin(action="retry", value="44").pack() in callbacks
+    record.target.telegram_id = None
+    callbacks = [button.callback_data for row in controls(record).inline_keyboard for button in row]
+    assert ScamAdmin(action="retry", value="44").pack() not in callbacks

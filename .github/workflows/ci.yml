@@ -35,6 +35,12 @@ jobs:
       - run: |
           pip install -r requirements.lock
           pip install --no-deps -e .
+      - name: Validate production Compose without reading runtime secrets
+        run: |
+          compose_test_secrets=$(mktemp -d)
+          trap 'rm -rf "$compose_test_secrets"' EXIT
+          touch "$compose_test_secrets"/{runtime.env,postgres_password,redis_acl,redis_password,redis_maintenance_password}
+          SAFECHECK_ENV_FILE=deploy/runtime.env.example SAFECHECK_SECRETS_DIR="$compose_test_secrets" docker compose --env-file deploy/compose.env.example -f docker-compose.production.yml config --no-env-resolution --quiet
       - run: pytest -q
       - run: ruff check .
       - run: ruff format --check .
