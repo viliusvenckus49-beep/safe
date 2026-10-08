@@ -30,9 +30,9 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
             ["🔍 TIKRINTI"],
             ["＋ ĮVERTINTI", "🚨 PRANEŠTI"],
             ["🏆 TOP 10", "🚷SCAM REGISTRAS"],
-            ["◇ PROFILIS", "ⓘ INFORMACIJA"],
-            ["↻ GRUPĖS ATKŪRIMAS"],
+            ["👤 PROFILIS", "ⓘ INFORMACIJA"],
             ["🌐 KALBA"],
+            ["↻ GRUPĖS ATKŪRIMAS"],
             ["× UŽDARYTI"],
         ]
         assert [[button.callback_data for button in row] for row in rows] == [
@@ -40,8 +40,8 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
             [keyboards.action("rep"), keyboards.action("report")],
             [keyboards.action("top"), keyboards.action("scams", "0")],
             [keyboards.action("profile"), keyboards.action("info")],
-            [GroupAction(action="subscriptions").pack()],
             [keyboards.action("language")],
+            [GroupAction(action="subscriptions").pack()],
             [keyboards.action("close")],
         ]
 
