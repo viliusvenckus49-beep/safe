@@ -115,6 +115,47 @@ async def test_member_lookup_failure_still_attempts_preemptive_ban(database, set
     assert bot.calls == [(-1000, 22)]
 
 
+@pytest.mark.parametrize("reason", ["PARTICIPANT_ID_INVALID", "USER_NOT_PARTICIPANT"])
+async def test_identity_refusal_retries_after_another_group_resolves_user(
+    database, settings, reason
+):
+    record_id = await prepare(database, settings, groups=3)
+    async with database() as session:
+        first = await session.scalar(select(BanAction).order_by(BanAction.id).limit(1))
+        first_chat = first.chat_id
+
+    class ResolvingBot(BanBot):
+        resolved = False
+
+        async def ban_chat_member(self, *, chat_id, user_id):
+            self.calls.append((chat_id, user_id))
+            if chat_id == first_chat and not self.resolved:
+                raise TelegramBadRequest(
+                    method=BanChatMember(chat_id=chat_id, user_id=user_id),
+                    message=reason,
+                )
+            self.resolved = True
+            return True
+
+    bot = ResolvingBot()
+    summary = await process_scam_bans(bot, settings, database, record_id)
+    assert (summary.succeeded, summary.pending) == (2, 1)
+    async with database() as session:
+        failed = await session.scalar(select(BanAction).where(BanAction.chat_id == first_chat))
+        assert failed.status == "FAILED" and failed.attempts == 1
+        assert failed.next_attempt_at.replace(tzinfo=now().tzinfo) > now()
+        failed.next_attempt_at = now() - timedelta(seconds=1)
+        await session.commit()
+    # No member message or join event is needed to retry the preemptive ban.
+    assert await process_group_jobs(bot, settings, database) == 1
+    async with database() as session:
+        groups = GroupService(settings, session)
+        summary = await groups.ban_summary(record_id)
+        retried = await session.scalar(select(BanAction).where(BanAction.chat_id == first_chat))
+        assert summary.succeeded == summary.checked == 3 and summary.pending == 0
+        assert retried.status == "SUCCEEDED" and retried.attempts == 2
+
+
 async def test_unknown_id_never_issues_ban_and_admin_link_starts_all_groups(database, settings):
     record_id = await prepare(database, settings, target="@unknown_user")
     bot = BanBot()

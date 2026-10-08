@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: ['scam-ban-diagnosis-2.14.0']
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -83,6 +86,71 @@ jobs:
           printf 'DataAfter=%s\n' "$after_counts"
           python3 -c 'import json,sys; before,after=map(json.loads,sys.argv[1:]); assert all(after[key] >= value for key,value in before.items()), "Preserved data count decreased"; print("Preserved data counts verified.")' "$before_counts" "$after_counts"
           sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-bot-1 python /run/configs/secret_entrypoint.py python - <<'PYREPAIR'
+          import asyncio, json
+          from dataclasses import asdict
+          from aiogram import Bot
+          from sqlalchemy import select, update
+          from app.config import Settings
+          from app.db import create_database
+          from app.models import BanAction, ManagedGroup, now
+          from app.group_services import GroupService
+          from app.bot.group_runtime import process_scam_bans, _api_reason
+          from app.bot.session import telegram_session
+          
+          TARGET = 5108847812
+          FAILED_CHATS = [-1004467894566,-1004421084692,-1004413023527,-1004395482317,-1003987480921]
+          async def main():
+              settings = Settings(_env_file=None)
+              engine, sessions = create_database(settings.database_url)
+              bot = Bot(settings.bot_token.get_secret_value(), session=telegram_session(settings))
+              try:
+                  async with sessions() as session:
+                      service = GroupService(settings,session)
+                      await service.core.repo.lock_identity_metadata()
+                      user = await service.core.repo.user_by_telegram(TARGET)
+                      record = await service.core.repo.active_scam(user.id) if user is not None else None
+                      if record is None:
+                          await session.rollback()
+                          print("TargetRemediation=skipped_no_active_scam",flush=True)
+                          return
+                      record_id=record.id
+                      active_chats=select(ManagedGroup.chat_id).where(ManagedGroup.approved.is_(True),ManagedGroup.enabled.is_(True))
+                      result=await session.execute(update(BanAction).where(
+                          BanAction.telegram_id==TARGET,
+                          BanAction.scam_record_id==record_id,
+                          BanAction.chat_id.in_(FAILED_CHATS),
+                          BanAction.chat_id.in_(active_chats),
+                          BanAction.status=="FAILED",
+                          BanAction.result_type=="TelegramBadRequest"
+                      ).values(status="PENDING",attempts=0,next_attempt_at=now(),completed_at=None,claimed_at=None))
+                      await session.commit()
+                      print("TargetPendingRequeued="+str(result.rowcount),flush=True)
+                  summary=await process_scam_bans(bot,settings,sessions,record_id)
+                  print("TargetBanSummary="+json.dumps(asdict(summary)),flush=True)
+                  async with sessions() as session:
+                      chats=list((await session.scalars(select(ManagedGroup.chat_id).where(ManagedGroup.approved.is_(True),ManagedGroup.enabled.is_(True)))).all())
+                  verified=0
+                  for chat_id in chats:
+                      result={"chat_id":chat_id,"user_id":TARGET}
+                      try:
+                          member=await asyncio.wait_for(bot.get_chat_member(chat_id,TARGET),8)
+                          banned=str(member.status)=="kicked"
+                          result.update(status=str(member.status),banned=banned)
+                          verified+=banned
+                      except Exception as error:
+                          result.update(error=type(error).__name__,reason=_api_reason(error) if hasattr(error,"message") else None)
+                      print("TargetVerifiedBan="+json.dumps(result),flush=True)
+                  print("TargetVerifiedBanCount="+str(verified)+"/"+str(len(chats)),flush=True)
+              finally:
+                  await bot.session.close()
+                  await engine.dispose()
+          try:
+              asyncio.run(main())
+          except Exception as error:
+              print("TargetRemediationError="+type(error).__name__,flush=True)
+              raise SystemExit(1) from None
+          PYREPAIR
           REMOTE
       - name: Remove runner key
         if: always()

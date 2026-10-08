@@ -83,7 +83,12 @@ async def _execute_bans(
             await service.note_group_permissions(job.chat_id, False)
         except TelegramBadRequest as error:
             result, reason = "TelegramBadRequest", _api_reason(error)
-            permanent = True
+            # Telegram may learn this numeric peer through another protected group.
+            # Keep identity-resolution refusals eligible for bounded outbox retries.
+            permanent = not any(
+                code in error.message.upper()
+                for code in ("PARTICIPANT_ID_INVALID", "USER_NOT_PARTICIPANT")
+            )
         except TelegramAPIError as error:
             result, reason = type(error).__name__, _api_reason(error)
         except (TimeoutError, OSError) as error:

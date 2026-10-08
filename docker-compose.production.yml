@@ -1,7 +1,7 @@
 name: safecheck
 
 x-app: &app
-  image: ${SAFECHECK_IMAGE:-safecheck:2.14.2}
+    image: ${SAFECHECK_IMAGE:-safecheck:2.14.3}
   env_file: ${SAFECHECK_ENV_FILE:?Set SAFECHECK_ENV_FILE to the nonsecret runtime env file}
   environment:
     ENVIRONMENT: production

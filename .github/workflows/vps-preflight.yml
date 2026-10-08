@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: ['scam-ban-diagnosis-2.14.0']
+    branches: [safecheck-2.13.1]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -42,67 +42,7 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          sudo -n docker exec -i safecheck-bot-1 python /run/configs/secret_entrypoint.py python - <<'PYDIAG'
-          import asyncio, json
-          from aiogram import Bot
-          from sqlalchemy import text
-          from app.config import Settings
-          from app.db import create_database
-          from app.bot.session import telegram_session
-          from app.bot.group_runtime import _api_reason
-          
-          TARGET = 5108847812
-          async def main():
-              settings = Settings(_env_file=None)
-              engine, _ = create_database(settings.database_url)
-              bot = Bot(settings.bot_token.get_secret_value(), session=telegram_session(settings))
-              try:
-                  async with engine.connect() as conn:
-                      await conn.execute(text("SET TRANSACTION READ ONLY"))
-                      queries = {
-                          "Groups": "SELECT chat_id,title,approved,enabled,can_restrict_members FROM managed_groups ORDER BY chat_id",
-                          "Target": "SELECT u.id,u.telegram_id,u.username,s.id AS record_id,s.status FROM users u LEFT JOIN scam_records s ON s.target_id=u.id WHERE u.telegram_id=:target ORDER BY s.id",
-                          "Jobs": "SELECT a.id,a.chat_id,a.scam_record_id,a.status,a.attempts,a.result_type,a.next_attempt_at,a.completed_at,s.status AS scam_status FROM ban_actions a JOIN scam_records s ON s.id=a.scam_record_id WHERE a.telegram_id=:target ORDER BY a.id DESC LIMIT 30",
-                          "Presence": "SELECT action,details->>'chat_id' AS chat_id,details->>'record_id' AS record_id,created_at FROM audit_events WHERE actor_id=:target AND action IN ('scam_member_present','scam_presence_retry') ORDER BY id DESC LIMIT 10"
-                      }
-                      groups = []
-                      for label, query in queries.items():
-                          rows = [dict(x) for x in (await conn.execute(text(query), {"target":TARGET})).mappings()]
-                          print(label+"="+json.dumps(rows,default=str,ensure_ascii=False),flush=True)
-                          if label=="Groups": groups=rows
-                  me = await asyncio.wait_for(bot.get_me(),10)
-                  print("TelegramBot="+json.dumps({"id":me.id,"username":me.username}),flush=True)
-                  for group in groups:
-                      if not group["approved"] or not group["enabled"]: continue
-                      for uid, role in [(me.id,"bot"),(TARGET,"target")]:
-                          result={"chat_id":group["chat_id"],"role":role,"user_id":uid}
-                          try:
-                              member=await asyncio.wait_for(bot.get_chat_member(group["chat_id"],uid),8)
-                              result.update(status=str(member.status),can_restrict_members=getattr(member,"can_restrict_members",None))
-                          except Exception as error:
-                              result.update(error=type(error).__name__,reason=_api_reason(error) if hasattr(error,"message") else None)
-                          print("TelegramMembership="+json.dumps(result,ensure_ascii=False),flush=True)
-              finally:
-                  await bot.session.close()
-                  await engine.dispose()
-          try:
-              asyncio.run(main())
-          except Exception as error:
-              print("DiagnosticError="+type(error).__name__,flush=True)
-              raise SystemExit(1) from None
-          PYDIAG
-          sudo -n docker logs --since 8h --tail 3000 safecheck-bot-1 2>&1 | python3 -c 'import sys,json,re
-          keys=("event","operation","chat_id","user_id","scam_record_id","exception_type","result","success","pending","reason","timestamp")
-          events={"group_ban_result","group_ban_precheck_failed","scam_ban_processing_deferred","update_failed","group_worker_failed","group_leave_failed"}
-          rows=[]
-          for line in sys.stdin:
-              try: row=json.loads(line)
-              except (ValueError,TypeError): continue
-              if row.get("event") not in events: continue
-              row={key:row[key] for key in keys if key in row}
-              if "reason" in row: row["reason"]=re.sub(r"https?://\\S+|\\b\\d{5,}:[A-Za-z0-9_-]{20,}\\b","[redacted]",str(row["reason"]))[:256]
-              rows.append(row)
-          for row in rows[-55:]: print("RuntimeEvent="+json.dumps(row,ensure_ascii=False))'
+          df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
         if: always()
