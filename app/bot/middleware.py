@@ -12,8 +12,11 @@ from structlog.contextvars import bind_contextvars, reset_contextvars
 
 from app import presentation as p
 from app.bot.group_runtime import process_scam_bans
+from app.bot.lookup_limits import AskLimiter
 from app.bot.navigation import error_navigation
 from app.bot.screens import flow_screen, panel_state, preserved_source, render, send_screen
+from app.bot.states import InputFlow
+from app.bot.validation import valid_target
 from app.group_services import GroupService
 from app.i18n import use_language
 from app.models import AuditEvent
@@ -24,8 +27,41 @@ from app.services import DomainError, Service
 class ServiceMiddleware(BaseMiddleware):
     def __init__(self, settings: Any, session_factory: Any) -> None:
         self.recent: dict[int, list[float]] = {}
+        self.ask_limits = AskLimiter()
         self.settings = settings
         self.session_factory = session_factory
+
+    async def ask_target(self, event: TelegramObject, data: dict[str, Any]) -> str | None:
+        if not isinstance(event, Message):
+            return None
+        parts = (event.text or "").split(maxsplit=2)
+        command = (parts[0] if parts else "").split("@", 1)
+        if command[0] == "/ask":
+            if len(command) == 2 and event.bot is not None:
+                bot = await event.bot.me()
+                if command[1].casefold() != (bot.username or "").casefold():
+                    return None
+            if len(parts) > 1 and valid_target(parts[1]):
+                return parts[1]
+            replied = event.reply_to_message
+            if (
+                replied
+                and replied.from_user
+                and not replied.from_user.is_bot
+                and not replied.sender_chat
+            ):
+                return str(replied.from_user.id)
+            return "<prompt>"
+        if (
+            data.get("raw_state") == InputFlow.lookup.state
+            and not (event.text or "").startswith("/")
+            and (parts[0].casefold() if parts else "") not in {"+rep", "-rep"}
+            and data.get("state") is not None
+            and (await data["state"].get_data()).get("lookup_persistent")
+        ):
+            target = (event.text or "").strip()
+            return target if valid_target(target) else "<invalid>"
+        return None
 
     async def __call__(
         self, handler: Callable[..., Awaitable[Any]], event: TelegramObject, data: dict[str, Any]
@@ -148,13 +184,22 @@ class ServiceMiddleware(BaseMiddleware):
                     if seen and current - seen[-1] < 60
                 }
             recent = [seen for seen in self.recent.get(actor.id, []) if current - seen < 10]
+            ask_target = await self.ask_target(event, data)
             if actionable and len(recent) >= 20:
+                if ask_target is not None:
+                    log.info("ask_rate_limited", reason="general_limit")
+                    return None
                 if isinstance(event, CallbackQuery):
                     await event.answer(p.text("cooldown"), show_alert=True)
                 elif isinstance(event, Message) and actionable:
                     await send_screen(event, p.text("cooldown"), None, False)
                 log.info("update_rate_limited")
                 return None
+            if ask_target is not None:
+                reason = self.ask_limits.admit(actor.id, ask_target, current)
+                if reason is not None:
+                    log.info("ask_rate_limited", reason=reason)
+                    return None
             if actionable:
                 self.recent[actor.id] = [*recent, current]
             async with self.session_factory() as session:

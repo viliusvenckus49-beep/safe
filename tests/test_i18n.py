@@ -344,11 +344,13 @@ async def test_localized_profile_pending_rep_report_and_admin_permissions(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
 async def test_localized_lookup_top_registry_and_group_admin_actions(
-    localized_bot, database, settings, lang
+    localized_bot, database, settings, lang, monkeypatch
 ):
     from app.i18n import t
     from app.models import ScamRecord
 
+    clock = [1000.0]
+    monkeypatch.setattr("app.bot.middleware.monotonic", lambda: clock[0])
     async with database() as session:
         service = Service(settings, session)
         await service.set_language(1, lang)
@@ -372,6 +374,7 @@ async def test_localized_lookup_top_registry_and_group_admin_actions(
         assert record.status == "REMOVED"
         assert record.removal_reason == "Original removal reason"
         assert record.reason == "Original scam reason"
+    clock[0] += 10
     await send(localized_bot, "/ask 42", chat=-100)
     assert t("p.no_scam", lang=lang) in last_screen(localized_bot).text
     assert t("p.warning", lang=lang) in last_screen(localized_bot).text

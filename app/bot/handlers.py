@@ -215,7 +215,10 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     @router.message(Command("help"))
     async def help_command(message: Message, state: FSMContext) -> None:
         await clear_flow(state)
-        await flow_screen(message, state, t("core.help"), reply_markup=kb.result())
+        if message.chat.type in {"group", "supergroup"}:
+            await flow_screen(message, state, p.info(), persistent=True)
+        else:
+            await flow_screen(message, state, t("core.help"), reply_markup=kb.result())
 
     @router.callback_query(Language.filter())
     async def select_language(
@@ -254,9 +257,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
 
     @router.message(Command("ask", "rep", "profile"))
     async def check(message: Message, state: FSMContext, service: Service) -> None:
+        command = (message.text or "").split()[0].split("@")[0]
+        persistent = command == "/ask"
         await clear_flow(state)
         target, _ = await target_from_message(message, service)
-        if (message.text or "").split()[0].split("@")[0] == "/profile" and not target:
+        if command == "/profile" and not target:
             target = str(actor_id(message))
         if target:
             data = await service.profile(target, refresh_identity=True)
@@ -264,10 +269,12 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 message,
                 state,
                 p.profile(data),
-                reply_markup=kb.result(callback_target(data["user"])),
+                reply_markup=kb.result(callback_target(data["user"]), persistent=persistent),
+                persistent=persistent,
             )
         else:
             await state.set_state(InputFlow.lookup)
+            await state.update_data(lookup_persistent=persistent)
             await flow_screen(message, state, p.text("target"), reply_markup=kb.navigation())
 
     @router.message(Command("top"))
@@ -463,11 +470,21 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await callback.answer(p.text("admin_private"), show_alert=True)
             return
         await callback.answer()
+        receipt = bool(
+            message.reply_markup
+            and any(
+                button.callback_data == kb.action("home", "receipt")
+                for row in message.reply_markup.inline_keyboard
+                for button in row
+            )
+        )
+        if receipt:
+            preserved_source.set(message.message_id)
         if name in {"home", "admin", "pending"} and value == "receipt":
             preserved_source.set(message.message_id)
             if name == "pending":
                 value = ""
-        else:
+        elif not receipt:
             await state.update_data(screen_message_id=message.message_id)
         if name == "language":
             await clear_flow(state)
@@ -503,9 +520,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await clear_flow(state)
             await state.set_state(InputFlow.lookup if name == "lookup" else InputFlow.reputation)
             await state.update_data(
-                screen_message_id=message.message_id,
                 lookup_return_name=parent,
                 lookup_return_value=parent_value,
+                lookup_persistent=receipt and name == "lookup",
             )
             await render(
                 message,
@@ -828,6 +845,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         draft = await state.get_data()
         parent = draft.get("lookup_return_name", "home")
         parent_value = draft.get("lookup_return_value", "")
+        persistent = bool(draft.get("lookup_persistent"))
         target = (message.text or "").strip()
         if not valid_target(target):
             await flow_screen(
@@ -843,7 +861,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 callback_target(data["user"]),
                 back_name=parent if parent.startswith("admin") else None,
                 back_value=parent_value,
+                persistent=persistent,
             ),
+            persistent=persistent,
         )
         await clear_flow(state)
 

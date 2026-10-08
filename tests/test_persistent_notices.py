@@ -64,9 +64,7 @@ async def test_command_notices_survive_following_screens(
             assert "@receiptuser" in item.text
         else:
             assert "𝗧𝗥𝗨𝗦𝗧𝗘𝗗 • 𝗩𝗘𝗥𝗜𝗙𝗜𝗘𝗗" in item.text
-    assert (previous in [call.message_id for call in journey.transport.deletions]) == (
-        kind != "denied"
-    )
+    assert previous not in [call.message_id for call in journey.transport.deletions]
     for command in ("/profile", "/top", "/ask 43"):
         await journey.send(command, actor=actor, chat=chat)
     assert receipt not in [call.message_id for call in journey.transport.deletions]

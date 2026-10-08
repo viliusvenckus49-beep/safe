@@ -145,7 +145,8 @@ async def test_manual_trusted_date_comes_from_database_and_top_has_no_manual_dat
     assert expected in journey.text()
     assert journey.transport.calls[-1].reply_markup is not None
     assert (
-        journey.transport.calls[-1].reply_markup.inline_keyboard[-1][0].callback_data == "sc|close|"
+        journey.transport.calls[-1].reply_markup.inline_keyboard[-1][0].callback_data
+        == "sc|home|receipt"
     )
 
 

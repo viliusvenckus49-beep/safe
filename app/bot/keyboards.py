@@ -63,7 +63,11 @@ def navigation(destination: str = "home", value: str = "") -> InlineKeyboardMark
 
 
 def result(
-    target: str = "", *, back_name: str | None = None, back_value: str = ""
+    target: str = "",
+    *,
+    back_name: str | None = None,
+    back_value: str = "",
+    persistent: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = [[(t("button.lookup_other"), action("lookup"))]]
     if target:
@@ -76,8 +80,9 @@ def result(
     if back_name:
         rows.append([(t("button.back"), action(back_name, back_value))])
     else:
-        rows.append([(t("button.back"), action("home"))])
-        rows.append([(t("button.cancel"), action("close"))])
+        rows.append([(t("button.back"), action("home", "receipt" if persistent else ""))])
+        if not persistent:
+            rows.append([(t("button.cancel"), action("close"))])
     return keyboard(rows)
 
 
