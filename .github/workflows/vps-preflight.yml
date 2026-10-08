@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: [safecheck-2.13.1]
+    branches: [scam-ban-diagnosis-2.14.0]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -42,7 +42,49 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          df -h /home/ubuntu
+          sudo -n docker exec -i safecheck-bot-1 python /run/configs/secret_entrypoint.py python - <<'PYDIAG'
+          import asyncio,json
+          from dataclasses import asdict
+          from aiogram import Bot
+          from aiogram.exceptions import TelegramAPIError
+          from sqlalchemy import select,text
+          from app.config import Settings
+          from app.db import create_database
+          from app.models import BanAction,ManagedGroup,ScamRecord,User
+          from app.group_services import GroupService
+          from app.bot.session import telegram_session
+          from app.bot.group_runtime import _api_reason
+          TARGET=8805206375
+          async def main():
+           s=Settings(_env_file=None)
+           engine,sessions=create_database(s.database_url)
+           bot=Bot(s.bot_token.get_secret_value(),session=telegram_session(s))
+           try:
+            async with sessions() as session:
+             await session.execute(text('SET TRANSACTION READ ONLY'))
+             records=list((await session.scalars(select(ScamRecord).join(User,ScamRecord.target_id==User.id).where(User.telegram_id==TARGET))).all())
+             print('TargetRecords='+json.dumps([{'record':r.id,'status':r.status,'target':r.target_id} for r in records]))
+             for r in records:
+              print('TargetSummary='+json.dumps(asdict(await GroupService(s,session).ban_summary(r.id))))
+             jobs=list((await session.scalars(select(BanAction).where(BanAction.telegram_id==TARGET).order_by(BanAction.id))).all())
+             print('TargetJobs='+json.dumps([{'id':j.id,'record':j.scam_record_id,'chat_id':j.chat_id,'status':j.status,'attempts':j.attempts,'result':j.result_type,'next':str(j.next_attempt_at),'claimed':str(j.claimed_at)} for j in jobs]))
+             groups=list((await session.scalars(select(ManagedGroup).where(ManagedGroup.approved.is_(True),ManagedGroup.enabled.is_(True)))).all())
+             me=await asyncio.wait_for(bot.get_me(),8)
+             for g in groups:
+              result={'chat_id':g.chat_id,'title':g.title,'saved_restrict':g.can_restrict_members,'target':TARGET}
+              for label,uid in [('bot',me.id),('target',TARGET)]:
+               try:
+                m=await asyncio.wait_for(bot.get_chat_member(g.chat_id,uid),8)
+                result[label]={'status':m.status,'can_restrict':getattr(m,'can_restrict_members',None)}
+               except TelegramAPIError as e:result[label]={'type':type(e).__name__,'reason':_api_reason(e)}
+               except Exception as e:result[label]={'type':type(e).__name__}
+              print('TargetGroup='+json.dumps(result,ensure_ascii=False))
+           finally:
+            await bot.session.close()
+            await engine.dispose()
+          try:asyncio.run(main())
+          except Exception as e:print('DiagnosticError='+type(e).__name__);raise SystemExit(1)
+          PYDIAG
           REMOTE
       - name: Remove runner key
         if: always()
