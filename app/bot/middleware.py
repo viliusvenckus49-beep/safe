@@ -55,6 +55,7 @@ class ServiceMiddleware(BaseMiddleware):
         if (
             data.get("raw_state") == InputFlow.lookup.state
             and not (event.text or "").startswith("/")
+            and (parts[0].casefold() if parts else "") not in {"+rep", "-rep"}
             and data.get("state") is not None
             and (await data["state"].get_data()).get("lookup_persistent")
         ):

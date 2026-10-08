@@ -215,7 +215,10 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     @router.message(Command("help"))
     async def help_command(message: Message, state: FSMContext) -> None:
         await clear_flow(state)
-        await flow_screen(message, state, t("core.help"), reply_markup=kb.result())
+        if message.chat.type in {"group", "supergroup"}:
+            await flow_screen(message, state, p.info(), persistent=True)
+        else:
+            await flow_screen(message, state, t("core.help"), reply_markup=kb.result())
 
     @router.callback_query(Language.filter())
     async def select_language(

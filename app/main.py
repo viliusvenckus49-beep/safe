@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 from app import __version__
 from app.bot import create_router
-from app.bot.commands import commands, user_commands
+from app.bot.commands import commands, group_commands, user_commands
 from app.bot.errors import error_response
 from app.bot.group_runtime import group_worker
 from app.bot.session import telegram_session
@@ -102,6 +102,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         await bot.set_my_commands(commands("lt"))
         for lang in sorted(LANGUAGES):
             await bot.set_my_commands(commands(lang), language_code=lang)
+        await group_commands(bot)
         for admin_id in settings.admins:
             async with sessions() as locale_session:
                 selected_language = await Repository(locale_session).language(admin_id)

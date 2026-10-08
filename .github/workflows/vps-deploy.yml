@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: [persistent-ask-soft-limits-20261008]
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -89,6 +92,60 @@ jobs:
           printf 'DataAfter=%s\n' "$after_counts"
           python3 -c 'import json,sys; before,after=map(json.loads,sys.argv[1:]); assert all(after[key] >= value for key,value in before.items()), "Preserved data count decreased"; print("Preserved data counts verified.")' "$before_counts" "$after_counts"
           sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-bot-1 python - <<'ASK_POLICY_CHECK'
+          import asyncio
+          from types import SimpleNamespace
+          from unittest.mock import AsyncMock
+          from app.bot import keyboards as kb
+          from app.bot.lookup_limits import AskLimiter
+          from app.bot.screens import flow_screen, panel_state, preserved_source, render
+          from app.i18n import use_language
+
+          async def verify():
+              limiter = AskLimiter()
+              for target in range(10):
+                  assert limiter.admit(1, str(target), 1000) is None
+              for second in range(6):
+                  assert limiter.admit(1, 'next', 1000 + second) == 'burst'
+              assert limiter.admit(1, 'next', 1006) is None
+              assert limiter.admit(2, 'next', 1006) is None
+              assert limiter.admit(2, 'NEXT', 1015) == 'duplicate'
+              assert limiter.admit(2, 'next', 1016) is None
+              for lang in ('lt', 'en', 'ru'):
+                  with use_language(lang):
+                      markup = kb.result('42', persistent=True)
+                      values = {b.callback_data for row in markup.inline_keyboard for b in row}
+                      assert values == {kb.action('lookup'), kb.action('vote+', '42'), kb.action('vote-', '42'), kb.action('home', 'receipt')}
+                      ordinary = kb.result('42')
+                      assert kb.action('close') in {b.callback_data for row in ordinary.inline_keyboard for b in row}
+                      bot = SimpleNamespace(delete_message=AsyncMock())
+                      message = SimpleNamespace(chat=SimpleNamespace(id=1, type='private'), message_id=45, bot=bot, answer=AsyncMock(return_value=SimpleNamespace(message_id=46)))
+                      state = SimpleNamespace(get_data=AsyncMock(return_value={'screen_message_id': 44}), update_data=AsyncMock())
+                      await flow_screen(message, state, 'result', reply_markup=markup, persistent=True)
+                      state.update_data.assert_awaited_with(screen_message_id=None)
+                      bot.delete_message.assert_awaited_once_with(1, 44)
+                      bot.delete_message.reset_mock()
+                      state.get_data.return_value = {'screen_message_id': 47}
+                      anchor = panel_state.set(state)
+                      source = preserved_source.set(45)
+                      try:
+                          await render(message, 'next panel', reply_markup=kb.back())
+                          bot.delete_message.assert_awaited_once_with(1, 47)
+                      finally:
+                          preserved_source.reset(source)
+                          panel_state.reset(anchor)
+                      from app.bot.commands import commands
+                      from app.i18n import t
+                      assert [c.command for c in commands(lang, group=True)] == ['start', 'ask', 'rep', 'report', 'help']
+                      assert commands(lang, group=True)[-1].description == t('command.help')
+                      assert 'ⓘ' in t('p.info') and '/ask @username' in t('p.info')
+                      print('LiveAskPolicyVerified=' + lang + ' Persistence=passed REPCallbacks=unchanged Back=passed OtherScreens=unchanged')
+              print('LiveAskLimitsVerified=Burst10 Refill6s Duplicate10s SilentRejections IndependentUsers ImpatientRetryRecovery')
+
+          asyncio.run(verify())
+          ASK_POLICY_CHECK
+          systemctl is-enabled safecheck-monitor.timer
+          systemctl is-active safecheck-monitor.timer
           REMOTE
       - name: Remove runner key
         if: always()

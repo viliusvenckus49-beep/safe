@@ -203,6 +203,21 @@ async def test_other_bot_mentions_do_not_spend_safecheck_budget(journey, clock):
     assert len(sent(journey)) == 10
 
 
+@pytest.mark.parametrize("command,value", [("+rep", 1), ("-REP", -1)])
+async def test_exhausted_lookup_prompt_does_not_throttle_rep_commands(
+    journey, database, clock, command, value
+):
+    for target in range(40, 49):
+        await journey.send(f"/ask {target}")
+    await journey.send("/ask")
+    assert await journey.state() == InputFlow.lookup.state
+    await journey.send(f"{command} 42 Reviewed useful trade feedback")
+    async with database() as session:
+        request = await session.scalar(select(ReputationRequest))
+        assert request is not None and request.value == value
+    assert await journey.state() is None
+
+
 @pytest.mark.parametrize("value", [1, -1])
 @pytest.mark.parametrize("chat", [None, -100])
 async def test_rep_callbacks_keep_result_and_original_vote_behavior(
