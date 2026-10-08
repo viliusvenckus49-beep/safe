@@ -13,6 +13,7 @@ from app import presentation as p
 from app.bot.callbacks import ScamAdmin
 from app.bot.keyboards import keyboard, pages
 from app.bot.scam_notices import registered_scam_text
+from app.bot.scam_unban import process_scam_unban
 from app.bot.screens import clear_flow, flow_screen, preserved_source
 from app.bot.states import ScamAdminFlow
 from app.errors import DomainError
@@ -31,6 +32,8 @@ def refresh_controls(record, *, allow_remove: bool = False):
     if allow_remove:
         rows.append([(t("diagnostic.button"), cb("details_receipt", str(record.id)))])
         rows.append([(t("sm.remove"), cb("remove_receipt", str(record.id)))])
+        if record.target.telegram_id is not None:
+            rows.append([(t("sm.unban"), cb("unban_receipt", str(record.id)))])
     return keyboard(rows)
 
 
@@ -47,6 +50,8 @@ def controls(record, page: int = 0, *, persistent: bool = False):
         )
     rows.append([(t("diagnostic.button"), cb("details" + suffix, str(record.id)))])
     rows.append([(t("sm.remove"), cb("remove" + suffix, str(record.id)))])
+    if record.target.telegram_id is not None:
+        rows.append([(t("sm.unban"), cb("unban" + suffix, str(record.id)))])
     rows.append([(t("button.back"), cb("page" + suffix, str(page)))])
     return keyboard(rows)
 
@@ -115,6 +120,7 @@ def register_scam_handlers(router: Router):
             "retry_receipt",
             "remove_receipt",
             "details_receipt",
+            "unban_receipt",
         }:
             preserved_source.set(message.message_id)
             name = name.removesuffix("_receipt")
@@ -159,8 +165,43 @@ def register_scam_handlers(router: Router):
                 return
             await listing(message, state, service, int(value))
             return
-        if name not in {"view", "id", "username", "retry", "remove", "details"}:
+        if name not in {"view", "id", "username", "retry", "remove", "details", "unban"}:
             await flow_screen(message, state, p.text("stale"))
+            return
+        if name == "unban":
+            assert callback.bot is not None
+            try:
+                record, summary = await process_scam_unban(callback.bot, service, int(value), actor)
+            except DomainError as error:
+                await callback.answer(
+                    p.text("cooldown") if error.code == "cooldown" else p.text("stale"),
+                    show_alert=True,
+                )
+                return
+            await clear_flow(state)
+            unban_buttons = [[(t("sm.unban_retry"), cb("unban_receipt", str(record.id)))]]
+            unban_buttons.append(
+                [(t("button.back"), cb("page_receipt", str(draft.get("scam_page", 0))))]
+            )
+            outcomes = summary["groups"]
+            text = t(
+                "sm.unban_result",
+                user=p.identity(record.target, max_units=120),
+                groups=len(outcomes),
+                unbanned=sum(row["result"] == "UNBANNED" for row in outcomes),
+                already=sum(row["result"] == "ALREADY_UNBANNED" for row in outcomes),
+                failed=sum(not row["success"] for row in outcomes),
+            )
+            if summary["staff"] != "disabled":
+                text += "\n\n" + t("sm.unban_staff_" + summary["staff"])
+            failed_groups = [row for row in outcomes if not row["success"]]
+            for row in failed_groups[:8]:
+                text += "\n\n⚠ " + escape(row["title"][:48]) + " · " + str(row["chat_id"])
+            if len(failed_groups) > 8:
+                text += "\n" + t("sm.unban_more", count=len(failed_groups) - 8)
+            await flow_screen(
+                message, state, text, reply_markup=keyboard(unban_buttons), persistent=True
+            )
             return
         if name == "retry":
             try:
@@ -213,11 +254,15 @@ def register_scam_handlers(router: Router):
                 "Administrator removal via SCAM registry",
                 record_id=record.id,
             )
+            removal_buttons = []
+            if removed and record.target.telegram_id is not None:
+                removal_buttons.append([(t("sm.unban"), cb("unban_receipt", str(record.id)))])
+            removal_buttons.append([(t("button.back"), cb("page", str(page)))])
             await flow_screen(
                 message,
                 state,
                 p.scam_action(record.target, False) if removed else p.text("stale"),
-                reply_markup=keyboard([[(t("button.back"), cb("page", str(page)))]]),
+                reply_markup=keyboard(removal_buttons),
                 persistent=True,
             )
         elif name == "view":
