@@ -28,20 +28,20 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
         rows = keyboards.home().inline_keyboard
         assert [[button.text for button in row] for row in rows] == [
             ["🔍 TIKRINTI"],
-            ["＋ ĮVERTINTI", "🚨 PRANEŠTI"],
+            ["👤 PROFILIS", "🚨 PRANEŠTI"],
             ["🏆 TOP 10", "🚷SCAM REGISTRAS"],
-            ["👤 PROFILIS", "ⓘ INFORMACIJA"],
-            ["🌐 KALBA"],
+            ["＋ ĮVERTINTI", "ⓘ INFORMACIJA"],
             ["↻ GRUPĖS ATKŪRIMAS"],
+            ["🌐 KALBA"],
             ["× UŽDARYTI"],
         ]
         assert [[button.callback_data for button in row] for row in rows] == [
             [keyboards.action("lookup")],
-            [keyboards.action("rep"), keyboards.action("report")],
+            [keyboards.action("profile"), keyboards.action("report")],
             [keyboards.action("top"), keyboards.action("scams", "0")],
-            [keyboards.action("profile"), keyboards.action("info")],
-            [keyboards.action("language")],
+            [keyboards.action("rep"), keyboards.action("info")],
             [GroupAction(action="subscriptions").pack()],
+            [keyboards.action("language")],
             [keyboards.action("close")],
         ]
 

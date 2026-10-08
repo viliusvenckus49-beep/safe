@@ -34,14 +34,14 @@ def action(name: str, value: str = "") -> str:
 def home(admin: bool = False, *, private: bool = True) -> InlineKeyboardMarkup:
     rows = [
         [(t("button.lookup"), action("lookup"))],
-        [(t("button.rep"), action("rep")), (t("button.report"), action("report"))],
+        [(t("button.profile"), action("profile")), (t("button.report"), action("report"))],
         [(t("button.top"), action("top"))]
         + ([(t("button.scams"), action("scams", "0"))] if private else []),
-        [(t("button.profile"), action("profile")), (t("button.info"), action("info"))],
+        [(t("button.rep"), action("rep")), (t("button.info"), action("info"))],
     ]
-    rows.append([(t("button.language"), action("language"))])
     if private:
         rows.append([(t("button.recovery"), GroupAction(action="subscriptions").pack())])
+    rows.append([(t("button.language"), action("language"))])
     rows.append([(t("button.close"), action("close"))])
     return keyboard(rows)
 
