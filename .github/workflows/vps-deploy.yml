@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: [requested-button-style-20261008]
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -89,6 +92,31 @@ jobs:
           printf 'DataAfter=%s\n' "$after_counts"
           python3 -c 'import json,sys; before,after=map(json.loads,sys.argv[1:]); assert all(after[key] >= value for key,value in before.items()), "Preserved data count decreased"; print("Preserved data counts verified.")' "$before_counts" "$after_counts"
           sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-bot-1 python - <<'BUTTON_CHECK'
+          from app.bot import keyboards
+          from app.bot.callbacks import AdminAccess
+          from app.i18n import t, use_language
+          expected = {'lt': [[{'text': '🔍 TIKRINTI', 'callback_data': 'sc|lookup|'}], [{'text': '＋ ĮVERTINTI', 'callback_data': 'sc|rep|'}, {'text': '🚨 PRANEŠTI', 'callback_data': 'sc|report|'}], [{'text': '🏆 TOP 10', 'callback_data': 'sc|top|'}, {'text': '🚷SCAM REGISTRAS', 'callback_data': 'sc|scams|0'}], [{'text': '👤 PROFILIS', 'callback_data': 'sc|profile|'}, {'text': 'ⓘ INFORMACIJA', 'callback_data': 'sc|info|'}], [{'text': '🌐 KALBA', 'callback_data': 'sc|language|'}], [{'text': '↻ GRUPĖS ATKŪRIMAS', 'callback_data': 'sg|subscriptions|0|'}], [{'text': '× UŽDARYTI', 'callback_data': 'sc|close|'}]], 'en': [[{'text': '🔍 CHECK', 'callback_data': 'sc|lookup|'}], [{'text': '＋ RATE', 'callback_data': 'sc|rep|'}, {'text': '🚨 REPORT', 'callback_data': 'sc|report|'}], [{'text': '🏆 TOP 10', 'callback_data': 'sc|top|'}, {'text': '🚷SCAM REGISTRY', 'callback_data': 'sc|scams|0'}], [{'text': '👤 PROFILE', 'callback_data': 'sc|profile|'}, {'text': 'ⓘ INFORMATION', 'callback_data': 'sc|info|'}], [{'text': '🌐 LANGUAGE', 'callback_data': 'sc|language|'}], [{'text': '↻ GROUP RECOVERY', 'callback_data': 'sg|subscriptions|0|'}], [{'text': '× CLOSE', 'callback_data': 'sc|close|'}]], 'ru': [[{'text': '🔍 ПРОВЕРИТЬ', 'callback_data': 'sc|lookup|'}], [{'text': '＋ ОЦЕНИТЬ', 'callback_data': 'sc|rep|'}, {'text': '🚨 СООБЩИТЬ', 'callback_data': 'sc|report|'}], [{'text': '🏆 TOP 10', 'callback_data': 'sc|top|'}, {'text': '🚷РЕЕСТР SCAM', 'callback_data': 'sc|scams|0'}], [{'text': '👤 ПРОФИЛЬ', 'callback_data': 'sc|profile|'}, {'text': 'ⓘ ИНФОРМАЦИЯ', 'callback_data': 'sc|info|'}], [{'text': '🌐 ЯЗЫК', 'callback_data': 'sc|language|'}], [{'text': '↻ ВОССТАНОВЛЕНИЕ ГРУППЫ', 'callback_data': 'sg|subscriptions|0|'}], [{'text': '× ЗАКРЫТЬ', 'callback_data': 'sc|close|'}]]}
+          for lang in ('lt', 'en', 'ru'):
+              with use_language(lang):
+                  actual = [[{'text': b.text, 'callback_data': b.callback_data} for b in row] for row in keyboards.home().inline_keyboard]
+                  assert actual == expected[lang], lang
+                  assert t('button.admin').startswith('👑 ')
+                  for menu in (keyboards.admin(), keyboards.admin(owner=True), keyboards.languages(), keyboards.leaderboard([])):
+                      home = [b for row in menu.inline_keyboard for b in row if b.callback_data == keyboards.action('home')]
+                      assert len(home) == 1 and home[0].text == t('button.home')
+                      assert home[0].text.startswith('◀ ') and '\ufe0f' not in home[0].text
+                  ordinary = [b.callback_data for row in keyboards.admin().inline_keyboard for b in row]
+                  owned = {b.callback_data: b.text for row in keyboards.admin(owner=True).inline_keyboard for b in row}
+                  assert AdminAccess(action='list').pack() not in ordinary
+                  assert owned[AdminAccess(action='list').pack()] == t('admin_access.button')
+                  assert t('admin_access.button').startswith('👑 ')
+                  public = [b.callback_data for row in keyboards.home(private=False).inline_keyboard for b in row]
+                  assert keyboards.action('scams', '0') not in public
+          print('LiveButtonsVerified=LT,EN,RU symbols/order/callbacks/private-boundaries')
+          BUTTON_CHECK
+          sudo -n systemctl is-enabled safecheck-monitor.timer
+          sudo -n systemctl is-active safecheck-monitor.timer
           REMOTE
       - name: Remove runner key
         if: always()

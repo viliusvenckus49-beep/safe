@@ -399,8 +399,8 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
         ["sc|rep|", "sc|report|"],
         ["sc|top|", "sc|scams|0"],
         ["sc|profile|", "sc|info|"],
-        [GroupAction(action="subscriptions").pack()],
         ["sc|language|"],
+        [GroupAction(action="subscriptions").pack()],
         ["sc|close|"],
     ]
     if lang == "lt":
@@ -408,9 +408,9 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
             ["🔍 TIKRINTI"],
             ["＋ ĮVERTINTI", "🚨 PRANEŠTI"],
             ["🏆 TOP 10", "🚷SCAM REGISTRAS"],
-            ["◇ PROFILIS", "ⓘ INFORMACIJA"],
-            ["↻ GRUPĖS ATKŪRIMAS"],
+            ["👤 PROFILIS", "ⓘ INFORMACIJA"],
             ["🌐 KALBA"],
+            ["↻ GRUPĖS ATKŪRIMAS"],
             ["× UŽDARYTI"],
         ]
     for callback in [value for row in rows[:-1] for value in row]:
