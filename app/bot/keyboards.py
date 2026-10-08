@@ -39,9 +39,9 @@ def home(admin: bool = False, *, private: bool = True) -> InlineKeyboardMarkup:
         + ([(t("button.scams"), action("scams", "0"))] if private else []),
         [(t("button.profile"), action("profile")), (t("button.info"), action("info"))],
     ]
+    rows.append([(t("button.language"), action("language"))])
     if private:
         rows.append([(t("button.recovery"), GroupAction(action="subscriptions").pack())])
-    rows.append([(t("button.language"), action("language"))])
     rows.append([(t("button.close"), action("close"))])
     return keyboard(rows)
 

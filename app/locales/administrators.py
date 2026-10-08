@@ -2,7 +2,7 @@
 
 CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
-        "admin_access.button": "◇ Administratoriai",
+        "admin_access.button": "👑 Administratoriai",
         "admin_access.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◇ <b>ADMINISTRATORIAI</b>",
         "admin_access.description": "Teises suteikia ir atšaukia tik savininkas. Pasirink administratorių, kurį nori pašalinti.",
         "admin_access.add": "＋ Pridėti administratorių",
@@ -36,7 +36,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "admin_help.permissions": "◇ <b>Teisės ir saugumas</b>\n\n/admin → Patikimi vartotojai: peržiūra, paieška ir patvirtinamas rankinio TRUSTED bei TOP dalyvavimo pašalinimas. Rolės suteiktas TRUSTED lieka, kol galioja teisės.\n\nAdministratorius: įvertinimai, pranešimai, SCAM registras, TRUSTED žymos, TOP valdymas, statistika ir auditas.\n\n/add_trusted ID arba @username — rankinė TRUSTED žyma. /del_trusted ID — pašalinti rankinę žymą. TOP 10 žyma suteikiama automatiškai; SCAM turi pirmenybę.\n\nTik savininkas: /admins, kitų administratorių skyrimas ir pašalinimas, /groups, grupių patvirtinimai, narių kopijos ir atkūrimo siuntimai.\n\nNiekam neduok boto tokeno. Nenaudok username kaip administratoriaus tapatybės. Visi jautrūs veiksmai tikrinami serveryje ir registruojami. Įrašo nebuvimas nėra patikimumo garantija.",
     },
     "en": {
-        "admin_access.button": "◇ Administrators",
+        "admin_access.button": "👑 Administrators",
         "admin_access.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◇ <b>ADMINISTRATORS</b>",
         "admin_access.description": "Only the owner can grant or revoke access. Select an administrator to remove.",
         "admin_access.add": "＋ Add administrator",
@@ -70,7 +70,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "admin_help.permissions": "◇ <b>Permissions and security</b>\n\n/admin → Trusted users: browse, search and confirm removal of manual TRUSTED and TOP participation. Role-based TRUSTED remains while access is active.\n\nAdministrators: ratings, reports, SCAM registry, TRUSTED designations, TOP management, statistics and audit history.\n\n/add_trusted ID or @username — manual TRUSTED. /del_trusted ID — remove manual designation. TOP 10 status is automatic; SCAM takes precedence.\n\nOwner only: /admins, administrator grants and revocations, /groups, group approvals, member backups and recovery broadcasts.\n\nNever share the bot token. Never use a username as an administrator identity. Sensitive actions are checked server-side and audited. Absence from the registry is not a guarantee of trustworthiness.",
     },
     "ru": {
-        "admin_access.button": "◇ Администраторы",
+        "admin_access.button": "👑 Администраторы",
         "admin_access.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◇ <b>АДМИНИСТРАТОРЫ</b>",
         "admin_access.description": "Только владелец может выдавать и отзывать права. Выберите администратора для удаления.",
         "admin_access.add": "＋ Добавить администратора",
