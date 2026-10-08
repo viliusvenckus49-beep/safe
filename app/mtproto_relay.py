@@ -572,3 +572,72 @@ class GroupHelpRelay:
         if not await service.ban_eligible(job.id):
             return False, "OBSOLETE"
         return await _attempt_ban(bot, job, timeout)
+
+    async def dispatch_unban(self, actor: int, record_id: int) -> bool:
+        """Submit one numeric /unban after removal; submission is not proof of unblocking."""
+        from aiogram.methods import UnbanChatMember
+        from telethon.tl.functions.messages import SendMessageRequest
+
+        async with self.commands:
+            async with self.sessions() as session:
+                core = Service(self.settings, session)
+                await core._admin_write_lock(actor)
+                record = await core.repo.scam_by_id(record_id)
+                if (
+                    record is None
+                    or record.status != "REMOVED"
+                    or record.target.telegram_id is None
+                    or await core.repo.active_scam(record.target_id) is not None
+                    or not await self.scope_active(session)
+                ):
+                    await session.rollback()
+                    return False
+                user_id = record.target.telegram_id
+                if self.flood_until > now():
+                    await session.rollback()
+                    raise TelegramRetryAfter(
+                        method=UnbanChatMember(
+                            chat_id=self.settings.group_help_staff_id, user_id=user_id
+                        ),
+                        message="MTProto flood wait",
+                        retry_after=max(1, int((self.flood_until - now()).total_seconds())),
+                    )
+                event = AuditEvent(
+                    actor_id=actor,
+                    action="group_help_unban_dispatch",
+                    target_id=record.target_id,
+                    details={"record_id": record_id, "user_id": user_id},
+                )
+                session.add(event)
+                await session.commit()
+                event_id = event.id
+            try:
+                random_id = int.from_bytes(
+                    hashlib.sha256(f"safecheck-staff-unban:{event_id}".encode()).digest()[:8],
+                    "big",
+                ) & ((1 << 63) - 1)
+                await self.client(
+                    SendMessageRequest(
+                        peer=await self.client.get_input_entity(self.staff),
+                        message=f"/unban {user_id}",
+                        random_id=random_id,
+                        no_webpage=True,
+                    )
+                )
+                structlog.get_logger().info(
+                    "group_help_command_submitted",
+                    operation="staff_unban",
+                    user_id=user_id,
+                    staff_id=self.settings.group_help_staff_id,
+                    scam_record_id=record_id,
+                )
+                return True
+            except Exception as error:
+                await self._note_flood(error)
+                structlog.get_logger().warning(
+                    "group_help_command_failed",
+                    operation="staff_unban",
+                    user_id=user_id,
+                    exception_type=type(error).__name__,
+                )
+                return False

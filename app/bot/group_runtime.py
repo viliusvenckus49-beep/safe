@@ -17,6 +17,7 @@ from aiogram.exceptions import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.group_presentation import recovery_notification
+from app.bot.moderation_lock import user_moderation_lock
 from app.bot.moderation_notices import notify_ban_failure
 from app.config import Settings
 from app.group_services import BanSummary, GroupService, enqueue_scam_bans
@@ -66,70 +67,71 @@ async def _execute_bans(
     log = structlog.get_logger()
     processed = 0
     for job in bans:
-        if not await service.ban_eligible(job.id):
-            continue
-        success, result = False, "TelegramAPIError"
-        retry_after, permanent = None, False
-        reason = None
-        relay = active_relay()
-        try:
-            success, result = await asyncio.wait_for(
-                (
-                    relay.attempt_ban(bot, service, job, timeout)
-                    if service.settings.group_help_enabled and relay is not None
-                    else _attempt_ban(bot, job, timeout)
-                ),
-                timeout=timeout,
-            )
-        except TelegramRetryAfter as error:
-            result, reason = "TelegramRetryAfter", _api_reason(error)
-            retry_after = error.retry_after
-        except TelegramForbiddenError as error:
-            result, reason = "TelegramForbiddenError", _api_reason(error)
-            permanent = True
-            await service.note_group_permissions(job.chat_id, False)
-        except TelegramBadRequest as error:
-            result, reason = "TelegramBadRequest", _api_reason(error)
-            # Telegram may learn this numeric peer through another protected group.
-            # Keep identity-resolution refusals eligible for bounded outbox retries.
-            permanent = not any(
-                code in error.message.upper()
-                for code in ("PARTICIPANT_ID_INVALID", "USER_NOT_PARTICIPANT")
-            )
-        except TelegramAPIError as error:
-            result, reason = type(error).__name__, _api_reason(error)
-        except (TimeoutError, OSError) as error:
-            result = type(error).__name__
-        await service.finish_ban(
-            job.id, success, result, retry_after=retry_after, permanent=permanent, reason=reason
-        )
-        log.info(
-            "group_ban_result",
-            operation="ban_chat_member",
-            chat_id=job.chat_id,
-            user_id=job.telegram_id,
-            scam_record_id=job.scam_record_id,
-            success=success,
-            pending=not success,
-            result=result,
-            error_type=None if success else result,
-            reason=reason,
-        )
-        processed += 1
-        if not success:
-            # Alert rollback must not expire the worker's other claimed ban jobs.
-            async with AsyncSession(
-                bind=service.session.bind, expire_on_commit=False
-            ) as alert_session:
-                await notify_ban_failure(
-                    bot,
-                    GroupService(service.settings, alert_session),
-                    job.chat_id,
-                    job.telegram_id,
-                    record_id=job.scam_record_id,
-                    result=result,
-                    reason=reason,
+        async with user_moderation_lock(job.telegram_id):
+            if not await service.ban_eligible(job.id):
+                continue
+            success, result = False, "TelegramAPIError"
+            retry_after, permanent = None, False
+            reason = None
+            relay = active_relay()
+            try:
+                success, result = await asyncio.wait_for(
+                    (
+                        relay.attempt_ban(bot, service, job, timeout)
+                        if service.settings.group_help_enabled and relay is not None
+                        else _attempt_ban(bot, job, timeout)
+                    ),
+                    timeout=timeout,
                 )
+            except TelegramRetryAfter as error:
+                result, reason = "TelegramRetryAfter", _api_reason(error)
+                retry_after = error.retry_after
+            except TelegramForbiddenError as error:
+                result, reason = "TelegramForbiddenError", _api_reason(error)
+                permanent = True
+                await service.note_group_permissions(job.chat_id, False)
+            except TelegramBadRequest as error:
+                result, reason = "TelegramBadRequest", _api_reason(error)
+                # Telegram may learn this numeric peer through another protected group.
+                # Keep identity-resolution refusals eligible for bounded outbox retries.
+                permanent = not any(
+                    code in error.message.upper()
+                    for code in ("PARTICIPANT_ID_INVALID", "USER_NOT_PARTICIPANT")
+                )
+            except TelegramAPIError as error:
+                result, reason = type(error).__name__, _api_reason(error)
+            except (TimeoutError, OSError) as error:
+                result = type(error).__name__
+            await service.finish_ban(
+                job.id, success, result, retry_after=retry_after, permanent=permanent, reason=reason
+            )
+            log.info(
+                "group_ban_result",
+                operation="ban_chat_member",
+                chat_id=job.chat_id,
+                user_id=job.telegram_id,
+                scam_record_id=job.scam_record_id,
+                success=success,
+                pending=not success,
+                result=result,
+                error_type=None if success else result,
+                reason=reason,
+            )
+            processed += 1
+            if not success:
+                # Alert rollback must not expire the worker's other claimed ban jobs.
+                async with AsyncSession(
+                    bind=service.session.bind, expire_on_commit=False
+                ) as alert_session:
+                    await notify_ban_failure(
+                        bot,
+                        GroupService(service.settings, alert_session),
+                        job.chat_id,
+                        job.telegram_id,
+                        record_id=job.scam_record_id,
+                        result=result,
+                        reason=reason,
+                    )
     return processed
 
 
