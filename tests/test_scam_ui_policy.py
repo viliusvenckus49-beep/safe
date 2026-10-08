@@ -91,12 +91,12 @@ async def test_add_scam_target_wizard_needs_no_reason(journey, database):
     assert await journey.state(900) is None
 
 
-def test_scam_menu_private_only_and_no_admin_or_group_entry():
+def test_scam_menu_and_admin_entry_private_only():
     for private in [False, True]:
         values = [
             b.callback_data for row in home(True, private=private).inline_keyboard for b in row
         ]
-        assert Action(name="admin").pack() not in values
+        assert (Action(name="admin").pack() in values) is private
         assert (
             Action(name="scams", value="0").pack() in values
             if private

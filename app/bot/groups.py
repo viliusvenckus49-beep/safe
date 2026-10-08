@@ -248,6 +248,7 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
                 await query.message.answer_document(
                     BufferedInputFile(data, filename="safecheck-members.txt"),
                     caption=p.text("MEMBERS_NOTICE"),
+                    reply_markup=kb.back_to_group(chosen.chat_id),
                 )
             elif action == "recover":
                 await state.set_state(RecoveryFlow.invite)

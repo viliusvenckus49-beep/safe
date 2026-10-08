@@ -5,7 +5,7 @@ from uuid import uuid4
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app import presentation as p
 from app.bot import keyboards as kb
@@ -38,7 +38,14 @@ from app.bot.scam_admin import (
     register_scam_handlers,
 )
 from app.bot.scam_notices import registered_scam_text
-from app.bot.screens import clear_flow, close_panel, flow_screen, preserved_source, render
+from app.bot.screens import (
+    clear_flow,
+    close_panel,
+    flow_screen,
+    preserved_source,
+    render,
+    send_screen,
+)
 from app.bot.states import AdminRepFlow, InputFlow, ReportFlow
 from app.bot.trusted import open_panel as open_trusted_panel
 from app.bot.trusted import register_trusted_handlers
@@ -125,6 +132,14 @@ async def begin_report(message: Message, state: FSMContext, *, edit: bool = Fals
             await state.update_data(screen_message_id=result.message_id)
 
 
+async def home_keyboard(service: Service, actor: int, *, private: bool) -> InlineKeyboardMarkup:
+    return kb.home(
+        admin=private and await service.is_admin(actor),
+        owner=private and service.access.is_owner(actor),
+        private=private,
+    )
+
+
 def create_router(settings: Any, session_factory: Any) -> Router:
     router = Router(name="safecheck")
     middleware = ServiceMiddleware(settings, session_factory)
@@ -143,7 +158,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             message,
             state,
             p.home(),
-            reply_markup=kb.home(private=message.chat.type == "private"),
+            reply_markup=await home_keyboard(
+                service, actor_id(message), private=message.chat.type == "private"
+            ),
             home_photo=True,
         )
 
@@ -174,7 +191,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         await render(
             callback.message,
             t("language.changed") + "\n\n" + p.home(),
-            reply_markup=kb.home(private=callback.message.chat.type == "private"),
+            reply_markup=await home_keyboard(
+                service, callback.from_user.id, private=callback.message.chat.type == "private"
+            ),
             home_photo=True,
         )
         if callback.message.chat.type == "private":
@@ -297,7 +316,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         await clear_flow(state)
         target, comment = await target_from_message(message, service)
         if not target:
-            await message.answer(p.text("rep_target"))
+            await send_screen(message, p.text("rep_target"), None, False)
             return
         value = 1 if (message.text or "").startswith("+") else -1
         if not comment:
@@ -323,7 +342,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     @router.message(Command("admin"))
     async def admin_command(message: Message, state: FSMContext, service: Service) -> None:
         if not await service.is_admin(actor_id(message)):
-            await message.answer(p.text("denied"))
+            await send_screen(message, p.text("denied"), None, False, persistent=True)
             return
         if message.chat.type != "private":
             await flow_screen(message, state, p.text("admin_private"))
@@ -373,7 +392,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     @router.message(Command("add_sc", "del_sc"))
     async def scam_command(message: Message, state: FSMContext, service: Service) -> None:
         if not await service.is_admin(actor_id(message)):
-            await message.answer(p.text("denied"))
+            await send_screen(message, p.text("denied"), None, False, persistent=True)
             return
         operation = (message.text or "").split()[0].split("@")[0][1:]
         await clear_flow(state)
@@ -439,7 +458,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await callback.answer(p.text("admin_private"), show_alert=True)
             return
         await callback.answer()
-        if name in {"admin", "pending"} and value == "receipt":
+        if name in {"home", "admin", "pending"} and value == "receipt":
             preserved_source.set(message.message_id)
             if name == "pending":
                 value = ""
@@ -455,7 +474,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await render(
                 message,
                 p.home(),
-                reply_markup=kb.home(private=message.chat.type == "private"),
+                reply_markup=await home_keyboard(
+                    service, actor, private=message.chat.type == "private"
+                ),
                 home_photo=True,
             )
         elif name == "info":
@@ -827,7 +848,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             return
         if not await service.is_admin(actor_id(message)):
             await clear_flow(state)
-            await message.answer(p.text("denied"))
+            await send_screen(message, p.text("denied"), None, False, persistent=True)
             return
         target = (message.text or "").strip()
         if not valid_target(target):
@@ -866,7 +887,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             return
         if not await service.is_admin(actor_id(message)):
             await clear_flow(state)
-            await message.answer(p.text("denied"))
+            await send_screen(message, p.text("denied"), None, False, persistent=True)
             return
         reason = (message.text or "").strip()
         if not 10 <= len(reason) <= 1500:

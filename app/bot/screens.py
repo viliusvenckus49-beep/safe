@@ -7,14 +7,25 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message
 
+from app.bot.keyboards import back
+
 panel_state: ContextVar[FSMContext | None] = ContextVar("panel_state", default=None)
 preserved_source: ContextVar[int | None] = ContextVar("preserved_source", default=None)
 HOME_PHOTO = Path(__file__).resolve().parents[1] / "assets" / "home.jpg"
 
 
 async def send_screen(
-    message: Message, text: str, markup: InlineKeyboardMarkup | None, home_photo: bool
+    message: Message,
+    text: str,
+    markup: InlineKeyboardMarkup | None,
+    home_photo: bool,
+    *,
+    persistent: bool = False,
 ) -> Message:
+    if getattr(message.chat, "type", None) == "private" and (
+        markup is None or not markup.inline_keyboard
+    ):
+        markup = back("home", "receipt" if persistent else "")
     if home_photo:
         return await message.answer_photo(
             FSInputFile(HOME_PHOTO), caption=text, reply_markup=markup
@@ -65,7 +76,7 @@ async def flow_screen(
 ) -> None:
     data = await state.get_data()
     previous = data.get("screen_message_id")
-    result = await send_screen(message, text, reply_markup, home_photo)
+    result = await send_screen(message, text, reply_markup, home_photo, persistent=persistent)
     # Receipts are chat history, never an anchor retired by the next screen.
     await state.update_data(screen_message_id=None if persistent else result.message_id)
     if previous and previous != result.message_id and previous != preserved_source.get():

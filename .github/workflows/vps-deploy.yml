@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: [private-admin-home-navigation-20261008]
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -89,6 +92,66 @@ jobs:
           printf 'DataAfter=%s\n' "$after_counts"
           python3 -c 'import json,sys; before,after=map(json.loads,sys.argv[1:]); assert all(after[key] >= value for key,value in before.items()), "Preserved data count decreased"; print("Preserved data counts verified.")' "$before_counts" "$after_counts"
           sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-bot-1 python - <<'ADMIN_HOME_CHECK'
+          import asyncio
+          import runpy
+          from sqlalchemy import text
+          from app.bot import keyboards
+          from app.bot.callbacks import AdminAccess
+          from app.bot.group_keyboards import GroupAction
+          from app.bot.handlers import home_keyboard
+          from app.config import Settings
+          from app.db import create_database
+          from app.i18n import use_language
+          from app.services import Service
+
+          expected = {'lt': {'inline_keyboard': [[{'text': '🔍 TIKRINTI', 'callback_data': 'sc|lookup|'}], [{'text': '👤 PROFILIS', 'callback_data': 'sc|profile|'}, {'text': '🚨 PRANEŠTI', 'callback_data': 'sc|report|'}], [{'text': '🏆 TOP 10', 'callback_data': 'sc|top|'}, {'text': '🚷SCAM REGISTRAS', 'callback_data': 'sc|scams|0'}], [{'text': '＋ ĮVERTINTI', 'callback_data': 'sc|rep|'}, {'text': 'ⓘ INFORMACIJA', 'callback_data': 'sc|info|'}], [{'text': '↻ GRUPĖS ATKŪRIMAS', 'callback_data': 'sg|subscriptions|0|'}], [{'text': '🌐 KALBA', 'callback_data': 'sc|language|'}], [{'text': '× UŽDARYTI', 'callback_data': 'sc|close|'}]]}, 'en': {'inline_keyboard': [[{'text': '🔍 CHECK', 'callback_data': 'sc|lookup|'}], [{'text': '👤 PROFILE', 'callback_data': 'sc|profile|'}, {'text': '🚨 REPORT', 'callback_data': 'sc|report|'}], [{'text': '🏆 TOP 10', 'callback_data': 'sc|top|'}, {'text': '🚷SCAM REGISTRY', 'callback_data': 'sc|scams|0'}], [{'text': '＋ RATE', 'callback_data': 'sc|rep|'}, {'text': 'ⓘ INFORMATION', 'callback_data': 'sc|info|'}], [{'text': '↻ GROUP RECOVERY', 'callback_data': 'sg|subscriptions|0|'}], [{'text': '🌐 LANGUAGE', 'callback_data': 'sc|language|'}], [{'text': '× CLOSE', 'callback_data': 'sc|close|'}]]}, 'ru': {'inline_keyboard': [[{'text': '🔍 ПРОВЕРИТЬ', 'callback_data': 'sc|lookup|'}], [{'text': '👤 ПРОФИЛЬ', 'callback_data': 'sc|profile|'}, {'text': '🚨 СООБЩИТЬ', 'callback_data': 'sc|report|'}], [{'text': '🏆 TOP 10', 'callback_data': 'sc|top|'}, {'text': '🚷РЕЕСТР SCAM', 'callback_data': 'sc|scams|0'}], [{'text': '＋ ОЦЕНИТЬ', 'callback_data': 'sc|rep|'}, {'text': 'ⓘ ИНФОРМАЦИЯ', 'callback_data': 'sc|info|'}], [{'text': '↻ ВОССТАНОВЛЕНИЕ ГРУППЫ', 'callback_data': 'sg|subscriptions|0|'}], [{'text': '🌐 ЯЗЫК', 'callback_data': 'sc|language|'}], [{'text': '× ЗАКРЫТЬ', 'callback_data': 'sc|close|'}]]}}
+
+          def values(markup):
+              return {b.callback_data for row in markup.inline_keyboard for b in row}
+
+          async def verify():
+              runpy.run_path('/run/configs/secret_entrypoint.py')['load_secrets']()
+              settings = Settings()
+              engine, sessions = create_database(settings.database_url)
+              try:
+                  async with sessions() as session:
+                      await session.execute(text('SET TRANSACTION READ ONLY'))
+                      service = Service(settings, session)
+                      rows = await service.repo.administrator_rows()
+                      actors = settings.admins | {row.telegram_id for row in rows}
+                      if settings.group_owner is not None:
+                          actors = actors | {settings.group_owner}
+                      assert actors
+                      outsider = 1
+                      while outsider in actors:
+                          outsider += 1
+                      for lang in ('lt', 'en', 'ru'):
+                          with use_language(lang):
+                              ordinary = await home_keyboard(service, outsider, private=True)
+                              assert ordinary.model_dump(exclude_none=True) == expected[lang]
+                              assert keyboards.action('home') in values(keyboards.result('42'))
+                              for actor in actors:
+                                  is_admin = await service.is_admin(actor)
+                                  owner = service.access.is_owner(actor)
+                                  home = await home_keyboard(service, actor, private=True)
+                                  assert home == keyboards.home(is_admin, owner=owner)
+                                  routes = values(home)
+                                  assert (keyboards.action('admin') in routes) == is_admin
+                                  assert (AdminAccess(action='list').pack() in routes) == (is_admin and owner)
+                                  assert (GroupAction(action='list').pack() in routes) == (is_admin and owner)
+                                  if is_admin:
+                                      assert values(keyboards.admin(owner)) - {keyboards.action('home')} <= routes
+                                  group = await home_keyboard(service, actor, private=False)
+                                  assert group == keyboards.home(private=False)
+                              print('LiveAdminHomeVerified=' + lang + ' Authorized=' + str(len(actors)) + ' Ordinary=passed GroupPrivacy=passed Back=passed')
+              finally:
+                  await engine.dispose()
+
+          asyncio.run(verify())
+          ADMIN_HOME_CHECK
+          systemctl is-enabled safecheck-monitor.timer
+          systemctl is-active safecheck-monitor.timer
           REMOTE
       - name: Remove runner key
         if: always()
