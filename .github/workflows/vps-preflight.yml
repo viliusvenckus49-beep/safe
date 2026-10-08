@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: [safecheck-2.13.1]
+    branches: [scam-ban-diagnosis-2.14.0]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -42,7 +42,98 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          df -h /home/ubuntu
+          sudo -n docker exec -i safecheck-bot-1 python - <<'PYCHECK'
+          import asyncio, dataclasses, importlib.util, json
+          from aiogram import Bot
+          from sqlalchemy import select
+          from app.config import Settings
+          from app.db import create_database
+          from app.group_services import GroupService
+          from app.models import BanAction, ManagedGroup, ScamRecord, User
+          from app.services import Service
+          loader=importlib.util.spec_from_file_location('secret_loader','/run/configs/secret_entrypoint.py')
+          module=importlib.util.module_from_spec(loader);loader.loader.exec_module(module);module.load_secrets()
+          async def main():
+           settings=Settings()
+           print('RelayRuntime='+json.dumps({'enabled':settings.group_help_enabled,'staff_id':settings.group_help_staff_id,'scope_count':len(settings.group_help_scope)}),flush=True)
+           engine,sessions=create_database(settings.database_url)
+           bot=Bot(settings.bot_token.get_secret_value())
+           try:
+            async with sessions() as session:
+             groups=list((await session.scalars(select(ManagedGroup).where(ManagedGroup.approved.is_(True),ManagedGroup.enabled.is_(True)))).all())
+             for user_id in (8805206375,5108847812):
+              record=await session.scalar(select(ScamRecord).join(User).where(User.telegram_id==user_id,ScamRecord.status=='ACTIVE').order_by(ScamRecord.id.desc()).limit(1))
+              if record:
+               summary=await GroupService(settings,session).ban_summary(record.id)
+               print('LiveBanSummary='+json.dumps({'record_id':record.id,**dataclasses.asdict(summary)}),flush=True)
+               actions=list((await session.scalars(select(BanAction).where(BanAction.scam_record_id==record.id))).all())
+               for action in actions:
+                print('LiveBanAction='+json.dumps({'user_id':user_id,'chat_id':action.chat_id,'status':action.status,'attempts':action.attempts,'result_type':action.result_type}),flush=True)
+              for group in groups:
+               try:
+                member=await bot.get_chat_member(group.chat_id,user_id)
+                print('LiveMembership='+json.dumps({'user_id':user_id,'chat_id':group.chat_id,'status':str(member.status)}),flush=True)
+               except Exception as error:
+                reason=getattr(error,'message','')
+                code=next((c for c in ('PARTICIPANT_ID_INVALID','USER_NOT_PARTICIPANT','CHAT_ADMIN_REQUIRED','USER_IS_AN_ADMIN','CHAT_NOT_FOUND') if c in reason.upper()),None)
+                print('LiveMembership='+json.dumps({'user_id':user_id,'chat_id':group.chat_id,'error_type':type(error).__name__,'error_code':code}),flush=True)
+           finally:
+            await bot.session.close();await engine.dispose()
+          try:asyncio.run(main())
+          except Exception as error:
+           print('LiveCheckError='+type(error).__name__,flush=True);raise SystemExit(1)
+          PYCHECK
+          sudo -n docker logs --since 45m safecheck-bot-1 2>&1 | python3 -c 'import json,sys; allowed={"event","user_id","chat_id","account_id","staff_id","scope_count","success","pending","result","exception_type","scam_record_id","error_type","reason"}; count=0
+          for line in sys.stdin:
+           try: item=json.loads(line)
+           except ValueError: continue
+           if item.get("event") in {"group_help_connected","group_help_command_submitted","group_help_command_failed","scam_observed_identity_linked","scam_observed_identity_link_failed","mtproto_scam_identity_linked","group_worker_failed"} or (item.get("event")=="group_ban_result" and item.get("user_id")==8805206375):
+            print("RelayRuntimeLog="+json.dumps({k:v for k,v in item.items() if k in allowed}));count+=1
+            if count>=80:break'
+          sudo -n docker run --rm -i --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" --mount "type=bind,src=$HOME/.config/safecheck-mtproto-account2,dst=/state" --entrypoint python safecheck-mtproto-tools:1.42.0 - <<'PYSTAFF'
+          import asyncio
+          import json
+          import re
+          from telethon import TelegramClient
+          
+          async def main():
+              with open('/state/api.json') as handle:
+                  config = json.load(handle)
+              client = TelegramClient('/state/account.session', config['api_id'], config['api_hash'], flood_sleep_threshold=0)
+              try:
+                  await client.connect()
+                  if not await client.is_user_authorized():
+                      raise ValueError('Account not authenticated')
+                  staff = await client.get_entity(-1004300060813)
+                  bot = await client.get_entity('ghStaffBot')
+                  if not bot.bot or not any(p.id == bot.id for p in await client.get_participants(staff)):
+                      raise ValueError('Unexpected staff bot')
+                  messages = await client.get_messages(staff, limit=100)
+                  command = next((m for m in messages if m.out and m.raw_text == '/ban 8805206375'), None)
+                  if command is None:
+                      print('TargetStaffBanCommandFound=false', flush=True)
+                      return
+                  print('TargetStaffBanCommandFound=true', flush=True)
+                  replies = [m for m in messages if m.sender_id == bot.id and m.id > command.id and (m.reply_to_msg_id == command.id or '8805206375' in (m.raw_text or ''))]
+                  print('TargetStaffBanRepliesAfterCommand=' + str(len(replies)), flush=True)
+                  for message in reversed(replies):
+                      content = message.raw_text or ''
+                      print('TargetStaffBanReplyThreaded=' + str(message.reply_to_msg_id == command.id).lower(), flush=True)
+                      print('TargetStaffBanTargetPresent=' + str('8805206375' in content).lower(), flush=True)
+                      for line in content.splitlines()[:25]:
+                              if not ('»' in line or any(w in line.lower() for w in ('8805206375','not found','invalid','banned','admin','permission','error','unknown','queued','cannot','unable'))):
+                                  continue
+                          safe = re.sub(r'https?://\S+', '[link]', line)
+                          print('TargetStaffBanDetail=' + safe[:250], flush=True)
+              finally:
+                  await client.disconnect()
+          
+          try:
+              asyncio.run(main())
+          except Exception as error:
+              print('TargetStaffBanCheckError=' + type(error).__name__, flush=True)
+              raise SystemExit(1)
+          PYSTAFF
           REMOTE
       - name: Remove runner key
         if: always()
