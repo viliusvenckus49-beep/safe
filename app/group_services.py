@@ -24,6 +24,7 @@ from app.models import (
     now,
 )
 from app.services import DomainError, Service
+from app.telegram_failures import ban_failure
 
 
 @dataclass(frozen=True)
@@ -683,6 +684,56 @@ class GroupService:
             ),
         )
 
+    async def ban_diagnostics(self, actor: int, record_id: int) -> list[dict]:
+        """Read only current protection and stable causes; never expose raw API errors."""
+        await self.core.require_admin(actor)
+        record = await self.core.repo.scam_by_id(record_id)
+        if record is None or record.status != "ACTIVE":
+            raise DomainError("stale_callback")
+        if record.target.telegram_id is None:
+            return []
+        rows = (
+            await self.session.execute(
+                select(ManagedGroup, BanAction)
+                .outerjoin(
+                    BanAction,
+                    (BanAction.chat_id == ManagedGroup.chat_id)
+                    & (BanAction.telegram_id == record.target.telegram_id)
+                    & (BanAction.scam_record_id == record_id),
+                )
+                .where(ManagedGroup.approved.is_(True), ManagedGroup.enabled.is_(True))
+                .order_by(ManagedGroup.chat_id)
+            )
+        ).all()
+        output = []
+        for group, job in rows:
+            cause = "queued"
+            if job is not None and job.status != "SUCCEEDED":
+                event = await self.session.scalar(
+                    select(AuditEvent)
+                    .where(
+                        AuditEvent.action == "scam_ban_attempt",
+                        AuditEvent.details["action_id"].as_integer() == job.id,
+                    )
+                    .order_by(AuditEvent.id.desc())
+                    .limit(1)
+                )
+                if event is not None and not event.details.get("success"):
+                    cause = event.details.get("cause") or "temporary"
+                elif job.result_type and job.result_type not in {"BANNED", "ALREADY_BANNED"}:
+                    cause = ban_failure(job.result_type)
+            output.append(
+                dict(
+                    title=group.title,
+                    chat_id=group.chat_id,
+                    status=job.status if job is not None else "PENDING",
+                    cause=cause,
+                    result=job.result_type if job is not None else None,
+                    paused=bool(job and job.attempts >= 8 and job.status != "SUCCEEDED"),
+                )
+            )
+        return output
+
     async def claim_bans(
         self, limit: int = 20, *, scam_record_id: int | None = None
     ) -> list[BanAction]:
@@ -783,8 +834,12 @@ class GroupService:
         result_type: str,
         retry_after: int | None = None,
         permanent: bool = False,
+        *,
+        reason: str | None = None,
     ) -> None:
-        await self._finish(BanAction, action_id, success, result_type, retry_after, permanent)
+        await self._finish(
+            BanAction, action_id, success, result_type, retry_after, permanent, reason=reason
+        )
 
     async def finish_delivery(
         self,
@@ -799,7 +854,15 @@ class GroupService:
         )
 
     async def _finish(
-        self, model, action_id, success, result_type, retry_after=None, permanent=False
+        self,
+        model,
+        action_id,
+        success,
+        result_type,
+        retry_after=None,
+        permanent=False,
+        *,
+        reason=None,
     ):
         row = await self.session.get(model, action_id)
         if row is None or row.status != "PROCESSING":
@@ -819,12 +882,33 @@ class GroupService:
             values["attempts"] = 8
         # A group removal may have invalidated this claim during its Telegram call.
         # Never replace that committed withdrawal with a stale worker result.
-        await self.session.execute(
+        applied = await self.session.execute(
             update(model)
             .where(model.id == action_id, model.status == "PROCESSING")
             .values(**values)
+            .returning(model.id)
             .execution_options(synchronize_session=False)
         )
+        if applied.scalar_one_or_none() is not None and model is BanAction:
+            record = await self.session.get(ScamRecord, row.scam_record_id)
+            self.session.add(
+                AuditEvent(
+                    actor_id=self.settings.group_owner or 0,
+                    action="scam_ban_attempt",
+                    target_id=record.target_id if record else None,
+                    details={
+                        "action_id": row.id,
+                        "record_id": row.scam_record_id,
+                        "chat_id": row.chat_id,
+                        "user_id": row.telegram_id,
+                        "attempt": row.attempts,
+                        "success": success,
+                        "result": values["result_type"],
+                        "cause": "" if success else ban_failure(result_type, reason),
+                        "retry_after": retry_after,
+                    },
+                )
+            )
         await self.session.commit()
         await self.session.refresh(row)
 

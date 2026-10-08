@@ -21,6 +21,7 @@ from app.models import AuditEvent, BanAction, ManagedGroup, ScamRecord, User, no
 from app.repositories import Repository
 from app.scam_management import ScamManagement
 from app.services import DomainError, Service
+from app.telegram_failures import IdentityLookup, identity_failure
 
 _relay: "GroupHelpRelay | None" = None
 
@@ -71,21 +72,31 @@ class GroupHelpRelay:
         self.commands = asyncio.Lock()
         self.identity = asyncio.Lock()
         self.flood_until = now()
-        self.lookups: dict[str, tuple[float, Any]] = {}
+        self.lookups: dict[str, tuple[float, IdentityLookup]] = {}
 
     async def lookup_username(self, username: str, *, refresh: bool = False) -> Any:
+        return (await self.lookup_identity(username, refresh=refresh)).user
+
+    async def lookup_identity(self, username: str, *, refresh: bool = False) -> IdentityLookup:
         """Share bounded caching; explicit checks refresh it while respecting flood waits."""
         async with self.identity:
             cached = self.lookups.get(username)
             if not refresh and cached is not None and cached[0] > monotonic():
                 return cached[1]
             if self.flood_until > now():
-                return None
-            user = None
+                return IdentityLookup(
+                    code="rate_limit",
+                    retry_after=max(1, int((self.flood_until - now()).total_seconds())),
+                )
             try:
                 user = await self.telegram_user(username)
+                result = IdentityLookup(user=user, code="resolved")
             except Exception as error:
                 await self._note_flood(error)
+                result = IdentityLookup(
+                    code=identity_failure(error),
+                    retry_after=max(0, int((self.flood_until - now()).total_seconds())),
+                )
                 structlog.get_logger().info(
                     "mtproto_username_lookup_failed",
                     username=username,
@@ -93,8 +104,8 @@ class GroupHelpRelay:
                 )
             if len(self.lookups) >= 128:
                 self.lookups.pop(next(iter(self.lookups)))
-            self.lookups[username] = (monotonic() + (30 if user is not None else 15), user)
-            return user
+            self.lookups[username] = (monotonic() + (30 if result.user is not None else 15), result)
+            return result
 
     @classmethod
     async def connect(cls, settings: Settings, sessions: Any) -> "GroupHelpRelay":

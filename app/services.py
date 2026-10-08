@@ -29,6 +29,7 @@ from app.models import (
     now,
 )
 from app.repositories import Repository
+from app.telegram_failures import IdentityLookup, identity_failure
 
 
 class Service:
@@ -40,6 +41,7 @@ class Service:
         self.session = session
         self.repo = Repository(session)
         self.access = AdminService(settings, session)
+        self.identity_lookup: IdentityLookup | None = None
 
     async def language(self, actor: int) -> str | None:
         return await self.repo.language(actor)
@@ -165,10 +167,17 @@ class Service:
 
         relay = active_relay() if self.settings.group_help_enabled else None
         if relay is None:
+            self.identity_lookup = IdentityLookup(
+                code="disconnected" if self.settings.group_help_enabled else "disabled"
+            )
             return None
         try:
-            observed = await asyncio.wait_for(relay.lookup_username(username, refresh=refresh), 6)
+            self.identity_lookup = await asyncio.wait_for(
+                relay.lookup_identity(username, refresh=refresh), 6
+            )
+            observed = self.identity_lookup.user
         except (TimeoutError, OSError) as error:
+            self.identity_lookup = IdentityLookup(code=identity_failure(error))
             structlog.get_logger().info(
                 "mtproto_username_lookup_failed",
                 username=username,
@@ -275,9 +284,12 @@ class Service:
         return (now() - timestamp.replace(tzinfo=UTC)).total_seconds() < seconds
 
     async def profile(self, target: str, *, refresh_identity: bool = False) -> dict:
-        return await self._profile_user(
+        self.identity_lookup = None
+        result = await self._profile_user(
             await self.resolve(target, refresh_identity=refresh_identity)
         )
+        result["identity_lookup"] = self.identity_lookup
+        return result
 
     async def _profile_user(self, user: User) -> dict:
         score, positive, negative = await self.repo.rep_stats(user.id)

@@ -241,7 +241,47 @@ def profile(data: dict[str, Any]) -> str:
         )
     if not scam and not trusted:
         result += "\n\n" + warning()
+    lookup = data.get("identity_lookup")
+    if lookup is not None and lookup.code != "resolved":
+        result += "\n\n" + identity_lookup_note(lookup, known=user.telegram_id is not None)
     return result
+
+
+def identity_lookup_note(lookup: Any, *, known: bool = False) -> str:
+    return t(
+        "diagnostic.identity_note",
+        reason=t("diagnostic.identity_" + lookup.code, seconds=lookup.retry_after),
+        saved=t("diagnostic.identity_saved") if known else "",
+    )
+
+
+def ban_diagnostics(user: Any, rows: list[dict]) -> str:
+    text = t("diagnostic.ban_title") + "\n\n" + identity(user, max_units=120) + "\n\n"
+    if user.telegram_id is None:
+        return text + t("diagnostic.identity_needed")
+    if not rows:
+        return text + t("diagnostic.no_groups")
+    for row in rows[:15]:
+        result = (
+            t(
+                "diagnostic.ban_already"
+                if row["result"] == "ALREADY_BANNED"
+                else "diagnostic.ban_done"
+            )
+            if row["status"] == "SUCCEEDED"
+            else t("diagnostic.ban_" + row["cause"])
+        )
+        if row["paused"]:
+            result += " " + t("diagnostic.ban_paused")
+        text += (
+            escape(display_text(row["title"], 50))
+            + f" • <code>{row['chat_id']}</code>\n"
+            + result
+            + "\n\n"
+        )
+    if len(rows) > 15:
+        text += t("diagnostic.more_groups", count=len(rows) - 15)
+    return text.strip()
 
 
 def preview(data: dict[str, Any]) -> str:
@@ -316,6 +356,7 @@ def stats(data: dict[str, Any]) -> str:
 
 
 AUDIT_ACTIONS = {
+    "scam_ban_attempt",
     "trusted_added",
     "trusted_removed",
     "administrator_added",

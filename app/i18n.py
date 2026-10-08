@@ -9,6 +9,7 @@ import structlog
 
 from app.locales.administrators import CATALOGS as ADMINISTRATORS
 from app.locales.core import CATALOGS as CORE
+from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
 from app.locales.presentation import CATALOGS as PRESENTATION
 from app.locales.scam_management import CATALOGS as SCAM_MANAGEMENT
 from app.locales.trusted_management import CATALOGS as TRUSTED_MANAGEMENT
@@ -22,6 +23,7 @@ CATALOGS = {
         **ADMINISTRATORS[lang],
         **TRUSTED_MANAGEMENT[lang],
         **SCAM_MANAGEMENT[lang],
+        **DIAGNOSTICS[lang],
     }
     for lang in LANGUAGES
 }

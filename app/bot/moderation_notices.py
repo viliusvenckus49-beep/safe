@@ -10,19 +10,16 @@ from sqlalchemy import BigInteger, cast, select
 from app.group_services import GroupService
 from app.i18n import t
 from app.models import AuditEvent, BanAction, ManagedGroup
+from app.telegram_failures import ban_failure
 
 
 def reason_key(result: str, reason: str | None) -> str:
-    description = (reason or "").lower()
-    if "administrator" in description:
-        return "ban_alert.admin"
-    if result == "TelegramForbiddenError" or "rights" in description:
-        return "ban_alert.rights"
-    if "not_participant" in description or "id_invalid" in description:
-        return "ban_alert.unknown"
-    if result == "TelegramRetryAfter":
-        return "ban_alert.rate_limit"
-    return "ban_alert.temporary"
+    code = ban_failure(result, reason)
+    return (
+        "ban_alert." + code
+        if code in {"admin", "rights", "unknown", "rate_limit", "temporary"}
+        else "diagnostic.ban_" + code
+    )
 
 
 async def notify_ban_failure(

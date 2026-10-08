@@ -50,11 +50,14 @@ On the actual VPS, install the supplied units after initialization succeeds:
 ```sh
 sudo install -m 0644 deploy/systemd/safecheck* /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo python3 deploy/install_monitor.py
 sudo systemctl enable --now safecheck.service safecheck-backup.timer safecheck-monitor.timer
 sudo systemctl list-timers 'safecheck-*'
 ```
 
 These commands are installation instructions; they have not been executed here. `safecheck.service` resumes services after reboot without migrations. Docker `unless-stopped` restarts crashed processes. The bot's Docker health check requires recent **successful Telegram polls and worker cycles**, rather than merely a live process. PostgreSQL/Redis health checks and `app.main --check` validate dependencies and migration readiness. The monitor runs every two minutes, checks aggregate terminal ban/recovery failures and overdue outbox work, and reports locally through journal/stdout. Pending REP/report counts are displayed but do not cause notifications.
+
+`install_monitor.py` installs the monitor wrapper and enables its timer. Each invocation follows the currently running bot's Compose release directory, so later releases are monitored automatically. It preserves `/etc/safecheck/operations.env` and any explicit alert options. Aggregate samples are retained privately in `/var/lib/safecheck/monitor-history.jsonl`, rotated at 2 MiB with seven retained files. They contain service status and queue counts, without usernames, Telegram IDs or credentials. No additional server is needed; samples accrue over time and do not establish long-term stability immediately. `/status` exposes the current polling/worker ages and queue health only to administrators in private chat. The timer reports health and does not restart services.
 
 A Docker health failure does not itself restart a running container. The monitor deliberately reports a stalled polling process for operator action; use `status`, inspect private logs, and restart the bot after diagnosing the cause. Deployment/restore holds a lock and maintenance marker; monitoring is quiet during maintenance and reports markers older than one hour. If an operator kills the CLI, check that no operation remains running before removing a stale marker or abandoned `safecheck-verify-*` container.
 

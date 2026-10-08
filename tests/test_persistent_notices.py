@@ -94,7 +94,13 @@ async def test_unknown_scam_receipt_preserves_id_wizard_and_history(journey, dat
         for row in item.reply_markup.inline_keyboard
         for b in row
     ]
-    assert names == ["id_receipt", "retry_receipt", "remove_receipt", "page_receipt"]
+    assert names == [
+        "id_receipt",
+        "retry_receipt",
+        "details_receipt",
+        "remove_receipt",
+        "page_receipt",
+    ]
     await journey.send("42", actor=900)
     preview, _ = last_sent(journey)
     nonce = (await journey.data(900))["scam_nonce"]

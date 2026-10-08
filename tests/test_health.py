@@ -98,3 +98,15 @@ async def test_worker_heartbeat_requires_successful_cycle(settings, monkeypatch,
             None, settings, None, on_progress=lambda: progress.append("worker")
         )
     assert progress == ([] if failure else ["worker"])
+
+
+def test_status_snapshot_reports_ages_and_rejects_missing_or_invalid_signals(tmp_path, monkeypatch):
+    from app.health import snapshot
+
+    monkeypatch.setattr("app.health.time.time", lambda: 1000)
+    path = tmp_path / "health.json"
+    assert snapshot(path) == {"healthy": False, "uptime": None, "poll": None, "worker": None}
+    path.write_text(json.dumps({"started_at": 500, "poll_at": 990, "worker_at": 995}))
+    assert snapshot(path) == {"healthy": True, "uptime": 500, "poll": 10, "worker": 5}
+    path.write_text('{"started_at":true,"poll_at":NaN,"worker_at":1001}')
+    assert snapshot(path) == {"healthy": False, "uptime": None, "poll": None, "worker": None}

@@ -226,6 +226,48 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         rows, total = await service.scams(0)
         await flow_screen(message, state, p.scams(rows), reply_markup=kb.pages(0, total))
 
+    @router.message(Command("status"))
+    async def runtime_status(message: Message, service: Service, state: FSMContext) -> None:
+        from app.health import snapshot
+        from app.mtproto_relay import active_relay
+
+        await service.require_admin(actor_id(message))
+        if message.chat.type != "private":
+            await message.answer(p.text("admin_private"))
+            return
+        data = snapshot()
+        metrics = await service.repo.operational_stats()
+        connected = active_relay()
+        is_connected = bool(
+            connected and getattr(connected.client, "is_connected", lambda: False)()
+        )
+        relay = (
+            "disabled"
+            if not service.settings.group_help_enabled
+            else "connected"
+            if is_connected
+            else "disconnected"
+        )
+        await clear_flow(state)
+        await flow_screen(
+            message,
+            state,
+            t(
+                "diagnostic.status",
+                ban_terminal=metrics["ban_terminal"],
+                oldest_pending_seconds=metrics["oldest_pending_seconds"],
+                pending_reports=metrics["pending_reports"],
+                pending_rep=metrics["pending_rep"],
+                health=t("diagnostic.healthy" if data["healthy"] else "diagnostic.unhealthy"),
+                relay=t("diagnostic." + relay),
+                **{
+                    key: data[key] if data[key] is not None else t("diagnostic.no_signal")
+                    for key in ("uptime", "poll", "worker")
+                },
+            ),
+            reply_markup=kb.back("admin"),
+        )
+
     @router.message(Command("report"))
     async def report_command(message: Message, state: FSMContext, service: Service) -> None:
         await begin_report(message, state)
