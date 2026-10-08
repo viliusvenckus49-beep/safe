@@ -19,3 +19,5 @@ sudo docker run --rm -it --read-only --tmpfs /tmp --cap-drop ALL --security-opt 
 Telegram requires user authentication for the first account login. Session files grant account access and must be protected like passwords.
 
 Next: connect a disabled-by-default relay to durable SAFECheck SCAM jobs, resolve current public usernames through MTProto, save the actual ID, send the configured staff command, and verify bans in each protected group. Sending a command never proves ban success. Group Help's global staff scope must match the authorized group scope.
+
+Provisioned independently on the VPS: `safecheck-mtproto-tools:1.42.0`; Telethon version import and CLI help verified. SAFECheck 2.14.4 and PostgreSQL/Redis stayed healthy. Provisioning run: https://github.com/viliusvenckus49-beep/safe/actions/runs/37779790269. No account authenticated or moderation commands sent by provisioning.

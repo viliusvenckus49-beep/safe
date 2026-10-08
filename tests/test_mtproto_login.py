@@ -1,16 +1,22 @@
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from deploy.mtproto_login import (
-    STAFF_BOT,
-    STAFF_CHAT_ID,
-    credentials,
-    private_directory,
-    private_file,
-    validate_credentials,
-    verify_staff,
+spec = importlib.util.spec_from_file_location(
+    "mtproto_login", Path(__file__).resolve().parents[1] / "deploy/mtproto_login.py"
 )
+assert spec and spec.loader
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+STAFF_BOT = module.STAFF_BOT
+STAFF_CHAT_ID = module.STAFF_CHAT_ID
+credentials = module.credentials
+private_directory = module.private_directory
+private_file = module.private_file
+validate_credentials = module.validate_credentials
+verify_staff = module.verify_staff
 
 
 @pytest.mark.parametrize(
