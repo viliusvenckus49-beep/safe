@@ -263,6 +263,7 @@ async def test_inflight_ban_finishes_before_unban(database, settings):
 
 async def test_postgres_inflight_ban_finishes_before_unban(postgres_contract):
     database, settings = postgres_contract
+    settings.group_owner_id = 900
     await check_inflight_order(database, settings)
 
 
