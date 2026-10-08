@@ -32,6 +32,7 @@ async def registered_scam_text(
         )
         async with sessions() as session:
             summary = await GroupService(core.settings, session).ban_summary(record.id)
+    await core.session.refresh(record, attribute_names=["target", "target_id"])
     return p.scam_registered(
         record.target,
         groups=summary.checked,

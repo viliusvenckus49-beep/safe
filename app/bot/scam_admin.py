@@ -152,7 +152,9 @@ def register_scam_handlers(router: Router):
         if name == "retry":
             try:
                 record = await management.detail(actor, int(value))
-                if record.target.telegram_id is None:
+                if record.target.telegram_id is None and not (
+                    service.settings.group_help_enabled and record.target.username
+                ):
                     await callback.answer(t("sm.need_id"), show_alert=True)
                     return
                 await GroupService(service.settings, service.session).retry_scam_bans(

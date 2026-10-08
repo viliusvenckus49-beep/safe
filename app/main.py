@@ -28,6 +28,7 @@ from app.db import check_database, create_database
 from app.health import RuntimeHealth
 from app.i18n import LANGUAGES
 from app.logging import configure_logging
+from app.mtproto_relay import GroupHelpRelay, set_relay
 from app.repositories import Repository
 
 
@@ -40,6 +41,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
     isolation: BaseEventIsolation | None = None
     worker: asyncio.Task[None] | None = None
     health: RuntimeHealth | None = None
+    relay: GroupHelpRelay | None = None
     try:
         await check_database(engine)
         expected = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
@@ -64,6 +66,9 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         if check_only:
             log.info("startup_check_passed", operation="startup")
             return
+        if settings.group_help_enabled:
+            relay = await GroupHelpRelay.connect(settings, sessions)
+            set_relay(relay)
         health = RuntimeHealth()
         bot = Bot(
             settings.bot_token.get_secret_value(),
@@ -119,6 +124,9 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
                 await worker
             except asyncio.CancelledError:
                 pass
+        set_relay(None)
+        if relay:
+            await relay.close()
         if isolation:
             await isolation.close()
         if storage:
