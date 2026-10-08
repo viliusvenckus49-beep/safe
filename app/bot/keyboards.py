@@ -31,7 +31,7 @@ def action(name: str, value: str = "") -> str:
     return Action(name=name, value=value).pack()
 
 
-def home(admin: bool = False, *, private: bool = True) -> InlineKeyboardMarkup:
+def home(admin: bool = False, *, private: bool = True, owner: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [(t("button.lookup"), action("lookup"))],
         [(t("button.profile"), action("profile")), (t("button.report"), action("report"))],
@@ -42,6 +42,9 @@ def home(admin: bool = False, *, private: bool = True) -> InlineKeyboardMarkup:
     if private:
         rows.append([(t("button.recovery"), GroupAction(action="subscriptions").pack())])
     rows.append([(t("button.language"), action("language"))])
+    if admin and private:
+        rows.append([(t("button.admin"), action("admin"))])
+        rows.extend(_admin_rows(owner))
     rows.append([(t("button.close"), action("close"))])
     return keyboard(rows)
 
@@ -74,6 +77,7 @@ def result(
     if back_name:
         rows.append([(t("button.back"), action(back_name, back_value))])
     else:
+        rows.append([(t("button.back"), action("home"))])
         rows.append([(t("button.cancel"), action("close"))])
     return keyboard(rows)
 
@@ -94,7 +98,7 @@ def report(nonce: str, stage: str) -> InlineKeyboardMarkup:
     return keyboard(rows)
 
 
-def admin(owner: bool = False) -> InlineKeyboardMarkup:
+def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
     rows = [
         [(t("tm.menu"), action("trusted_admin"))],
         [(t("button.pending"), action("pending"))],
@@ -107,9 +111,13 @@ def admin(owner: bool = False) -> InlineKeyboardMarkup:
         [(t("admin_help.button"), AdminHelp().pack())],
     ]
     if owner:
+        rows.append([(t("button.groups"), GroupAction(action="list").pack())])
         rows.append([(t("admin_access.button"), AdminAccess(action="list").pack())])
-    rows.append([(t("button.home"), action("home"))])
-    return keyboard(rows)
+    return rows
+
+
+def admin(owner: bool = False) -> InlineKeyboardMarkup:
+    return keyboard([*_admin_rows(owner), [(t("button.home"), action("home"))]])
 
 
 def moderation(reference: str) -> InlineKeyboardMarkup:

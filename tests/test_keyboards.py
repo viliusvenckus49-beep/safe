@@ -16,7 +16,7 @@ def test_home_has_all_product_routes_and_admin_visibility():
     }
     assert {"lookup", "rep", "report", "top", "scams", "profile", "info"} <= normal
     assert "admin" not in normal
-    assert "admin" not in {
+    assert "admin" in {
         Action.unpack(value).name
         for value in callbacks(keyboards.home(True))
         if value.startswith("sc|")

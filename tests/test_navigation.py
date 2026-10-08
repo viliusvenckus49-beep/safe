@@ -132,14 +132,14 @@ async def test_report_errors_keep_back_and_cancel_then_submit_has_no_cancel(jour
 
 async def test_error_notifications_no_cancel_without_active_flow(journey, monkeypatch):
     await journey.send("/add_trusted 42")
-    assert last_message(journey).reply_markup is None
+    assert callbacks(last_message(journey).reply_markup) == [kb.action("home", "receipt")]
 
     async def unavailable(self, target, *, refresh_identity=False):
         raise DomainError("not_found")
 
     monkeypatch.setattr(Service, "profile", unavailable)
     await journey.send("/ask 42")
-    assert last_message(journey).reply_markup is None
+    assert callbacks(last_message(journey).reply_markup) == [kb.action("home")]
     await journey.send("/ask")
     await journey.send("42")
     assert kb.action("close") in callbacks(last_message(journey).reply_markup)
@@ -254,7 +254,7 @@ async def test_result_buttons_include_cancel_in_private_and_group(
         await journey.send(command, chat=chat)
         markup = last_message(journey).reply_markup
         names = [Action.unpack(value).name for value in callbacks(markup)]
-        assert names == ["lookup", "vote+", "vote-", "close"]
+        assert names == ["lookup", "vote+", "vote-", "home", "close"]
         with use_language(locale):
             assert markup.inline_keyboard[-1][0].text == t("button.cancel")
         before = len(journey.transport.deletions)

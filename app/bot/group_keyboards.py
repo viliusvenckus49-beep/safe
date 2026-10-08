@@ -54,6 +54,10 @@ def group(chat_id: int, *, approved: bool = True) -> InlineKeyboardMarkup:
     )
 
 
+def back_to_group(chat_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[button(t("button.back"), "group", chat_id)]])
+
+
 def consent(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

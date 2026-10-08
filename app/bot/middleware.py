@@ -13,7 +13,7 @@ from structlog.contextvars import bind_contextvars, reset_contextvars
 from app import presentation as p
 from app.bot.group_runtime import process_scam_bans
 from app.bot.navigation import error_navigation
-from app.bot.screens import flow_screen, panel_state, preserved_source, render
+from app.bot.screens import flow_screen, panel_state, preserved_source, render, send_screen
 from app.group_services import GroupService
 from app.i18n import use_language
 from app.models import AuditEvent
@@ -152,7 +152,7 @@ class ServiceMiddleware(BaseMiddleware):
                 if isinstance(event, CallbackQuery):
                     await event.answer(p.text("cooldown"), show_alert=True)
                 elif isinstance(event, Message) and actionable:
-                    await event.answer(p.text("cooldown"))
+                    await send_screen(event, p.text("cooldown"), None, False)
                 log.info("update_rate_limited")
                 return None
             if actionable:
@@ -209,11 +209,15 @@ class ServiceMiddleware(BaseMiddleware):
                         # Permission notices remain in chat and do not replace a draft.
                         if isinstance(event, CallbackQuery):
                             if isinstance(event.message, Message):
-                                await event.message.answer(p.error(exc.code))
+                                await send_screen(
+                                    event.message, p.error(exc.code), None, False, persistent=True
+                                )
                             else:
                                 await event.answer(p.error(exc.code), show_alert=True)
                         elif isinstance(event, Message):
-                            await event.answer(p.error(exc.code))
+                            await send_screen(
+                                event, p.error(exc.code), None, False, persistent=True
+                            )
                         return None
                     # A callback may already be acknowledged; send an understandable
                     # message as well so errors never disappear after a double click.

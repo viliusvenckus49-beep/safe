@@ -77,11 +77,28 @@ async def test_service_permission_error_remains_without_discarding_current_panel
     previous, _ = last_sent(journey)
     await journey.send("/add_trusted 42")
     receipt, item = last_sent(journey)
-    assert item.reply_markup is None
+    assert [b.callback_data for row in item.reply_markup.inline_keyboard for b in row] == [
+        Action(name="home", value="receipt").pack()
+    ]
     assert (await journey.data())["screen_message_id"] == previous
     await journey.send("/profile")
     await journey.send("/top")
     assert receipt not in [call.message_id for call in journey.transport.deletions]
+
+
+@pytest.mark.parametrize("kind", ["denied", "trusted"])
+async def test_new_back_button_keeps_persistent_notice_in_history(journey, kind):
+    actor = 1 if kind == "denied" else 900
+    await journey.send("/profile", actor=actor)
+    await journey.send("/add_trusted 42", actor=actor)
+    receipt, item = last_sent(journey)
+    button = item.reply_markup.inline_keyboard[-1][0]
+    assert button.callback_data == Action(name="home", value="receipt").pack()
+    await click_message(journey, button.callback_data, receipt, actor=actor)
+    assert receipt not in [call.message_id for call in journey.transport.deletions]
+    _, screen = last_sent(journey)
+    assert isinstance(screen, SendPhoto)
+    assert await journey.state(actor) is None
 
 
 async def test_unknown_scam_receipt_preserves_id_wizard_and_history(journey, database, settings):
