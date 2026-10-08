@@ -1,8 +1,5 @@
 name: SAFECheck VPS deploy
 on:
-  push:
-    branches: [scam-ban-diagnosis-2.14.0]
-    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -69,51 +66,6 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
           git archive --format=tar.gz HEAD > "$RUNNER_TEMP/safecheck-source.tar.gz"
-      - name: Enable verified staff transport and identity observation
-        env:
-          HOST: ${{ secrets.VPS_HOST }}
-          REMOTE_USER: ${{ secrets.VPS_USER }}
-        run: |
-          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'PYSTAFFCONFIG'
-          import os,re,stat,tempfile
-          from pathlib import Path
-          scope=(-1003976343267,-1004467894566,-1003987480921,-1004421084692,-1004395482317,-1004413023527,-1003802477695)
-          selector=Path('/etc/safecheck/compose.env')
-          text=selector.read_text()
-          match=re.search(r'^SAFECHECK_ENV_FILE=[\"\']?([^\"\'\n]+)',text,re.M)
-          if not match:raise ValueError('Runtime settings location not configured')
-          runtime=Path(match.group(1))
-          if not runtime.is_absolute() or Path('/etc/safecheck') not in runtime.resolve().parents:raise ValueError('Unexpected settings location')
-          for path in (selector,runtime):
-           info=path.lstat()
-           if not stat.S_ISREG(info.st_mode) or info.st_uid != 0:raise ValueError('Expected owned regular settings')
-          state=Path('/etc/safecheck/mtproto')
-          if state.is_symlink() or state.stat().st_uid!=10001 or state.stat().st_mode&0o077:raise ValueError('Session directory is not private')
-          for name in ('api.json','account.session'):
-           info=(state/name).lstat()
-           if not stat.S_ISREG(info.st_mode) or info.st_uid!=10001 or info.st_mode&0o077:raise ValueError('Session file is not private')
-          import subprocess
-          sql='SELECT count(*) FROM managed_groups WHERE approved AND enabled AND chat_id IN ('+','.join(map(str,scope))+');'
-          result=subprocess.run(['docker','exec','safecheck-postgres-1','psql','-U','safecheck','-d','safecheck','-Atc',sql],capture_output=True,check=True)
-          if int(result.stdout)!=len(scope):raise ValueError('Staff scope differs from active protection')
-          def private_update(path,values):
-           content=path.read_text()
-           backup=path.with_name(path.name+'.before-mtproto')
-           if not backup.exists():
-            fd=os.open(backup,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-            with os.fdopen(fd,'w') as f:f.write(content)
-           for key,value in values.items():
-            pattern=re.compile(r'^[ \t]*(?:export[ \t]+)?'+re.escape(key)+r'[ \t]*=.*$',re.M)
-            if len(pattern.findall(content))>1:raise ValueError('Duplicate setting')
-            if pattern.search(content):content=pattern.sub(lambda _:key+'='+value,content)
-            else:content=content.rstrip('\n')+'\n'+key+'='+value+'\n'
-           fd,name=tempfile.mkstemp(dir=path.parent,prefix='.mtproto-settings-')
-           with os.fdopen(fd,'w') as f:f.write(content);f.flush();os.fsync(f.fileno())
-           os.chmod(name,0o600);os.replace(name,path)
-          private_update(selector,{'SAFECHECK_MTPROTO_DIR':str(state)})
-          private_update(runtime,{'GROUP_HELP_ENABLED':'true','GROUP_HELP_STAFF_ID':'-1004300060813','GROUP_HELP_BOT_ID':'239226622','GROUP_HELP_SCOPE_IDS':','.join(map(str,scope)),'GROUP_HELP_STATE_DIR':'/run/mtproto'})
-          print('PrivateStaffConfigurationReady=true')
-          PYSTAFFCONFIG
       - name: Upload and deploy tested source
         env:
           HOST: ${{ secrets.VPS_HOST }}
