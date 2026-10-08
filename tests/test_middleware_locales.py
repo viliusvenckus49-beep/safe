@@ -27,7 +27,7 @@ async def test_early_rejection_uses_saved_language_and_resets_context(
         date=datetime.now(UTC),
         chat=Chat(id=42, type="private"),
         from_user=User(id=42, first_name="Tester", is_bot=False),
-        text="/ask 43",
+        text="/profile 43",
         sender_chat=Chat(id=-100, type="channel") if anonymous else None,
     )
     middleware = ServiceMiddleware(settings, database)

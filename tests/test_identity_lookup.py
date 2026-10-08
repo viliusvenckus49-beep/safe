@@ -237,8 +237,10 @@ async def test_lookup_cache_expires_and_simultaneous_requests_share_one_query(
 
 @pytest.mark.asyncio
 async def test_ask_rechecks_cached_failure_links_existing_scam_and_enqueues(
-    journey, database, settings
+    journey, database, settings, monkeypatch
 ):
+    clock = [1000.0]
+    monkeypatch.setattr("app.bot.middleware.monotonic", lambda: clock[0])
     enabled, client, _ = connect(database)
     settings.group_help_enabled = True
     settings.group_help_bot_id = enabled.group_help_bot_id
@@ -252,6 +254,7 @@ async def test_ask_rechecks_cached_failure_links_existing_scam_and_enqueues(
     client.error = OSError("Unavailable")
     await journey.send("/ask @scammer")
     client.error = None
+    clock[0] += 10
     await journey.send("/ask @scammer")
     async with database() as session:
         core = Service(settings, session)
@@ -261,6 +264,7 @@ async def test_ask_rechecks_cached_failure_links_existing_scam_and_enqueues(
         assert len(jobs) == 1 and jobs[0].telegram_id == 22
     assert len(client.calls) == 2
     client.user_id = 33
+    clock[0] += 10
     await journey.send("/ask @scammer")
     async with database() as session:
         core = Service(settings, session)

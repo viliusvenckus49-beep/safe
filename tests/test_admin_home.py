@@ -213,8 +213,9 @@ async def test_moderator_administration_opens_existing_screens_with_back(
 async def test_private_result_back_returns_to_authorized_home(journey, database, settings, command):
     await prepare(database, settings, MODERATOR, "lt")
     await journey.send(command, actor=MODERATOR)
-    assert kb.action("home") in values(last_screen(journey).reply_markup)
-    await journey.click(kb.action("home"), actor=MODERATOR)
+    back = kb.action("home", "receipt" if command.startswith("/ask") else "")
+    assert back in values(last_screen(journey).reply_markup)
+    await journey.click(back, actor=MODERATOR)
     assert kb.action("admin") in values(last_screen(journey).reply_markup)
 
 

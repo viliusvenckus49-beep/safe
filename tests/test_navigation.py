@@ -245,20 +245,26 @@ async def test_report_decision_returns_to_pending_reports(journey, database, set
 
 @pytest.mark.parametrize("locale", ["lt", "en", "ru"])
 @pytest.mark.parametrize("chat", [None, -100])
-async def test_result_buttons_include_cancel_in_private_and_group(
+async def test_ask_results_stay_while_regular_results_keep_cancel(
     journey, database, settings, locale, chat
 ):
     async with database() as session:
         await Service(settings, session).set_language(1, locale)
-    for command in ["/ask 42", "/ask@redsafecheckbot 42", "/rep 42", "/profile"]:
+    for command in ["/ask 42", "/ask@redsafecheckbot 43", "/rep 42", "/profile"]:
         await journey.send(command, chat=chat)
         markup = last_message(journey).reply_markup
         names = [Action.unpack(value).name for value in callbacks(markup)]
-        assert names == ["lookup", "vote+", "vote-", "home", "close"]
+        persistent = command.startswith("/ask")
+        assert names == ["lookup", "vote+", "vote-", "home"] + ([] if persistent else ["close"])
         with use_language(locale):
-            assert markup.inline_keyboard[-1][0].text == t("button.cancel")
+            assert markup.inline_keyboard[-1][0].text == t(
+                "button.back" if persistent else "button.cancel"
+            )
         before = len(journey.transport.deletions)
-        await journey.click(kb.action("close"), chat=chat)
-        assert len(journey.transport.deletions) == before + 1
+        await journey.click(
+            kb.action("home", "receipt") if persistent else kb.action("close"), chat=chat
+        )
+        if not persistent:
+            assert len(journey.transport.deletions) == before + 1
         state = journey.dp.fsm.get_context(bot=journey.bot, chat_id=chat or 1, user_id=1)
         assert await state.get_state() is None
