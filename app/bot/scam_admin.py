@@ -26,8 +26,11 @@ def cb(name: str, value: str = "") -> str:
     return ScamAdmin(action=name, value=value).pack()
 
 
-def refresh_controls(record):
-    return keyboard([[(t("sm.refresh"), cb("retry_receipt", str(record.id)))]])
+def refresh_controls(record, *, allow_remove: bool = False):
+    rows = [[(t("sm.refresh"), cb("retry_receipt", str(record.id)))]]
+    if allow_remove:
+        rows.append([(t("sm.remove"), cb("remove_receipt", str(record.id)))])
+    return keyboard(rows)
 
 
 def controls(record, page: int = 0, *, persistent: bool = False):
@@ -41,6 +44,7 @@ def controls(record, page: int = 0, *, persistent: bool = False):
         rows.append(
             [(t("sm.refresh" if persistent else "sm.retry"), cb("retry" + suffix, str(record.id)))]
         )
+    rows.append([(t("sm.remove"), cb("remove" + suffix, str(record.id)))])
     rows.append([(t("button.back"), cb("page" + suffix, str(page)))])
     return keyboard(rows)
 
@@ -102,7 +106,13 @@ def register_scam_handlers(router: Router):
         if callback_data.action not in {"retry", "retry_receipt"}:
             await callback.answer()
         name, value = callback_data.action, callback_data.value
-        if name in {"id_receipt", "username_receipt", "page_receipt", "retry_receipt"}:
+        if name in {
+            "id_receipt",
+            "username_receipt",
+            "page_receipt",
+            "retry_receipt",
+            "remove_receipt",
+        }:
             preserved_source.set(message.message_id)
             name = name.removesuffix("_receipt")
         draft = await state.get_data()
@@ -146,7 +156,7 @@ def register_scam_handlers(router: Router):
                 return
             await listing(message, state, service, int(value))
             return
-        if name not in {"view", "id", "username", "retry"}:
+        if name not in {"view", "id", "username", "retry", "remove"}:
             await flow_screen(message, state, p.text("stale"))
             return
         if name == "retry":
@@ -183,7 +193,21 @@ def register_scam_handlers(router: Router):
         page = draft.get("scam_page", 0)
         await clear_flow(state)
         await state.update_data(scam_page=page)
-        if name == "view":
+        if name == "remove":
+            removed = await service.remove_scam(
+                actor,
+                f"u:{record.target_id}",
+                "Administrator removal via SCAM registry",
+                record_id=record.id,
+            )
+            await flow_screen(
+                message,
+                state,
+                p.scam_action(record.target, False) if removed else p.text("stale"),
+                reply_markup=keyboard([[(t("button.back"), cb("page", str(page)))]]),
+                persistent=True,
+            )
+        elif name == "view":
             await flow_screen(
                 message, state, p.scams([record]), reply_markup=controls(record, page)
             )

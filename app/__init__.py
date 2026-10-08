@@ -1,3 +1,3 @@
 """SAFECheck reputation and moderation platform."""
 
-__version__ = "2.15.2"
+__version__ = "2.15.3"

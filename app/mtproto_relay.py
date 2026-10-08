@@ -73,11 +73,11 @@ class GroupHelpRelay:
         self.flood_until = now()
         self.lookups: dict[str, tuple[float, Any]] = {}
 
-    async def lookup_username(self, username: str) -> Any:
-        """Resolve public input for every flow; share short bounded lookup caching."""
+    async def lookup_username(self, username: str, *, refresh: bool = False) -> Any:
+        """Share bounded caching; explicit checks refresh it while respecting flood waits."""
         async with self.identity:
             cached = self.lookups.get(username)
-            if cached is not None and cached[0] > monotonic():
+            if not refresh and cached is not None and cached[0] > monotonic():
                 return cached[1]
             if self.flood_until > now():
                 return None
