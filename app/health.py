@@ -50,6 +50,27 @@ def healthy(path: Path, max_age: float = 180, *, current: float | None = None) -
         return False
 
 
+def snapshot(path: Path | None = None) -> dict:
+    path = path or Path(os.getenv("HEALTH_PATH", "/tmp/safecheck-health.json"))
+    current = time.time()
+    result: dict[str, int | bool | None] = {"healthy": healthy(path, current=current)}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = {}
+    for label, key in (("uptime", "started_at"), ("poll", "poll_at"), ("worker", "worker_at")):
+        value = data.get(key) if isinstance(data, dict) else None
+        result[label] = (
+            int(current - value)
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and 0 < value <= current
+            else None
+        )
+    return result
+
+
 def run() -> None:
     try:
         valid = healthy(

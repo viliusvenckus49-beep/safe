@@ -280,3 +280,24 @@ async def test_explicit_refresh_still_respects_telegram_flood_wait(database):
         assert (await core.profile("@scammer", refresh_identity=True))["user"].telegram_id is None
         assert (await core.profile("@scammer", refresh_identity=True))["user"].telegram_id is None
     assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_live_check_reports_cause_and_preserves_known_numeric_identity(database):
+    from telethon.errors import UsernameInvalidError
+
+    from app import presentation as p
+    from app.i18n import t
+
+    settings, client, _ = connect(database)
+    client.error = UsernameInvalidError(request=None)
+    async with database() as session:
+        core = Service(settings, session)
+        await core.observe(22, "scammer", "Original person")
+        record = await core.add_scam(900, "22")
+        profile = await core.profile("@scammer", refresh_identity=True)
+        assert profile["user"].telegram_id == 22 and profile["scam"].id == record.id
+        assert profile["identity_lookup"].code == "invalid_username"
+        text = p.profile(profile)
+        assert t("diagnostic.identity_invalid_username") in text
+        assert t("diagnostic.identity_saved") in text

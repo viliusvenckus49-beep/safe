@@ -29,6 +29,7 @@ def cb(name: str, value: str = "") -> str:
 def refresh_controls(record, *, allow_remove: bool = False):
     rows = [[(t("sm.refresh"), cb("retry_receipt", str(record.id)))]]
     if allow_remove:
+        rows.append([(t("diagnostic.button"), cb("details_receipt", str(record.id)))])
         rows.append([(t("sm.remove"), cb("remove_receipt", str(record.id)))])
     return keyboard(rows)
 
@@ -44,6 +45,7 @@ def controls(record, page: int = 0, *, persistent: bool = False):
         rows.append(
             [(t("sm.refresh" if persistent else "sm.retry"), cb("retry" + suffix, str(record.id)))]
         )
+    rows.append([(t("diagnostic.button"), cb("details" + suffix, str(record.id)))])
     rows.append([(t("sm.remove"), cb("remove" + suffix, str(record.id)))])
     rows.append([(t("button.back"), cb("page" + suffix, str(page)))])
     return keyboard(rows)
@@ -112,6 +114,7 @@ def register_scam_handlers(router: Router):
             "page_receipt",
             "retry_receipt",
             "remove_receipt",
+            "details_receipt",
         }:
             preserved_source.set(message.message_id)
             name = name.removesuffix("_receipt")
@@ -156,7 +159,7 @@ def register_scam_handlers(router: Router):
                 return
             await listing(message, state, service, int(value))
             return
-        if name not in {"view", "id", "username", "retry", "remove"}:
+        if name not in {"view", "id", "username", "retry", "remove", "details"}:
             await flow_screen(message, state, p.text("stale"))
             return
         if name == "retry":
@@ -193,7 +196,17 @@ def register_scam_handlers(router: Router):
         page = draft.get("scam_page", 0)
         await clear_flow(state)
         await state.update_data(scam_page=page)
-        if name == "remove":
+        if name == "details":
+            rows = await GroupService(service.settings, service.session).ban_diagnostics(
+                actor, record.id
+            )
+            await flow_screen(
+                message,
+                state,
+                p.ban_diagnostics(record.target, rows),
+                reply_markup=controls(record, page),
+            )
+        elif name == "remove":
             removed = await service.remove_scam(
                 actor,
                 f"u:{record.target_id}",

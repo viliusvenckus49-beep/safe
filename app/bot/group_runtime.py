@@ -101,7 +101,7 @@ async def _execute_bans(
         except (TimeoutError, OSError) as error:
             result = type(error).__name__
         await service.finish_ban(
-            job.id, success, result, retry_after=retry_after, permanent=permanent
+            job.id, success, result, retry_after=retry_after, permanent=permanent, reason=reason
         )
         log.info(
             "group_ban_result",
