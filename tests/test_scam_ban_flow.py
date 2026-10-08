@@ -373,3 +373,35 @@ async def test_database_identity_lock_not_held_during_telegram_request(database,
             return await super().ban_chat_member(chat_id=chat_id, user_id=user_id)
 
     assert (await process_scam_bans(InspectBot(), settings, database, record_id)).succeeded == 1
+
+
+async def test_manual_retry_rechecks_bans_and_bounds_repeated_clicks(database, settings):
+    from app.errors import DomainError
+
+    record_id = await prepare(database, settings, groups=2)
+    await process_scam_bans(BanBot({-1000: TelegramBadRequest}), settings, database, record_id)
+    async with database() as session:
+        service = GroupService(settings, session)
+        with pytest.raises(DomainError):
+            await service.retry_scam_bans(1, record_id)
+        await service.retry_scam_bans(900, record_id)
+        jobs = list((await session.scalars(select(BanAction))).all())
+        assert all(job.status == "PENDING" and job.attempts == 0 for job in jobs)
+        with pytest.raises(DomainError, match="cooldown"):
+            await service.retry_scam_bans(900, record_id)
+    bot = BanBot()
+    summary = await process_scam_bans(bot, settings, database, record_id)
+    assert summary.succeeded == 2 and summary.pending == 0
+    assert len(bot.calls) == 2
+
+
+async def test_manual_retry_preserves_telegram_flood_wait(database, settings):
+    record_id = await prepare(database, settings, groups=1)
+    await process_scam_bans(BanBot({-1000: TelegramRetryAfter}), settings, database, record_id)
+    async with database() as session:
+        await GroupService(settings, session).retry_scam_bans(900, record_id)
+        job = await session.scalar(select(BanAction))
+        assert job.status == "FAILED" and job.result_type == "TelegramRetryAfter"
+    bot = BanBot()
+    summary = await process_scam_bans(bot, settings, database, record_id)
+    assert summary.pending == 1 and not bot.calls

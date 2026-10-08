@@ -27,12 +27,12 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
     with use_language("lt"):
         rows = keyboards.home().inline_keyboard
         assert [[button.text for button in row] for row in rows] == [
-            ["◈ TIKRINTI"],
-            ["＋ ĮVERTINTI", "△ PRANEŠTI"],
-            ["♛ TOP 10", "⛨ SCAM REGISTRAS"],
+            ["🔍 TIKRINTI"],
+            ["＋ ĮVERTINTI", "🚨 PRANEŠTI"],
+            ["🏆 TOP 10", "⛨ SCAM REGISTRAS"],
             ["◇ PROFILIS", "ⓘ INFORMACIJA"],
             ["↻ GRUPĖS ATKŪRIMAS"],
-            ["◎ KALBA"],
+            ["🌐 KALBA"],
             ["× UŽDARYTI"],
         ]
         assert [[button.callback_data for button in row] for row in rows] == [

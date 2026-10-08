@@ -43,7 +43,6 @@ async def test_group_notifications_have_no_buttons(journey, database, settings, 
         "/scammers",
         "/add_trusted",
         "/add_trusted 42",
-        "/add_sc 43",
     ]:
         await journey.send(command, actor=900, chat=-100)
         assert last_message(journey).reply_markup is None, command

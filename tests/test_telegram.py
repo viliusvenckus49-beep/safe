@@ -631,3 +631,43 @@ async def test_cancel_command_closes_latest_callback_panel(journey):
     assert await journey.data() == {}
     assert await journey.state() is None
     assert len(journey.transport.calls) == panel_count
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["42", "@Example"])
+@pytest.mark.parametrize("chat", [900, -100])
+async def test_del_sc_without_reason_removes_immediately(journey, database, target, chat):
+    await journey.send(f"/add_sc {target}", actor=900, chat=chat)
+    await journey.send(f"/del_sc {target}", actor=1, chat=-100)
+    async with database() as session:
+        assert (await session.scalar(select(ScamRecord))).status == "ACTIVE"
+    await journey.send(f"/del_sc {target}", actor=900, chat=chat)
+    async with database() as session:
+        record = await session.scalar(select(ScamRecord))
+        assert record.status == "REMOVED"
+        assert record.removed_by == 900
+        assert record.removal_reason == "Administrator removal via /del_sc"
+    assert await journey.state(actor=900) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chat", [None, -100])
+async def test_scam_receipt_refresh_edits_in_place_and_denies_non_admin(journey, database, chat):
+    from app.bot.callbacks import ScamAdmin
+
+    await journey.send("/add_sc 42", actor=900, chat=chat)
+    async with database() as session:
+        record_id = (await session.scalar(select(ScamRecord))).id
+    data = ScamAdmin(action="retry_receipt", value=str(record_id)).pack()
+    markup = journey.transport.calls[-1].reply_markup
+    assert any(b.callback_data == data for row in markup.inline_keyboard for b in row)
+    before = len(journey.transport.calls)
+    await journey.click(data, actor=1, chat=chat)
+    assert not any(isinstance(call, EditMessageText) for call in journey.transport.calls[before:])
+    before = len(journey.transport.calls)
+    await journey.click(data, actor=900, chat=chat)
+    assert any(isinstance(call, EditMessageText) for call in journey.transport.calls[before:])
+    assert not any(isinstance(call, SendMessage) for call in journey.transport.calls[before:])
+    before = len(journey.transport.calls)
+    await journey.click(data, actor=900, chat=chat)
+    assert not any(isinstance(call, EditMessageText) for call in journey.transport.calls[before:])

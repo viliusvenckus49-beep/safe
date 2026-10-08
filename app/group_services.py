@@ -97,6 +97,51 @@ class GroupService:
         self.settings, self.session = settings, session
         self.core = Service(settings, session)
 
+    async def retry_scam_bans(self, actor: int, record_id: int) -> None:
+        """Recheck active protection without bypassing leases or Telegram flood waits."""
+        try:
+            await self.core.require_admin(actor)
+            await self.core.repo.lock_identity_metadata()
+            await self.core.require_admin(actor)
+            record = await self.core.repo.scam_by_id(record_id)
+            if record is None or record.status != "ACTIVE":
+                raise DomainError("stale_callback")
+            if record.target.telegram_id is None:
+                raise DomainError("invalid_target")
+            recent = await self.session.scalar(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.action == "scam_manual_retry",
+                    AuditEvent.target_id == record.target_id,
+                    AuditEvent.created_at >= now() - timedelta(seconds=60),
+                )
+                .limit(1)
+            )
+            if recent is not None:
+                raise DomainError("cooldown")
+            await enqueue_scam_bans(self.session, record)
+            active_groups = select(ManagedGroup.chat_id).where(
+                ManagedGroup.approved.is_(True), ManagedGroup.enabled.is_(True)
+            )
+            await self.session.execute(
+                update(BanAction)
+                .where(
+                    BanAction.scam_record_id == record.id,
+                    BanAction.chat_id.in_(active_groups),
+                    BanAction.status.in_(["SUCCEEDED", "FAILED"]),
+                    (BanAction.result_type != "TelegramRetryAfter")
+                    | BanAction.result_type.is_(None)
+                    | (BanAction.next_attempt_at <= now()),
+                )
+                .values(status="PENDING", attempts=0, next_attempt_at=now(), completed_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            self.core._audit(actor, "scam_manual_retry", record.target_id, record_id=record.id)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
+
     def require_owner(self, actor: int) -> None:
         if self.settings.group_owner is None or actor != self.settings.group_owner:
             raise DomainError("forbidden")
