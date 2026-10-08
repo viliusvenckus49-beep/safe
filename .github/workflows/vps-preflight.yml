@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: [scam-ban-diagnosis-2.14.0]
+    branches: [safecheck-2.13.1]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -42,53 +42,7 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          sudo -n docker run --rm -i --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" --mount "type=bind,src=$HOME/.config/safecheck-mtproto-account2,dst=/state" --entrypoint python safecheck-mtproto-tools:1.42.0 - <<'PYSTAFF'
-          import asyncio,json
-          from telethon import TelegramClient
-          async def main():
-           with open('/state/api.json') as f:config=json.load(f)
-           client=TelegramClient('/state/account.session',config['api_id'],config['api_hash'],flood_sleep_threshold=0)
-           try:
-            await client.connect()
-            if not await client.is_user_authorized():raise ValueError('Account not authenticated')
-            bot=await client.get_entity('ghStaffBot')
-            if not bot.bot:raise ValueError('Expected staff bot')
-            print('GroupHelpBotID='+str(bot.id))
-            print('GroupHelpStaffID=-1004300060813')
-           finally:await client.disconnect()
-          try:asyncio.run(main())
-          except Exception as error:print('StaffIdentityError='+type(error).__name__);raise SystemExit(1)
-          PYSTAFF
-          sudo -n python3 - "$HOME/.config/safecheck-mtproto-account2" <<'PYSESSION'
-          import os,sys,sqlite3,stat
-          from pathlib import Path
-          source=Path(sys.argv[1]);destination=Path('/etc/safecheck/mtproto')
-          if destination.is_symlink():raise ValueError('Unexpected session destination')
-          destination.mkdir(mode=0o700,exist_ok=True)
-          os.chmod(destination,0o700);os.chown(destination,10001,10001)
-          for name in ('api.json','account.session'):
-           item=source/name
-           info=item.lstat()
-           if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:raise ValueError('Source is not private')
-           target=destination/name
-           if target.exists():
-            if target.is_symlink() or not target.is_file():raise ValueError('Unsafe runtime state')
-            continue
-           temporary=destination/(name+'.pending')
-           if temporary.exists() or temporary.is_symlink():raise ValueError('Existing pending state')
-           os.umask(0o077)
-           if name=='account.session':
-            original=sqlite3.connect('file:'+str(item)+'?mode=ro',uri=True)
-            copied=sqlite3.connect(temporary)
-            try:original.backup(copied)
-            finally:copied.close();original.close()
-           else:
-            fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-            with os.fdopen(fd,'wb') as f:f.write(item.read_bytes())
-           os.chmod(temporary,0o600);os.chown(temporary,10001,10001)
-           temporary.replace(target)
-          print('RuntimeSessionPrepared=true')
-          PYSESSION
+          df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
         if: always()

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from aiogram.exceptions import TelegramRetryAfter
 from sqlalchemy import select
+from test_integration_contracts import postgres_contract as postgres_fixture
 
 from app.bot.group_runtime import process_scam_bans
 from app.config import Settings
@@ -11,6 +12,8 @@ from app.group_services import GroupService
 from app.models import AuditEvent, BanAction, ScamRecord, now
 from app.mtproto_relay import GroupHelpRelay, private_configuration, set_relay
 from app.services import Service
+
+postgres_contract = postgres_fixture
 
 
 class Client:
@@ -272,7 +275,9 @@ def test_disabled_configuration_preserves_existing_bot_api_default(settings):
 async def test_activation_only_requeues_failed_active_staff_jobs_once(database):
     settings, record_id, relay, client = await prepare(database)
     async with database() as session:
-        jobs = list((await session.scalars(select(BanAction))).all())
+        jobs = list(
+            (await session.scalars(select(BanAction).order_by(BanAction.chat_id.desc()))).all()
+        )
         for job in jobs:
             job.status, job.attempts, job.result_type = "FAILED", 8, "TelegramBadRequest"
         jobs[1].result_type = "TelegramRetryAfter"
@@ -327,3 +332,60 @@ async def test_background_resolution_skips_exhausted_records(database):
         assert (
             await Service(settings, session).repo.scam_by_id(second_id)
         ).target.telegram_id == 22
+
+
+@pytest.mark.asyncio
+async def test_postgres_bridge_bigint_scope_and_account_id_survive_restart(postgres_contract):
+    factory, base = postgres_contract
+    settings = relay_settings().model_copy(update={"database_url": base.database_url})
+    async with factory() as session:
+        for chat in settings.group_help_scope:
+            await GroupService(settings, session).register_group(900, chat, "Test group", True)
+        record = await Service(settings, session).add_scam(900, "@scammer")
+        record_id = record.id
+    relay = GroupHelpRelay(settings, factory, Client(), SimpleNamespace(id=555))
+    await relay.activate(8876719157)
+    await relay.activate(8876719157)
+    assert await relay.resolve_pending() == 1
+    async with factory() as session:
+        record = await Service(settings, session).repo.scam_by_id(record_id)
+        assert record.target.telegram_id == 22
+        assert (
+            len(
+                (
+                    await session.scalars(
+                        select(AuditEvent).where(AuditEvent.action == "group_help_activated")
+                    )
+                ).all()
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_staff_ban_shares_only_a_real_cached_user_entity(database):
+    from telethon.tl.types import InputPeerUser
+
+    settings, record_id, relay, client = await prepare(database)
+    original = client.get_input_entity
+
+    async def input_entity(value):
+        return InputPeerUser(22, 1234567) if value == 22 else await original(value)
+
+    client.get_input_entity = input_entity
+    async with database() as session:
+        service = GroupService(settings, session)
+        job = (await service.claim_bans())[0]
+        assert await relay.dispatch(service, job)
+    message = next(r for r in client.calls if hasattr(r, "message"))
+    assert message.message == "/ban 22"
+    assert len(message.entities) == 1
+    assert message.entities[0].offset == 5
+    assert message.entities[0].user_id.user_id == 22
+
+
+@pytest.mark.asyncio
+async def test_recycled_username_cannot_replace_a_known_numeric_peer(database):
+    settings, record_id, relay, client = await prepare(database)
+    client.user_id = 33
+    assert await relay.target_mention(22, "scammer") == []

@@ -13,7 +13,7 @@ from typing import Any
 import structlog
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.methods import BanChatMember
-from sqlalchemy import select, update
+from sqlalchemy import BigInteger, cast, select, update
 
 from app.config import Settings
 from app.models import AuditEvent, BanAction, ManagedGroup, ScamRecord, User, now
@@ -152,7 +152,7 @@ class GroupHelpRelay:
                 select(AuditEvent.id)
                 .where(
                     AuditEvent.action == "group_help_activated",
-                    AuditEvent.details["account_id"].as_integer() == account_id,
+                    cast(AuditEvent.details["account_id"].as_string(), BigInteger) == account_id,
                     AuditEvent.details["staff_id"].as_integer()
                     == self.settings.group_help_staff_id,
                     AuditEvent.details["scope"].as_string() == scope,
@@ -216,6 +216,54 @@ class GroupHelpRelay:
             .limit(1)
         )
 
+    async def telegram_user(self, username: str) -> Any:
+        from telethon.tl.functions.contacts import ResolveUsernameRequest
+
+        # ResolveUsernameRequest bypasses the account's cached username association.
+        result = await asyncio.wait_for(self.client(ResolveUsernameRequest(username)), 5)
+        peer_id = getattr(result.peer, "user_id", None)
+        user = next((u for u in result.users if u.id == peer_id), None)
+        if (
+            user is None
+            or getattr(user, "deleted", False)
+            or (user.username or "").casefold() != username.casefold()
+        ):
+            raise ValueError("Telegram did not return the requested public user")
+        return user
+
+    async def target_mention(self, user_id: int, username: str | None) -> list[Any]:
+        """Expose an actual Telegram user entity in staff, never a fabricated numeric peer."""
+        from telethon import utils
+        from telethon.tl.types import InputMessageEntityMentionName
+
+        try:
+            try:
+                peer = await self.client.get_input_entity(user_id)
+                if getattr(peer, "user_id", None) != user_id:
+                    raise ValueError("Not a cached user peer")
+            except ValueError:
+                if not username:
+                    return []
+                user = await self.telegram_user(username)
+                if user.id != user_id:
+                    return []  # A recycled username cannot redirect a numeric SCAM judgment.
+                peer = await self.client.get_input_entity(user)
+            return [
+                InputMessageEntityMentionName(
+                    offset=5,
+                    length=len(str(user_id)),
+                    user_id=utils.get_input_user(peer),
+                )
+            ]
+        except Exception as error:
+            await self._note_flood(error)
+            structlog.get_logger().info(
+                "group_help_peer_not_available",
+                user_id=user_id,
+                exception_type=type(error).__name__,
+            )
+            return []
+
     async def resolve_record(self, record_id: int) -> bool:
         """Fresh Telegram resolution; existing numeric associations are never overwritten."""
         async with self.identity:
@@ -241,7 +289,10 @@ class GroupHelpRelay:
                 ):
                     await session.rollback()
                     return False
-                actor, username = record.moderator_id, record.target.username
+                actor, username = (
+                    self.settings.group_owner or record.moderator_id,
+                    record.target.username,
+                )
                 try:
                     await core.require_admin(actor)
                 except DomainError:
@@ -257,18 +308,7 @@ class GroupHelpRelay:
                 )
                 await session.commit()
             try:
-                from telethon.tl.functions.contacts import ResolveUsernameRequest
-
-                # ResolveUsernameRequest bypasses the account's cached username association.
-                result = await asyncio.wait_for(self.client(ResolveUsernameRequest(username)), 5)
-                peer_id = getattr(result.peer, "user_id", None)
-                user = next((u for u in result.users if u.id == peer_id), None)
-                if (
-                    user is None
-                    or getattr(user, "deleted", False)
-                    or (user.username or "").casefold() != username.casefold()
-                ):
-                    raise ValueError("Telegram did not return the requested public user")
+                user = await self.telegram_user(username)
                 async with self.sessions() as session:
                     core = Service(self.settings, session)
                     await ScamManagement(core).supplement(
@@ -390,6 +430,7 @@ class GroupHelpRelay:
                 ):
                     await session.rollback()
                     return False
+                username = record.target.username
                 last = await self._latest(session, "group_help_dispatch", record.id)
                 if not due(last):
                     await session.rollback()
@@ -423,6 +464,9 @@ class GroupHelpRelay:
                     ).digest()[:8],
                     "big",
                 ) & ((1 << 63) - 1)
+                entities = await self.target_mention(job.telegram_id, username)
+                if self.flood_until > now():
+                    raise TimeoutError("Peer lookup is rate-limited")
                 # Group Help's staff parser accepts plain commands, not /ban@ghStaffBot.
                 await self.client(
                     SendMessageRequest(
@@ -430,6 +474,7 @@ class GroupHelpRelay:
                         message=f"/ban {job.telegram_id}",
                         random_id=random_id,
                         no_webpage=True,
+                        entities=entities,
                     )
                 )
                 structlog.get_logger().info(
