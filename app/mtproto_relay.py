@@ -153,7 +153,7 @@ class GroupHelpRelay:
                 .where(
                     AuditEvent.action == "group_help_activated",
                     cast(AuditEvent.details["account_id"].as_string(), BigInteger) == account_id,
-                    AuditEvent.details["staff_id"].as_integer()
+                    cast(AuditEvent.details["staff_id"].as_string(), BigInteger)
                     == self.settings.group_help_staff_id,
                     AuditEvent.details["scope"].as_string() == scope,
                 )
