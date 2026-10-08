@@ -44,7 +44,6 @@ def home(admin: bool = False, *, private: bool = True, owner: bool = False) -> I
     rows.append([(t("button.language"), action("language"))])
     if admin and private:
         rows.append([(t("button.admin"), action("admin"))])
-        rows.extend(_admin_rows(owner))
     rows.append([(t("button.close"), action("close"))])
     return keyboard(rows)
 
@@ -108,6 +107,7 @@ def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
         [(t("button.add_scam"), action("add_sc")), (t("button.remove_scam"), action("del_sc"))],
         [(t("button.users"), action("users", "0")), (t("button.stats"), action("stats"))],
         [(t("button.audit"), action("audit"))],
+        [(t("button.status"), action("status"))],
         [(t("admin_help.button"), AdminHelp().pack())],
     ]
     if owner:

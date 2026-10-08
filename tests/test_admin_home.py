@@ -1,4 +1,4 @@
-"""Private management shortcuts must use persisted roles and existing guarded routes."""
+"""Private administration entry uses persisted roles and existing guarded routes."""
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -55,15 +55,20 @@ async def test_private_start_exposes_only_existing_role_permissions(
     with use_language(lang):
         assert screen.reply_markup == kb.home(actor != 1, owner=actor == OWNER)
         if actor != 1:
-            assert set(values(kb.admin(actor == OWNER))) - {kb.action("home")} <= set(
-                values(screen.reply_markup)
-            )
             labels = [b.text for row in screen.reply_markup.inline_keyboard for b in row]
             assert t("button.admin") in labels
     routes = values(screen.reply_markup)
+    assert set(routes) - set(values(kb.home())) == ({kb.action("admin")} if actor != 1 else set())
+    assert not (set(routes) & (set(values(kb.admin(True))) - {kb.action("home")}))
+    assert (kb.action("admin") in routes) is (actor != 1)
+    if actor == 1:
+        return
+    await journey.click(kb.action("admin"), actor=actor)
+    with use_language(lang):
+        assert last_screen(journey).reply_markup == kb.admin(actor == OWNER)
+    routes = values(last_screen(journey).reply_markup)
     assert (GroupAction(action="list").pack() in routes) is (actor == OWNER)
     assert (AdminAccess(action="list").pack() in routes) is (actor == OWNER)
-    assert (kb.action("admin") in routes) is (actor != 1)
 
 
 async def test_trusted_status_does_not_grant_management_menu(journey, database, settings):
@@ -107,10 +112,11 @@ async def test_group_start_never_exposes_global_management(
     assert last_screen(journey).reply_markup == kb.home(private=False)
     await journey.click(kb.action("home"), actor=actor, chat=-100)
     assert last_screen(journey).reply_markup == kb.home(private=False)
-    await journey.click(kb.action("admin"), actor=actor, chat=-100)
-    assert isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
-    assert journey.transport.calls[-1].show_alert
-    assert last_screen(journey).reply_markup == kb.home(private=False)
+    for name in ("admin", "status"):
+        await journey.click(kb.action(name), actor=actor, chat=-100)
+        assert isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
+        assert journey.transport.calls[-1].show_alert
+        assert last_screen(journey).reply_markup == kb.home(private=False)
 
 
 def test_owner_flag_alone_or_group_context_cannot_expose_management():
@@ -119,15 +125,18 @@ def test_owner_flag_alone_or_group_context_cannot_expose_management():
 
 
 @pytest.mark.parametrize("return_route", [kb.action("home"), Language(lang="en").pack()])
+@pytest.mark.parametrize("protected_route", [kb.action("add_sc"), kb.action("status")])
 async def test_revocation_hides_buttons_and_rejects_saved_callback(
-    journey, database, settings, return_route
+    journey, database, settings, return_route, protected_route
 ):
     await prepare(database, settings, MODERATOR, "lt")
     await journey.send("/start", actor=MODERATOR)
+    assert kb.action("admin") in values(last_screen(journey).reply_markup)
+    await journey.click(kb.action("admin"), actor=MODERATOR)
     assert kb.action("add_sc") in values(last_screen(journey).reply_markup)
     async with database() as session:
         await AdminService(settings, session).change(OWNER, str(MODERATOR), False, "b" * 32)
-    await journey.click(kb.action("add_sc"), actor=MODERATOR)
+    await journey.click(protected_route, actor=MODERATOR)
     assert isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
     assert journey.transport.calls[-1].show_alert
     assert await journey.state(MODERATOR) is None
@@ -179,20 +188,24 @@ async def test_moderator_cannot_execute_owner_only_menu_routes(journey, database
         kb.action("users", "0"),
         kb.action("stats"),
         kb.action("audit"),
+        kb.action("status"),
         AdminHelp().pack(),
     ],
 )
-async def test_moderator_start_shortcuts_open_existing_screens_with_back(
+async def test_moderator_administration_opens_existing_screens_with_back(
     journey, database, settings, route
 ):
     await prepare(database, settings, MODERATOR, "lt")
     await journey.send("/start", actor=MODERATOR)
-    assert route in values(last_screen(journey).reply_markup)
+    assert kb.action("admin") in values(last_screen(journey).reply_markup)
+    await journey.click(kb.action("admin"), actor=MODERATOR)
+    assert route in values(last_screen(journey).reply_markup) or route == kb.action("admin")
     await journey.click(route, actor=MODERATOR)
     routes = values(last_screen(journey).reply_markup)
     assert kb.action("admin") in routes or kb.action("home") in routes
     await journey.click(kb.action("home"), actor=MODERATOR)
-    assert kb.action("add_sc") in values(last_screen(journey).reply_markup)
+    assert kb.action("admin") in values(last_screen(journey).reply_markup)
+    assert kb.action("add_sc") not in values(last_screen(journey).reply_markup)
     assert await journey.state(MODERATOR) is None
 
 
@@ -203,6 +216,32 @@ async def test_private_result_back_returns_to_authorized_home(journey, database,
     assert kb.action("home") in values(last_screen(journey).reply_markup)
     await journey.click(kb.action("home"), actor=MODERATOR)
     assert kb.action("admin") in values(last_screen(journey).reply_markup)
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+@pytest.mark.parametrize("actor", [MODERATOR, OWNER])
+async def test_status_button_matches_command_and_returns_to_administration(
+    journey, database, settings, monkeypatch, lang, actor
+):
+    await prepare(database, settings, actor, lang)
+    monkeypatch.setattr(
+        "app.health.snapshot", lambda: {"healthy": True, "uptime": 120, "poll": 2, "worker": 3}
+    )
+    await journey.send("/start", actor=actor)
+    assert kb.action("status") not in values(last_screen(journey).reply_markup)
+    await journey.click(kb.action("admin"), actor=actor)
+    menu = last_screen(journey).reply_markup
+    buttons = {b.callback_data: b.text for row in menu.inline_keyboard for b in row}
+    with use_language(lang):
+        assert buttons[kb.action("status")] == t("button.status")
+    await journey.send("/status", actor=actor)
+    expected = last_screen(journey).text
+    await journey.click(kb.action("status"), actor=actor)
+    status = last_screen(journey)
+    assert status.text == expected
+    assert values(status.reply_markup) == [kb.action("admin")]
+    await journey.click(kb.action("admin"), actor=actor)
+    assert kb.action("status") in values(last_screen(journey).reply_markup)
 
 
 async def test_group_export_has_back_to_group_and_owner_guard(journey, database, settings):

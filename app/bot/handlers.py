@@ -60,6 +60,7 @@ ADMIN_ACTIONS = {
     "admin_target_back",
     "pending",
     "stats",
+    "status",
     "audit",
     "users",
     "add_sc",
@@ -137,6 +138,48 @@ async def home_keyboard(service: Service, actor: int, *, private: bool) -> Inlin
         admin=private and await service.is_admin(actor),
         owner=private and service.access.is_owner(actor),
         private=private,
+    )
+
+
+async def show_runtime_status(
+    message: Message, state: FSMContext, service: Service, actor: int
+) -> None:
+    from app.health import snapshot
+    from app.mtproto_relay import active_relay
+
+    await service.require_admin(actor)
+    if message.chat.type != "private":
+        await message.answer(p.text("admin_private"))
+        return
+    data = snapshot()
+    metrics = await service.repo.operational_stats()
+    connected = active_relay()
+    is_connected = bool(connected and getattr(connected.client, "is_connected", lambda: False)())
+    relay = (
+        "disabled"
+        if not service.settings.group_help_enabled
+        else "connected"
+        if is_connected
+        else "disconnected"
+    )
+    await clear_flow(state)
+    await flow_screen(
+        message,
+        state,
+        t(
+            "diagnostic.status",
+            ban_terminal=metrics["ban_terminal"],
+            oldest_pending_seconds=metrics["oldest_pending_seconds"],
+            pending_reports=metrics["pending_reports"],
+            pending_rep=metrics["pending_rep"],
+            health=t("diagnostic.healthy" if data["healthy"] else "diagnostic.unhealthy"),
+            relay=t("diagnostic." + relay),
+            **{
+                key: data[key] if data[key] is not None else t("diagnostic.no_signal")
+                for key in ("uptime", "poll", "worker")
+            },
+        ),
+        reply_markup=kb.back("admin"),
     )
 
 
@@ -247,45 +290,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
 
     @router.message(Command("status"))
     async def runtime_status(message: Message, service: Service, state: FSMContext) -> None:
-        from app.health import snapshot
-        from app.mtproto_relay import active_relay
-
-        await service.require_admin(actor_id(message))
-        if message.chat.type != "private":
-            await message.answer(p.text("admin_private"))
-            return
-        data = snapshot()
-        metrics = await service.repo.operational_stats()
-        connected = active_relay()
-        is_connected = bool(
-            connected and getattr(connected.client, "is_connected", lambda: False)()
-        )
-        relay = (
-            "disabled"
-            if not service.settings.group_help_enabled
-            else "connected"
-            if is_connected
-            else "disconnected"
-        )
-        await clear_flow(state)
-        await flow_screen(
-            message,
-            state,
-            t(
-                "diagnostic.status",
-                ban_terminal=metrics["ban_terminal"],
-                oldest_pending_seconds=metrics["oldest_pending_seconds"],
-                pending_reports=metrics["pending_reports"],
-                pending_rep=metrics["pending_rep"],
-                health=t("diagnostic.healthy" if data["healthy"] else "diagnostic.unhealthy"),
-                relay=t("diagnostic." + relay),
-                **{
-                    key: data[key] if data[key] is not None else t("diagnostic.no_signal")
-                    for key in ("uptime", "poll", "worker")
-                },
-            ),
-            reply_markup=kb.back("admin"),
-        )
+        await show_runtime_status(message, state, service, actor_id(message))
 
     @router.message(Command("report"))
     async def report_command(message: Message, state: FSMContext, service: Service) -> None:
@@ -554,6 +559,8 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 p.text("admin"),
                 reply_markup=kb.admin(owner=service.access.is_owner(actor)),
             )
+        elif name == "status":
+            await show_runtime_status(message, state, service, actor)
         elif name in {"add_sc", "del_sc"}:
             await clear_flow(state)
             await state.set_state(InputFlow.admin_target)
