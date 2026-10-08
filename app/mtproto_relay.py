@@ -8,6 +8,7 @@ import stat
 import uuid
 from datetime import UTC, timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 import structlog
@@ -70,6 +71,30 @@ class GroupHelpRelay:
         self.commands = asyncio.Lock()
         self.identity = asyncio.Lock()
         self.flood_until = now()
+        self.lookups: dict[str, tuple[float, Any]] = {}
+
+    async def lookup_username(self, username: str) -> Any:
+        """Resolve public input for every flow; share short bounded lookup caching."""
+        async with self.identity:
+            cached = self.lookups.get(username)
+            if cached is not None and cached[0] > monotonic():
+                return cached[1]
+            if self.flood_until > now():
+                return None
+            user = None
+            try:
+                user = await self.telegram_user(username)
+            except Exception as error:
+                await self._note_flood(error)
+                structlog.get_logger().info(
+                    "mtproto_username_lookup_failed",
+                    username=username,
+                    exception_type=type(error).__name__,
+                )
+            if len(self.lookups) >= 128:
+                self.lookups.pop(next(iter(self.lookups)))
+            self.lookups[username] = (monotonic() + (30 if user is not None else 15), user)
+            return user
 
     @classmethod
     async def connect(cls, settings: Settings, sessions: Any) -> "GroupHelpRelay":

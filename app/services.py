@@ -1,3 +1,4 @@
+import asyncio
 import re
 import secrets
 from datetime import UTC, datetime
@@ -73,6 +74,14 @@ class Service:
         username = username.lower().lstrip("@") if username else None
         await self.repo.lock_identity_metadata()
         user = await self.repo.user_by_telegram(tg_id)
+        if user is None and username and self.settings.group_help_enabled:
+            # Complete the existing unknown row instead of orphaning its REP,
+            # TRUSTED or report history when its verified numeric ID is first seen.
+            user = await self.session.scalar(
+                select(User).where(User.telegram_id.is_(None), User.username == username)
+            )
+            if user is not None:
+                user.telegram_id = tg_id
         if user is None:
             user = User(telegram_id=tg_id, display_name=name[:256], username=username)
             self.session.add(user)
@@ -149,10 +158,40 @@ class Service:
                 await self.session.refresh(user)
         return user
 
+    async def _resolve_public_username(self, username: str) -> User | None:
+        from app.mtproto_relay import active_relay
+
+        relay = active_relay() if self.settings.group_help_enabled else None
+        if relay is None:
+            return None
+        try:
+            observed = await asyncio.wait_for(relay.lookup_username(username), 6)
+        except (TimeoutError, OSError) as error:
+            structlog.get_logger().info(
+                "mtproto_username_lookup_failed",
+                username=username,
+                exception_type=type(error).__name__,
+            )
+            return None
+        if observed is None:
+            return None
+        name = " ".join(part for part in (observed.first_name, observed.last_name) if part)
+        return await self.observe(observed.id, observed.username, name or "User")
+
     async def resolve(self, identifier: str, *, _retried: bool = False) -> User:
         identifier = identifier.strip()
         if not identifier or len(identifier) > 64:
             raise DomainError("invalid_target")
+        if not identifier.startswith("u:") and not identifier.isdigit():
+            username = identifier.removeprefix("@").lower()
+            if not re.fullmatch(r"[a-z][a-z0-9_]{4,31}", username):
+                raise DomainError("invalid_target")
+            # Network work precedes identity locking. All public target inputs
+            # share this path; numeric IDs and pinned callbacks are never redirected.
+            if not _retried:
+                observed = await self._resolve_public_username(username)
+                if observed is not None:
+                    return observed
         await self.repo.lock_identity_metadata()
         if identifier.startswith("u:"):
             raw_id = identifier[2:]
@@ -196,6 +235,17 @@ class Service:
                         raise
                     return await self.resolve(identifier, _retried=True)
         await self.session.commit()
+        if (
+            self.settings.group_help_enabled
+            and identifier.startswith("u:")
+            and user.telegram_id is None
+            and user.username
+        ):
+            observed = await self._resolve_public_username(user.username)
+            if observed is not None:
+                if observed.id == user.id:
+                    return observed
+                await self.session.refresh(user)
         return user
 
     async def _actor(self, actor: int) -> User:

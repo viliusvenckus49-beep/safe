@@ -91,6 +91,14 @@ def display_name(user: Any) -> str:
     return f"@{user.username}" if user.username else t("p.user")
 
 
+def leaderboard_name(user: Any) -> str:
+    """Plain compact TOP labels; user metadata and other identity cards stay intact."""
+    name = " ".join(display_name(user).replace("@", "").split())
+    if not any(char.isalnum() for char in name):
+        name = (user.username or "").replace("@", "") or t("p.user")
+    return name
+
+
 def telegram_id_label(user: Any) -> str:
     telegram_id = getattr(user, "telegram_id", None)
     return str(telegram_id) if telegram_id is not None else t("p.id_unknown")
@@ -266,9 +274,7 @@ def leaderboard(rows: list[dict[str, Any]]) -> str:
     entries = []
     for row in rows[:10]:
         user = row["user"]
-        name = display_name(user)
-        if not any(char.isalnum() for char in name) and user.username:
-            name = f"@{user.username}"
+        name = leaderboard_name(user)
         entries.append((display_text(" ".join(name.split()), 80), reputation_score(row["score"])))
     entries += [("—", "—")] * (10 - len(entries))
     lines = [

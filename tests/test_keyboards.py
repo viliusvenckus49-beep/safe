@@ -29,7 +29,7 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
         assert [[button.text for button in row] for row in rows] == [
             ["🔍 TIKRINTI"],
             ["＋ ĮVERTINTI", "🚨 PRANEŠTI"],
-            ["🏆 TOP 10", "⛨ SCAM REGISTRAS"],
+            ["🏆 TOP 10", "🚷SCAM REGISTRAS"],
             ["◇ PROFILIS", "ⓘ INFORMACIJA"],
             ["↻ GRUPĖS ATKŪRIMAS"],
             ["🌐 KALBA"],
@@ -97,3 +97,19 @@ def test_top_links_use_username_or_numeric_telegram_identity():
     assert buttons[0].url == "https://t.me/name_one"
     assert buttons[1].url == "tg://user?id=43"
     assert buttons[-1].callback_data == keyboards.action("home")
+
+
+def test_admin_circled_buttons_use_emoji_with_original_routes():
+    labels = {
+        button.callback_data: button.text
+        for row in keyboards.admin(owner=True).inline_keyboard
+        for button in row
+    }
+    assert labels[keyboards.action("admin_scams", "0")] == "🚷 SCAM registras"
+    assert labels[keyboards.action("users", "0")] == "👥 Vartotojai"
+    assert labels[keyboards.action("stats")] == "📊 Statistika"
+    assert labels[keyboards.action("audit")] == "📜 Veiksmų istorija"
+    assert labels[keyboards.action("rep_admin")] == "◇ REP ir TOP valdymas"
+    assert labels[keyboards.action("rep_pending", "0")] == "＋ Laukiantys REP"
+    assert labels[keyboards.action("add_sc")] == "＋ Pridėti SCAM"
+    assert labels[keyboards.action("del_sc")] == "− Pašalinti SCAM"
