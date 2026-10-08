@@ -1,5 +1,8 @@
 name: SAFECheck VPS deploy
 on:
+  push:
+    branches: [identity-lookup-top-ui-2.15.2]
+    paths: ['.github/workflows/vps-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -89,6 +92,55 @@ jobs:
           printf 'DataAfter=%s\n' "$after_counts"
           python3 -c 'import json,sys; before,after=map(json.loads,sys.argv[1:]); assert all(after[key] >= value for key,value in before.items()), "Preserved data count decreased"; print("Preserved data counts verified.")' "$before_counts" "$after_counts"
           sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'VerifiedService={{.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n docker exec -i safecheck-bot-1 python - <<'PYLOOKUP'
+          import asyncio, importlib.util, json, os, shutil, sqlite3, tempfile
+          from pathlib import Path
+          from types import SimpleNamespace
+          from telethon import TelegramClient
+          from app.config import Settings
+          from app.db import create_database
+          from app.mtproto_relay import GroupHelpRelay, set_relay
+          from app.services import Service
+          loader=importlib.util.spec_from_file_location('secret_loader','/run/configs/secret_entrypoint.py')
+          module=importlib.util.module_from_spec(loader);loader.loader.exec_module(module);module.load_secrets()
+          async def main():
+           settings=Settings()
+           if not settings.group_help_enabled:raise ValueError('Expected enabled identity transport')
+           engine,sessions=create_database(settings.database_url)
+           directory=Path(tempfile.mkdtemp(prefix='safecheck-identity-smoke-'))
+           os.chmod(directory,0o700)
+           client=None
+           try:
+            source=Path(settings.group_help_state_dir)
+            with (source/'api.json').open() as handle:config=json.load(handle)
+            origin=sqlite3.connect('file:'+str(source/'account.session')+'?mode=ro',uri=True)
+            copy=sqlite3.connect(directory/'account.session')
+            try:origin.backup(copy)
+            finally:copy.close();origin.close()
+            os.chmod(directory/'account.session',0o600)
+            client=TelegramClient(str(directory/'account.session'),config['api_id'],config['api_hash'],flood_sleep_threshold=0,request_retries=1,connection_retries=1,timeout=5)
+            await asyncio.wait_for(client.connect(),15)
+            if not await client.is_user_authorized():raise ValueError('Private saved session not authenticated')
+            relay=GroupHelpRelay(settings,sessions,client,SimpleNamespace(id=settings.group_help_staff_id))
+            set_relay(relay)
+            async with sessions() as session:
+             core=Service(settings,session)
+             previous=await core.repo.user_by_telegram(5108847812)
+             if previous is None or not previous.username:raise ValueError('Verified smoke target unavailable')
+             username,expected_id=previous.username,previous.telegram_id
+             user=await core.resolve('@'+username)
+             if user.telegram_id!=expected_id:raise ValueError('Public lookup identity differs')
+             if username not in relay.lookups or relay.lookups[username][1] is None:raise ValueError('Live MTProto lookup was not used')
+             print('AutomaticPublicLookupVerified='+str(user.telegram_id),flush=True)
+           finally:
+            set_relay(None)
+            if client is not None:await client.disconnect()
+            await engine.dispose()
+            shutil.rmtree(directory)
+          try:asyncio.run(main())
+          except Exception as error:
+           print('AutomaticLookupSmokeError='+type(error).__name__,flush=True);raise SystemExit(1)
+          PYLOOKUP
           REMOTE
       - name: Remove runner key
         if: always()

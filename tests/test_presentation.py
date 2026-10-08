@@ -52,8 +52,8 @@ def test_leaderboard_has_ten_rows_without_space_alignment_or_ids():
     output = p.leaderboard(rows)
     lines = output.split("\n\n")[-1].splitlines()
     assert len(lines) == 10
-    assert lines[0] == "1. @notoriouslyreborn · <b>+1</b>"
-    assert lines[1] == "2. @short · <b>+120</b>"
+    assert lines[0] == "1. notoriouslyreborn · <b>+1</b>"
+    assert lines[1] == "2. short · <b>+120</b>"
     assert lines[-1] == "10. — · <b>—</b>"
     assert "<pre>" not in output and "  " not in output
     assert p.submitted("SC-2026-000001") == "📨 <b>Pranešimas pateiktas</b>"
@@ -64,6 +64,29 @@ def test_top_long_name_is_bounded_and_html_escaped():
     assert "A" * 79 + "…" in p.leaderboard([{"user": long_user, "score": 1}])
     user = SimpleNamespace(display_name="<b>Name</b>", username="example")
     assert "&lt;b&gt;Name&lt;/b&gt;" in p.leaderboard([{"user": user, "score": 1}])
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_top_names_and_buttons_are_consistent_plain_and_keep_real_links(lang):
+    from app.bot import keyboards
+
+    users = [
+        SimpleNamespace(display_name="", username="plain_username", telegram_id=22),
+        SimpleNamespace(display_name="@Жivilė\n  Яна", username=None, telegram_id=23),
+        SimpleNamespace(display_name="😀™", username="fallback_name", telegram_id=24),
+    ]
+    rows = [{"user": user, "score": 1} for user in users]
+    with use_language(lang):
+        output = p.leaderboard(rows)
+        markup = keyboards.leaderboard(rows)
+    expected = ["plain_username", "Жivilė Яна", "fallback_name"]
+    assert "@" not in output
+    for index, name in enumerate(expected, 1):
+        assert f"{index}. {name} · <b>+1</b>" in output
+        assert markup.inline_keyboard[index - 1][0].text == f"{index}. {name}"
+    assert markup.inline_keyboard[0][0].url == "https://t.me/plain_username"
+    assert markup.inline_keyboard[1][0].url == "tg://user?id=23"
+    assert users[1].display_name == "@Жivilė\n  Яна"
 
 
 def test_manual_scam_confirmation_and_report_reason_preservation():
@@ -98,7 +121,7 @@ def test_symbol_only_top_name_falls_back_to_username():
         with use_language(lang):
             user = SimpleNamespace(display_name="™😀\u200b", username="cart3lis")
             result = p.leaderboard([{"user": user, "score": 0}])
-            assert "@cart3lis" in result
+            assert "cart3lis" in result and "@" not in result
             assert p.t("p.user") not in result
 
 

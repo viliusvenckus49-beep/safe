@@ -15,7 +15,7 @@ from app.bot.callbacks import (
 )
 from app.bot.group_keyboards import GroupAction
 from app.i18n import t
-from app.presentation import display_name
+from app.presentation import display_name, display_text, leaderboard_name
 
 
 def keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -163,13 +163,13 @@ def leaderboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for index, row in enumerate(rows, 1):
         user = row["user"]
-        name = display_name(user)
+        name = display_text(leaderboard_name(user), 45)
         if user.username:
-            builder.button(text=f"{index}. {name[:45]}", url=f"https://t.me/{user.username}")
+            builder.button(text=f"{index}. {name}", url=f"https://t.me/{user.username}")
         elif user.telegram_id:
-            builder.button(text=f"{index}. {name[:45]}", url=f"tg://user?id={user.telegram_id}")
+            builder.button(text=f"{index}. {name}", url=f"tg://user?id={user.telegram_id}")
         else:
-            builder.button(text=f"{index}. {name[:45]}", callback_data=action("lookup"))
+            builder.button(text=f"{index}. {name}", callback_data=action("lookup"))
     builder.button(text=t("button.home"), callback_data=action("home"))
     builder.adjust(1)
     return builder.as_markup()
