@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: ['scam-ban-diagnosis-2.14.0']
+    branches: [safecheck-2.13.1]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -42,36 +42,7 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          sudo -n docker exec -i safecheck-bot-1 python /run/configs/secret_entrypoint.py python - <<'PYMETA'
-          import asyncio,json
-          from aiogram import Bot
-          from sqlalchemy import text
-          from app.config import Settings
-          from app.db import create_database
-          from app.bot.session import telegram_session
-          async def main():
-              settings=Settings(_env_file=None)
-              engine,_=create_database(settings.database_url)
-              bot=Bot(settings.bot_token.get_secret_value(),session=telegram_session(settings))
-              try:
-                  async with engine.connect() as conn:
-                      await conn.execute(text("SET TRANSACTION READ ONLY"))
-                      groups=(await conn.execute(text("SELECT chat_id,title FROM managed_groups WHERE approved AND enabled ORDER BY chat_id"))).mappings().all()
-                  for group in groups:
-                      try:
-                          chat=await asyncio.wait_for(bot.get_chat(group["chat_id"]),8)
-                          member=await asyncio.wait_for(bot.get_chat_member(group["chat_id"],5108847812),8)
-                          print("CurrentGroup="+json.dumps({"chat_id":chat.id,"stored_title":group["title"],"telegram_title":chat.title,"target_status":str(member.status)},ensure_ascii=False),flush=True)
-                      except Exception as error:
-                          print("CurrentGroupError="+json.dumps({"chat_id":group["chat_id"],"type":type(error).__name__}),flush=True)
-              finally:
-                  await bot.session.close()
-                  await engine.dispose()
-          try: asyncio.run(main())
-          except Exception as error:
-              print("MetadataDiagnosticError="+type(error).__name__,flush=True)
-              raise SystemExit(1) from None
-          PYMETA
+          df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
         if: always()
