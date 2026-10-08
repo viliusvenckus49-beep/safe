@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-STAFF_CHAT_ID = -5572682269
+STAFF_CHAT_ID = -1004300060813
 STAFF_BOT = "ghStaffBot"
 
 

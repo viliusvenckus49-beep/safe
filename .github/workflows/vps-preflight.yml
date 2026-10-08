@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Prepare pinned SSH access
         env:
           DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -27,6 +28,36 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Install isolated MTProto login tool without activating automation
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'install -d -m 700 "$HOME/safecheck-mtproto-tools" "$HOME/.config/safecheck-mtproto"'
+          scp "${SSH_OPTIONS[@]}" deploy/mtproto_login.py deploy/mtproto-tools.Dockerfile "$REMOTE_USER@$HOST:safecheck-mtproto-tools/"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
+          set -eu
+          sudo -n docker build -f "$HOME/safecheck-mtproto-tools/mtproto-tools.Dockerfile" -t safecheck-mtproto-tools:1.42.0 "$HOME/safecheck-mtproto-tools"
+          sudo -n docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --entrypoint python safecheck-mtproto-tools:1.42.0 -c 'import telethon; assert telethon.__version__ == "1.42.0"; print("MTProtoToolsReady=" + telethon.__version__)'
+          sudo -n docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges safecheck-mtproto-tools:1.42.0 --help
+          sudo -n docker run --rm -i --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" --mount "type=bind,src=$HOME/.config/safecheck-mtproto-account2,dst=/state" --entrypoint python safecheck-mtproto-tools:1.42.0 - <<'PYVERIFY'
+          import asyncio,json
+          from telethon import TelegramClient
+          from mtproto_login import verify_staff
+          async def main():
+           with open('/state/api.json') as handle:config=json.load(handle)
+           client=TelegramClient('/state/account.session',config['api_id'],config['api_hash'],flood_sleep_threshold=0)
+           try:
+            await client.connect()
+            if not await client.is_user_authorized():raise ValueError('Account not authenticated')
+            await verify_staff(client)
+           finally:await client.disconnect()
+          try:asyncio.run(main())
+          except Exception as error:print('StaffVerificationError='+type(error).__name__);raise SystemExit(1)
+          PYVERIFY
+          REMOTE
       - name: Inspect existing deployment without changing it
         env:
           HOST: ${{ secrets.VPS_HOST }}
@@ -42,40 +73,7 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          sudo -n docker run --rm -i --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" --mount "type=bind,src=$HOME/.config/safecheck-mtproto-account2,dst=/state" --entrypoint python safecheck-mtproto-tools:1.42.0 - <<'PYSTAFF'
-          import asyncio,json
-          from telethon import TelegramClient
-          from telethon import utils
-          async def main():
-           with open('/state/api.json') as handle:
-            config=json.load(handle)
-           client=TelegramClient('/state/account.session',config['api_id'],config['api_hash'],flood_sleep_threshold=0)
-           try:
-            await client.connect()
-            if not await client.is_user_authorized():
-             print('AccountAuthorized=false');return
-            me=await client.get_me()
-            print('AccountAuthorized=true')
-            print('AccountID='+str(me.id))
-            bot=await client.get_entity('ghStaffBot')
-            if not getattr(bot,'bot',False) or (getattr(bot,'username','') or '').lower()!='ghstaffbot':
-             print('StaffBotVerified=false');return
-            print('StaffBotVerified=true')
-            count=0
-            async for dialog in client.iter_dialogs():
-             if not dialog.is_group or 'staff' not in (dialog.title or '').casefold():continue
-             count+=1
-             result={'id':utils.get_peer_id(dialog.entity),'title':dialog.title,'group_type':type(dialog.entity).__name__}
-             try:
-              participants=await client.get_participants(dialog.entity)
-              result['staff_bot_present']=any(u.id==bot.id for u in participants)
-             except Exception as error:result['membership_check_error']=type(error).__name__
-             print('StaffCandidate='+json.dumps(result,ensure_ascii=False))
-            print('StaffCandidateCount='+str(count))
-           finally:await client.disconnect()
-          try:asyncio.run(main())
-          except Exception as error:print('StaffDiagnosticError='+type(error).__name__);raise SystemExit(1)
-          PYSTAFF
+          df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
         if: always()
