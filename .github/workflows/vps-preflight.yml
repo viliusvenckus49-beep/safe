@@ -1,7 +1,7 @@
 name: SAFECheck VPS preflight
 on:
   push:
-    branches: [safecheck-2.13.1]
+    branches: [scam-ban-diagnosis-2.14.0]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
 permissions:
@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Prepare pinned SSH access
         env:
           DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -27,6 +28,21 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Install isolated MTProto login tool without activating automation
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'install -d -m 700 "$HOME/safecheck-mtproto-tools" "$HOME/.config/safecheck-mtproto"'
+          scp "${SSH_OPTIONS[@]}" deploy/mtproto_login.py deploy/mtproto-tools.Dockerfile "$REMOTE_USER@$HOST:safecheck-mtproto-tools/"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
+          set -eu
+          sudo -n docker build -f "$HOME/safecheck-mtproto-tools/mtproto-tools.Dockerfile" -t safecheck-mtproto-tools:1.42.0 "$HOME/safecheck-mtproto-tools"
+          sudo -n docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --entrypoint python safecheck-mtproto-tools:1.42.0 -c 'import telethon; assert telethon.__version__ == "1.42.0"; print("MTProtoToolsReady=" + telethon.__version__)'
+          sudo -n docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges safecheck-mtproto-tools:1.42.0 --help
+          REMOTE
       - name: Inspect existing deployment without changing it
         env:
           HOST: ${{ secrets.VPS_HOST }}
