@@ -60,21 +60,24 @@ jobs:
                   bot = await client.get_entity('ghStaffBot')
                   if not bot.bot or not any(p.id == bot.id for p in await client.get_participants(staff)):
                       raise ValueError('Unexpected staff bot')
-                  messages = await client.get_messages(staff, limit=50)
-                  command = next((m for m in messages if m.out and m.raw_text == '/info@ghStaffBot 8805206375'), None)
-                  if command is None:
-                      print('StaffInfoCommandFound=false', flush=True)
-                      return
-                  print('StaffInfoCommandFound=true', flush=True)
-                  replies = [m for m in messages if m.sender_id == bot.id and m.id > command.id]
-                  print('StaffInfoRepliesAfterCommand=' + str(len(replies)), flush=True)
-                  for message in reversed(replies):
-                      content = message.raw_text or ''
-                      print('StaffInfoReplyThreaded=' + str(message.reply_to_msg_id == command.id).lower(), flush=True)
-                      print('StaffInfoTargetPresent=' + str('8805206375' in content).lower(), flush=True)
-                      for line in content.splitlines()[:25]:
-                          safe = re.sub(r'https?://\S+', '[link]', line)
-                          print('StaffInfoDetail=' + safe[:250], flush=True)
+                  command = await client.send_message(staff, '/info 5108847812')
+                  print('StaffInfoCommandSent=true', flush=True)
+                  for _ in range(15):
+                      await asyncio.sleep(2)
+                      messages = await client.get_messages(staff, limit=20, min_id=command.id)
+                      for message in messages:
+                          if message.sender_id != bot.id:
+                              continue
+                          content = message.raw_text or ''
+                          print('StaffInfoReplyVerified=true', flush=True)
+                          print('StaffInfoTargetPresent=' + str('5108847812' in content).lower(), flush=True)
+                          for line in content.splitlines():
+                              if '»' in line or any(word in line.lower() for word in ('permission', 'unauthorized', 'authorized', 'admin', 'not found', 'id:', 'id ')):
+                                  safe = re.sub(r'https?://\S+', '[link]', line)
+                                  print('StaffInfoDetail=' + safe[:250], flush=True)
+                          if '5108847812' in content:
+                              return
+                  print('StaffInfoReplyTimeout=true', flush=True)
               finally:
                   await client.disconnect()
           
