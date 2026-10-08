@@ -64,7 +64,7 @@ jobs:
              for user_id in (8805206375,5108847812):
               record=await session.scalar(select(ScamRecord).join(User).where(User.telegram_id==user_id,ScamRecord.status=='ACTIVE').order_by(ScamRecord.id.desc()).limit(1))
               if record:
-               summary=await GroupService(Service(session,settings)).ban_summary(record.id)
+               summary=await GroupService(Service(settings,session)).ban_summary(record.id)
                print('LiveBanSummary='+json.dumps({'record_id':record.id,**dataclasses.asdict(summary)}),flush=True)
                actions=list((await session.scalars(select(BanAction).where(BanAction.scam_record_id==record.id))).all())
                for action in actions:
