@@ -132,8 +132,10 @@ async def test_identity_race_rechecks_username_before_committing(database):
     assert not await relay.resolve_record(record_id)
     async with database() as session:
         record = await Service(settings, session).repo.scam_by_id(record_id)
-        assert record.target.telegram_id is None
-        assert not (await session.scalars(select(BanAction))).all()
+        assert record.target.telegram_id == 33  # Trusted observation won the identity race.
+        assert all(
+            job.telegram_id == 33 for job in (await session.scalars(select(BanAction))).all()
+        )
 
 
 @pytest.mark.asyncio
@@ -389,3 +391,47 @@ async def test_recycled_username_cannot_replace_a_known_numeric_peer(database):
     settings, record_id, relay, client = await prepare(database)
     client.user_id = 33
     assert await relay.target_mention(22, "scammer") == []
+
+
+@pytest.mark.asyncio
+async def test_trusted_telegram_observation_immediately_links_unknown_scam(database):
+    settings, record_id, relay, client = await prepare(database, "@scammer")
+    async with database() as session:
+        observed = await Service(settings, session).observe(22, "scammer", "Actual Telegram name")
+        record = await Service(settings, session).repo.scam_by_id(record_id)
+        assert record.target_id == observed.id and record.target.telegram_id == 22
+        assert len((await session.scalars(select(BanAction))).all()) == 2
+    assert not client.calls  # No extra MTProto lookup or approval is needed.
+
+
+@pytest.mark.asyncio
+async def test_observation_relinks_existing_unknown_snapshot_after_upgrade(database):
+    settings, record_id, relay, client = await prepare(database, "@scammer")
+    # Simulate an imported historical record that retained only its SCAM username snapshot.
+    legacy = settings.model_copy(update={"group_help_enabled": False})
+    async with database() as session:
+        await Service(legacy, session).observe(22, "scammer", "Actual Telegram name")
+        record = await Service(legacy, session).repo.scam_by_id(record_id)
+        record.target.username = None
+        await session.commit()
+        assert record.target.telegram_id is None and record.target.username is None
+    async with database() as session:
+        await Service(settings, session).observe(22, "scammer", "Actual Telegram name")
+        assert (
+            await Service(settings, session).repo.scam_by_id(record_id)
+        ).target.telegram_id == 22
+
+
+@pytest.mark.asyncio
+async def test_observation_username_change_preserves_numeric_scam_identity(database):
+    settings, record_id, relay, client = await prepare(database, "@scammer")
+    async with database() as session:
+        core = Service(settings, session)
+        await core.observe(22, "scammer", "Original")
+        await core.observe(22, "renamed", "Original")
+        await core.observe(33, "scammer", "New username owner")
+        record = await core.repo.scam_by_id(record_id)
+        assert record.target.telegram_id == 22 and record.target.username == "renamed"
+        assert all(
+            job.telegram_id == 22 for job in (await session.scalars(select(BanAction))).all()
+        )

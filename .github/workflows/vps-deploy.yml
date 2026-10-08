@@ -69,7 +69,7 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
           git archive --format=tar.gz HEAD > "$RUNNER_TEMP/safecheck-source.tar.gz"
-      - name: Enable verified Crimson Staff session and scope
+      - name: Enable verified staff transport and identity observation
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}

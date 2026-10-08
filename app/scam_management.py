@@ -57,10 +57,25 @@ class ScamManagement:
                 return await self.detail(actor, record_id)
             record = await self.detail(actor, record_id)
             user = record.target
-            if verified_username is not None and (
-                field != "id" or (user.username or "").casefold() != verified_username.casefold()
-            ):
-                raise DomainError("sm_conflict")
+            if verified_username is not None:
+                if field != "id":
+                    raise DomainError("sm_conflict")
+                matches = (user.username or "").casefold() == verified_username.casefold()
+                if (
+                    not matches
+                    and user.telegram_id is None
+                    and user.username is None
+                    and (
+                        (record.username_snapshot or "").casefold() == verified_username.casefold()
+                    )
+                ):
+                    observed = await core.repo.user_by_telegram(int(value))
+                    matches = (
+                        observed is not None
+                        and (observed.username or "").casefold() == verified_username.casefold()
+                    )
+                if not matches:
+                    raise DomainError("sm_conflict")
             before = {
                 "target_id": user.id,
                 "telegram_id": user.telegram_id,

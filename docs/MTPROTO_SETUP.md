@@ -35,6 +35,7 @@ Compose selector: `SAFECHECK_MTPROTO_DIR=/etc/safecheck/mtproto`. API credential
 ## Execution and real results
 
 - Unknown-ID SCAM records use fresh Telegram `ResolveUsernameRequest`, not a cached or invented ID. The returned current username must match exactly. Existing numeric identities are never overwritten. The existing audited identity-supplement service checks admin authority and rechecks the username under its metadata lock, then enqueues the existing `BanAction` jobs.
+- A trusted Telegram user object observed later by the existing identity service also links pending username-only SCAM records immediately, including retired unknown metadata retained in the SCAM snapshot. The same audited supplement service performs the link and queues bans; numeric judgments remain stable when an alias changes.
 - Both interactive registration/refresh and the background worker use this same bridge and durable ban outbox. No separate ban worker competes for claims.
 - When an actual user entity is available to the account, the numeric command argument carries a Telegram user mention so Group Help can receive the verified user object. No zero-access-hash peer or fabricated entity is used. A username that now resolves to a different ID cannot replace an existing numeric judgment.
 - One plain staff command is durably limited to at most once per record per minute, with eight attempts. Pending work survives restart. Manual refresh retains admin checks and cooldowns and can retry unknown usernames without a confirmation screen.
