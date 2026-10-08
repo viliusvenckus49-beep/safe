@@ -1,7 +1,7 @@
 name: safecheck
 
 x-app: &app
-  image: ${SAFECHECK_IMAGE:-safecheck:2.14.4}
+  image: ${SAFECHECK_IMAGE:-safecheck:2.15.1}
   env_file: ${SAFECHECK_ENV_FILE:?Set SAFECHECK_ENV_FILE to the nonsecret runtime env file}
   environment:
     ENVIRONMENT: production
@@ -60,6 +60,10 @@ services:
   bot:
     <<: *app
     command: [python, -m, app.main]
+    volumes:
+      - type: bind
+        source: ${SAFECHECK_MTPROTO_DIR:-/etc/safecheck/mtproto-disabled}
+        target: /run/mtproto
     stop_grace_period: 45s
     restart: unless-stopped
     healthcheck:

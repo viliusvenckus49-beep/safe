@@ -28,7 +28,16 @@ class ScamManagement:
             return value.removeprefix("@").lower()
         raise DomainError("invalid_target")
 
-    async def supplement(self, actor: int, record_id: int, field: str, value: str, nonce: str):
+    async def supplement(
+        self,
+        actor: int,
+        record_id: int,
+        field: str,
+        value: str,
+        nonce: str,
+        *,
+        verified_username: str | None = None,
+    ):
         value = self.validate(field, value)
         if not re.fullmatch(r"[a-f0-9]{32}", nonce):
             raise DomainError("stale_callback")
@@ -48,6 +57,25 @@ class ScamManagement:
                 return await self.detail(actor, record_id)
             record = await self.detail(actor, record_id)
             user = record.target
+            if verified_username is not None:
+                if field != "id":
+                    raise DomainError("sm_conflict")
+                matches = (user.username or "").casefold() == verified_username.casefold()
+                if (
+                    not matches
+                    and user.telegram_id is None
+                    and user.username is None
+                    and (
+                        (record.username_snapshot or "").casefold() == verified_username.casefold()
+                    )
+                ):
+                    observed = await core.repo.user_by_telegram(int(value))
+                    matches = (
+                        observed is not None
+                        and (observed.username or "").casefold() == verified_username.casefold()
+                    )
+                if not matches:
+                    raise DomainError("sm_conflict")
             before = {
                 "target_id": user.id,
                 "telegram_id": user.telegram_id,

@@ -106,7 +106,9 @@ class GroupService:
             record = await self.core.repo.scam_by_id(record_id)
             if record is None or record.status != "ACTIVE":
                 raise DomainError("stale_callback")
-            if record.target.telegram_id is None:
+            if record.target.telegram_id is None and not (
+                self.settings.group_help_enabled and record.target.username
+            ):
                 raise DomainError("invalid_target")
             recent = await self.session.scalar(
                 select(AuditEvent.id)

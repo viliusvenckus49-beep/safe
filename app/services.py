@@ -2,6 +2,8 @@ import re
 import secrets
 from datetime import UTC, datetime
 
+import structlog
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -93,14 +95,58 @@ class Service:
         # A username can be reassigned; current verified ownership replaces older metadata.
         if username:
             await self.repo.retire_other_username_owners(username, user.id)
-        # A trusted numeric observation may complete an existing ID association.
-        # Never transfer a username-only judgment to a newly observed account.
+        # Numeric associations remain stable when usernames change.
         record = await self.repo.active_scam(user.id)
+        pending_record_id = None
+        if (
+            self.settings.group_help_enabled
+            and self.settings.group_owner is not None
+            and (username and record is None)
+        ):
+            # This object supplies the actual ID; a snapshot is only used for
+            # previously unknown records whose username metadata was retired.
+            pending_record_id = await self.session.scalar(
+                select(ScamRecord.id)
+                .join(User)
+                .where(
+                    ScamRecord.status == "ACTIVE",
+                    User.telegram_id.is_(None),
+                    ScamRecord.username_snapshot == username,
+                )
+                .order_by(ScamRecord.id.desc())
+                .limit(1)
+            )
         if record is not None:
             from app.group_services import enqueue_scam_bans
 
             await enqueue_scam_bans(self.session, record)
         await self.session.commit()
+        if pending_record_id is not None and self.settings.group_owner is not None:
+            from app.scam_management import ScamManagement
+
+            try:
+                await ScamManagement(self).supplement(
+                    self.settings.group_owner,
+                    pending_record_id,
+                    "id",
+                    str(tg_id),
+                    secrets.token_hex(16),
+                    verified_username=username,
+                )
+                structlog.get_logger().info(
+                    "scam_observed_identity_linked",
+                    user_id=tg_id,
+                    scam_record_id=pending_record_id,
+                )
+            except Exception as error:
+                # Observation is already committed; preserve it if linkage is stale.
+                structlog.get_logger().warning(
+                    "scam_observed_identity_link_failed",
+                    user_id=tg_id,
+                    scam_record_id=pending_record_id,
+                    exception_type=type(error).__name__,
+                )
+                await self.session.refresh(user)
         return user
 
     async def resolve(self, identifier: str, *, _retried: bool = False) -> User:

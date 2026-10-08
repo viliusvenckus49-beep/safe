@@ -22,6 +22,7 @@ from app.config import Settings
 from app.group_services import BanSummary, GroupService, enqueue_scam_bans
 from app.i18n import t, use_language
 from app.models import BanAction, ManagedGroup, RecoveryCampaign, ScamRecord
+from app.mtproto_relay import active_relay
 from app.repositories import Repository
 
 BAN_API_TIMEOUT = 10.0
@@ -70,9 +71,15 @@ async def _execute_bans(
         success, result = False, "TelegramAPIError"
         retry_after, permanent = None, False
         reason = None
+        relay = active_relay()
         try:
             success, result = await asyncio.wait_for(
-                _attempt_ban(bot, job, timeout), timeout=timeout
+                (
+                    relay.attempt_ban(bot, service, job, timeout)
+                    if service.settings.group_help_enabled and relay is not None
+                    else _attempt_ban(bot, job, timeout)
+                ),
+                timeout=timeout,
             )
         except TelegramRetryAfter as error:
             result, reason = "TelegramRetryAfter", _api_reason(error)
@@ -130,6 +137,9 @@ async def process_scam_bans(
     bot: Bot, settings: Settings, sessions: Any, record_id: int
 ) -> BanSummary:
     """Initiate committed SCAM protection now; retain unprocessed work in the outbox."""
+    relay = active_relay()
+    if settings.group_help_enabled and relay is not None:
+        await relay.resolve_record(record_id)
     async with sessions() as session:
         service = GroupService(settings, session)
         record = await session.get(ScamRecord, record_id, populate_existing=True)
@@ -155,6 +165,9 @@ async def process_scam_bans(
 async def process_group_jobs(bot: Bot, settings: Settings, sessions: Any) -> int:
     log = structlog.get_logger()
     processed = 0
+    relay = active_relay()
+    if settings.group_help_enabled and relay is not None:
+        processed += await relay.resolve_pending()
     async with sessions() as session:
         service = GroupService(settings, session)
         bans = await service.claim_bans(limit=5)

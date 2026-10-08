@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     environment: Literal["development", "production"] = "development"
     redis_url: SecretStr | None = None
     telegram_proxy_url: SecretStr | None = None
+    group_help_enabled: bool = False
+    group_help_state_dir: str = "/run/mtproto"
+    group_help_staff_id: int = Field(default=-1004300060813, lt=0, ge=-9223372036854775808)
+    group_help_bot_id: int = Field(default=0, ge=0, le=9223372036854775807)
+    group_help_scope_ids: str = ""
     fsm_ttl_seconds: int = 1800
     rep_cooldown_seconds: int = 60
     report_cooldown_seconds: int = 300
@@ -69,7 +74,32 @@ class Settings(BaseSettings):
             raise ValueError("Production requires PostgreSQL, REDIS_URL and ADMIN_IDS")
         if self.group_owner_id is not None and self.group_owner_id not in self.admins:
             raise ValueError("GROUP_OWNER_ID must be one of ADMIN_IDS")
+        if self.group_help_enabled and (
+            self.group_help_staff_id >= 0
+            or self.group_help_bot_id <= 0
+            or not self.group_help_scope
+            or not self.group_help_state_dir.startswith("/")
+        ):
+            raise ValueError("Group Help requires verified staff, bot, scope and private session")
         return self
+
+    @field_validator("group_help_scope_ids")
+    @classmethod
+    def scope_valid(cls, value: str) -> str:
+        if any(
+            not part.strip().startswith("-")
+            or not part.strip()[1:].isascii()
+            or not part.strip()[1:].isdigit()
+            or not -9223372036854775808 <= int(part.strip()) < 0
+            for part in value.split(",")
+            if part.strip()
+        ):
+            raise ValueError("GROUP_HELP_SCOPE_IDS must contain negative chat IDs")
+        return value
+
+    @property
+    def group_help_scope(self) -> frozenset[int]:
+        return frozenset(int(x.strip()) for x in self.group_help_scope_ids.split(",") if x.strip())
 
     @property
     def group_owner(self) -> int | None:
