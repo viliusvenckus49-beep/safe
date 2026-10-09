@@ -1,4 +1,4 @@
-name: SAFECheck private group member import
+name: SAFECheck verify imported member identities
 on:
   push:
     branches: [group-members-import-20261009]
@@ -26,7 +26,7 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Export private participants and import verified identities with a backup
+      - name: Verify directory duplicates and preserved historical identities
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
@@ -34,175 +34,45 @@ jobs:
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
           ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'PY'
-          """Private one-group export and backup-first import; do not publish member rows."""
-          import importlib.util
-          import json
-          import os
-          import pwd
-          import shutil
-          import sqlite3
-          import stat
-          import subprocess
-          import tempfile
-          import time
-          import uuid
+          import json,subprocess
           from pathlib import Path
-          
-          EXPORT_CODE = '"""Export one Telegram group\'s visible current participants without moderation or DB writes."""\nimport argparse\nimport asyncio\nimport csv\nimport json\nimport os\nimport runpy\nfrom datetime import UTC, datetime\nfrom pathlib import Path\n\nfrom telethon import TelegramClient, utils\nfrom telethon.errors import FloodWaitError\nfrom telethon.tl.types import Channel, ChannelForbidden, Chat, ChatForbidden\n\n\nclass GroupAccessError(ValueError):\n    pass\n\n\nclass GroupNotInDialogsError(ValueError):\n    pass\n\n\ndef csv_text(value):\n    # Retain the raw spelling; make a leading spreadsheet formula literal in CSV.\n    value = value or \'\'\n    return "\'" + value if value.startswith((\'=\', \'+\', \'-\', \'@\', \'\\t\', \'\\r\')) else value\n\n\nasync def export(options):\n    os.umask(0o077)\n    credentials = runpy.run_path(\'/app/mtproto_login.py\')[\'credentials\']\n\n    config = credentials(options.state / \'api.json\')\n    client = TelegramClient(\n        str(options.state / \'account.session\'), config[\'api_id\'], config[\'api_hash\'],\n        flood_sleep_threshold=0, request_retries=1, connection_retries=2,\n        timeout=8, receive_updates=False,\n    )\n    seen = set()\n    expected = None\n    partial = None\n    retry_after = None\n    group_id = None\n    account_id = None\n    options.output.mkdir(mode=0o700, parents=True, exist_ok=True)\n    filename = \'members.csv\' if options.format == \'csv\' else \'member-ids.txt\'\n    try:\n        await asyncio.wait_for(client.connect(), 20)\n        if not await client.is_user_authorized():\n            raise ValueError(\'Session is not authenticated\')\n        account = await client.get_me()\n        if account is None or account.bot:\n            raise ValueError(\'A user account is required\')\n        account_id = account.id\n        target = int(options.group) if options.group.lstrip(\'-\').isdigit() else options.group\n        try:\n            group = await client.get_entity(target)\n        except ValueError:\n            if not isinstance(target, int):\n                raise\n            async for dialog in client.iter_dialogs():\n                if dialog.id == target:\n                    group = dialog.entity\n                    break\n            else:\n                raise GroupNotInDialogsError(\'Group is not in the account dialogs\') from None\n        if isinstance(group, (ChannelForbidden, ChatForbidden)):\n            raise GroupAccessError(\'Telegram denied access to the group\')\n        if not isinstance(group, (Channel, Chat)) or getattr(group, \'broadcast\', False):\n            raise ValueError(\'Target must be a Telegram group\')\n        if getattr(group, \'left\', False) or getattr(group, \'deactivated\', False):\n            raise GroupAccessError(\'Account must be a current group member\')\n        group_id = utils.get_peer_id(group)\n        if isinstance(target, int) and group_id != target:\n            raise ValueError(\'Group ID differs\')\n        total = await client.get_participants(group, limit=0)\n        expected = getattr(total, \'total\', None)\n        with (options.output / filename).open(\'x\', encoding=\'utf-8-sig\' if options.format == \'csv\' else \'utf-8\', newline=\'\') as handle, (options.output / \'member-identities.jsonl\').open(\'x\', encoding=\'utf-8\') as raw:\n            writer = csv.writer(handle) if options.format == \'csv\' else None\n            if writer:\n                writer.writerow([\'telegram_id\', \'username\', \'display_name\'])\n\n            async def collect():\n                async for user in client.iter_participants(group):\n                    if user.id in seen:\n                        continue\n                    seen.add(user.id)\n                    name = \' \'.join(p for p in (getattr(user, \'first_name\', None), getattr(user, \'last_name\', None)) if p)\n                    raw.write(json.dumps({\'telegram_id\': user.id, \'username\': getattr(user, \'username\', None), \'display_name\': name, \'is_bot\': bool(getattr(user, \'bot\', False)), \'deleted\': bool(getattr(user, \'deleted\', type(user).__name__ == \'UserEmpty\'))}, ensure_ascii=False) + \'\\n\')\n                    if writer:\n                        writer.writerow([str(user.id), csv_text(getattr(user, \'username\', None)), csv_text(name)])\n                    else:\n                        handle.write(str(user.id) + \'\\n\')\n\n            try:\n                await asyncio.wait_for(collect(), 600)\n            except FloodWaitError as error:\n                partial, retry_after = type(error).__name__, error.seconds\n            except (TimeoutError, OSError) as error:\n                partial = type(error).__name__\n    finally:\n        await client.disconnect()\n    summary = {\'group_id\': group_id, \'source_account_id\': account_id, \'exported_members\': len(seen), \'reported_members\': expected,\n               \'exported_at_utc\': datetime.now(UTC).isoformat(), \'file\': filename,\n               \'partial_reason\': partial, \'retry_after_seconds\': retry_after,\n               \'count_matches_reported\': expected is not None and len(seen) == expected}\n    (options.output / \'export-summary.json\').write_text(json.dumps(summary, indent=2), encoding=\'utf-8\')\n    # Never log participant rows, credentials, phone numbers or the session.\n    print(\'MEMBER_EXPORT=\' + json.dumps(summary))\n\n\nparser = argparse.ArgumentParser(description=__doc__)\nparser.add_argument(\'--group\', required=True)\nparser.add_argument(\'--state\', type=Path, default=Path(\'/state\'))\nparser.add_argument(\'--output\', type=Path, default=Path(\'/output\'))\nparser.add_argument(\'--format\', choices=(\'csv\', \'txt\'), default=\'csv\')\nif __name__ == \'__main__\':\n    try:\n        asyncio.run(export(parser.parse_args()))\n    except Exception as error:\n        print(\'MEMBER_EXPORT_ERROR=\' + type(error).__name__)\n        raise SystemExit(1) from None\n'
-          IMPORT_CODE = '"""Import trusted, freshly exported Telegram identities through SAFECheck\'s existing service."""\nimport asyncio\nimport json\nimport re\nimport runpy\nimport sys\nfrom collections import Counter\n\n\ndef validated(payload):\n    if not isinstance(payload, dict) or payload.get(\'source\') != \'telegram_group_participants\':\n        raise ValueError(\'Expected a verified Telegram participant export\')\n    group_id = payload.get(\'group_id\')\n    account_id = payload.get(\'source_account_id\')\n    if type(group_id) is not int or not -(2**63) <= group_id < 0:\n        raise ValueError(\'Invalid source group\')\n    if type(account_id) is not int or not 0 < account_id <= 9223372036854775807:\n        raise ValueError(\'Invalid source account\')\n    members = payload.get(\'members\')\n    if not isinstance(members, list):\n        raise ValueError(\'Missing participants\')\n    seen = set()\n    result = []\n    skipped = 0\n    for member in members:\n        if not isinstance(member, dict):\n            raise ValueError(\'Invalid participant\')\n        tg_id = member.get(\'telegram_id\')\n        username = member.get(\'username\')\n        name = member.get(\'display_name\')\n        if type(tg_id) is not int or not 0 < tg_id <= 9223372036854775807:\n            raise ValueError(\'Invalid participant ID\')\n        if username is not None and (not isinstance(username, str) or not re.fullmatch(r\'[A-Za-z0-9_]{1,32}\', username)):\n            raise ValueError(\'Invalid Telegram username\')\n        if not isinstance(name, str):\n            raise ValueError(\'Invalid display name\')\n        if tg_id in seen or member.get(\'is_bot\') or member.get(\'deleted\'):\n            skipped += 1\n            continue\n        seen.add(tg_id)\n        result.append((tg_id, username, name or \'User\'))\n    return group_id, account_id, result, skipped\n\n\nasync def main(payload):\n    group_id, account_id, members, skipped = validated(payload)\n    runpy.run_path(\'/run/configs/secret_entrypoint.py\')[\'load_secrets\']()\n    from sqlalchemy import func, select\n    from app.config import Settings\n    from app.db import create_database\n    from app.models import User\n    from app.services import Service\n\n    settings = Settings()\n    if not settings.group_help_enabled or settings.group_help_staff_id != -1004430959898:\n        raise ValueError(\'Verified production identity service must be enabled\')\n    if account_id != 8896102663:\n        raise ValueError(\'Participant export account differs from the verified session\')\n    owner = settings.group_owner\n    if owner is None:\n        raise ValueError(\'Configured identity owner is required\')\n    engine, sessions = create_database(settings.database_url)\n    created = updated = linked = imported = 0\n    failures = Counter()\n    try:\n        async with sessions() as session:\n            await Service(settings, session).require_admin(owner)\n            before = await session.scalar(select(func.count(User.id)))\n        for tg_id, username, name in members:\n            async with sessions() as session:\n                core = Service(settings, session)\n                await core.require_admin(owner)\n                existing = await core.repo.user_by_telegram(tg_id)\n                unknown = None\n                if existing is None and username:\n                    unknown = await session.scalar(select(User).where(User.telegram_id.is_(None), User.username == username.lower()))\n                try:\n                    user = await core.observe(tg_id, username, name)\n                    if user.telegram_id != tg_id:\n                        raise ValueError(\'Observed identity differs\')\n                    imported += 1\n                    if existing is not None:\n                        updated += 1\n                    elif unknown is not None:\n                        linked += 1\n                    else:\n                        created += 1\n                except Exception as error:\n                    await session.rollback()\n                    failures[type(error).__name__] += 1\n        async with sessions() as session:\n            core = Service(settings, session)\n            await core.require_admin(owner)\n            core._audit(owner, \'telegram_group_identity_import\', None, chat_id=group_id, source_account_id=account_id, imported=imported, created=created, linked=linked, updated=updated, skipped=skipped, failures=sum(failures.values()))\n            await session.commit()\n            after = await session.scalar(select(func.count(User.id)))\n        print(\'MEMBER_IMPORT=\' + json.dumps({\'group_id\': group_id, \'imported\': imported, \'created\': created, \'updated\': updated, \'unknown_id_linked\': linked, \'skipped_bots_deleted_duplicates\': skipped, \'failed\': sum(failures.values()), \'error_types\': dict(failures), \'users_before\': before, \'users_after\': after}))\n        if failures:\n            raise RuntimeError(\'Some identities were not imported\')\n    finally:\n        await engine.dispose()\n\n\nif __name__ == \'__main__\':\n    try:\n        asyncio.run(main(json.load(sys.stdin)))\n    except Exception as error:\n        print(\'MEMBER_IMPORT_ERROR=\' + type(error).__name__)\n        raise SystemExit(1) from None\n'
-          
-          GROUP_ID = -1003976343267
-          EXPECTED_ACCOUNT = 8896102663
-          STATE = Path('/etc/safecheck/mtproto-next')
-          SERVICES = ('safecheck-bot-1', 'safecheck-postgres-1', 'safecheck-redis-1', 'safecheck-ui-studio-studio-1')
-          
-          
-          def command(args, *, input=None, timeout=60):
-              result = subprocess.run(args, input=input, capture_output=True, text=True, timeout=timeout)
-              if result.returncode:
-                  for line in result.stdout.splitlines():
-                      if line.startswith(('MEMBER_EXPORT_ERROR=', 'MEMBER_IMPORT_ERROR=')):
-                          print(line, flush=True)
-                  raise RuntimeError('Private member operation failed')
-              return result.stdout
-          
-          
-          def states():
-              return command(['docker', 'inspect', '--format', '{{.Id}} {{.Image}} {{.State.StartedAt}}', *SERVICES]).strip()
-          
-          
-          def rows(sql):
-              return command(['docker', 'exec', 'safecheck-postgres-1', 'psql', '-U', 'safecheck', '-d', 'safecheck', '-v', 'ON_ERROR_STOP=1', '-Atc', sql]).strip()
-          
-          
-          def counts():
-              tables = ('users', 'reputation_events', 'reputation_requests', 'reputation_adjustments', 'scam_records', 'trusted_designations', 'administrators', 'managed_groups', 'observed_members', 'reports')
-              sql = 'SELECT json_build_object(' + ','.join("'" + name + "',(SELECT count(*) FROM " + name + ')' for name in tables) + ');'
-              return json.loads(rows(sql))
-          
-          
-          def duplicates():
-              sql = "SELECT json_build_object('telegram_ids',(SELECT count(*) FROM (SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL GROUP BY telegram_id HAVING count(*)>1) x),'usernames',(SELECT count(*) FROM (SELECT lower(username) FROM users WHERE username IS NOT NULL GROUP BY lower(username) HAVING count(*)>1) x));"
-              return json.loads(rows(sql))
-          
-          
-          def health():
-              return json.loads(command(['docker', 'exec', 'safecheck-bot-1', 'python', '-c', 'from app.health import snapshot; import json; print(json.dumps(snapshot()))']))
-          
-          
-          def main():
-              os.umask(0o077)
-              print('MEMBER_OPERATION_PHASE=export', flush=True)
-              original_states = states()
-              if not health().get('healthy'):
-                  raise ValueError('Bot must be healthy before export')
-              root = Path(command(['docker', 'inspect', '--format', '{{index .Config.Labels "com.docker.compose.project.working_dir"}}', 'safecheck-bot-1']).strip())
-              if not root.is_absolute() or not (root / 'deploy/ops.py').is_file():
-                  raise ValueError('Existing production operations are unavailable')
-              info = STATE.lstat()
-              if not stat.S_ISDIR(info.st_mode) or info.st_uid != 10001 or info.st_gid != 10001 or info.st_mode & 0o077:
-                  raise ValueError('MTProto session directory is not private')
-              for name in ('api.json', 'account.session'):
-                  info = (STATE / name).lstat()
-                  if not stat.S_ISREG(info.st_mode) or info.st_uid != 10001 or info.st_mode & 0o077:
-                      raise ValueError('MTProto login state is not private')
-              owner = pwd.getpwnam('ubuntu')
-              base = Path(owner.pw_dir) / 'safecheck-exports'
-              if base.exists() or base.is_symlink():
-                  info = base.lstat()
-                  if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner.pw_uid or info.st_mode & 0o077:
-                      raise ValueError('Export directory must remain private')
-              else:
-                  base.mkdir(mode=0o700)
-                  os.chown(base, owner.pw_uid, owner.pw_gid)
-              folder = 'members-' + str(abs(GROUP_ID)) + '-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:6]
-              output = base / folder
-              output.mkdir(mode=0o700)
-              os.chown(output, 10001, 10001)
-              export_name = 'safecheck-member-export-' + uuid.uuid4().hex[:12]
-              try:
-                  with tempfile.TemporaryDirectory(prefix='safecheck-member-session-', dir='/etc/safecheck') as name:
-                      copied = Path(name)
-                      shutil.copyfile(STATE / 'api.json', copied / 'api.json')
-                      with sqlite3.connect('file:' + str(STATE / 'account.session') + '?mode=ro', uri=True) as source:
-                          with sqlite3.connect(copied / 'account.session') as destination:
-                              source.backup(destination)
-                      (copied / 'export.py').write_text(EXPORT_CODE)
-                      os.chown(copied, 10001, 10001)
-                      for file in copied.iterdir():
-                          file.chmod(0o600)
-                          os.chown(file, 10001, 10001)
-                      try:
-                          result = command(['docker', 'run', '--rm', '--name', export_name, '--read-only', '--tmpfs', '/tmp', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '10001:10001', '--mount', 'type=bind,src=' + str(copied) + ',dst=/state', '--mount', 'type=bind,src=' + str(output) + ',dst=/output', '--entrypoint', 'python', 'safecheck-mtproto-tools:1.42.0-staff-switch', '/state/export.py', '--group=' + str(GROUP_ID), '--format=csv'], timeout=720)
-                      finally:
-                          # This name belongs only to the disposable export, never a running bot/data service.
-                          subprocess.run(['docker', 'rm', '-f', export_name], capture_output=True, timeout=30)
-                  summary = json.loads((output / 'export-summary.json').read_text())
-                  if summary['group_id'] != GROUP_ID or summary['source_account_id'] != EXPECTED_ACCOUNT:
-                      raise ValueError('Participant export identity differs')
-                  print('MEMBER_EXPORT=' + json.dumps(summary), flush=True)
-                  payload = {'source': 'telegram_group_participants', 'group_id': GROUP_ID, 'source_account_id': summary['source_account_id'], 'members': [json.loads(line) for line in (output / 'member-identities.jsonl').read_text().splitlines()]}
-                  if len(payload['members']) != summary['exported_members']:
-                      raise ValueError('Export file count differs')
-                  namespace = {'__name__': 'private_member_validator'}
-                  exec(compile(IMPORT_CODE, '<validated-member-import>', 'exec'), namespace)
-                  _, _, members, _ = namespace['validated'](payload)
-                  if not members:
-                      raise ValueError('No human participants were exported')
-                  # Import through the current image's existing Service.observe, retaining all other services.
-                  spec = importlib.util.spec_from_file_location('safecheck_ops', root / 'deploy/ops.py')
-                  module = importlib.util.module_from_spec(spec)
-                  spec.loader.exec_module(module)
-                  args = module.parser().parse_args(['--root', str(root), 'backup'])
-                  ops = module.Operations(args)
-                  with ops.lock(maintenance=True):
-                      before = counts()
-                      duplicate_before = duplicates()
-                      print('MEMBER_OPERATION_PHASE=verified-backup', flush=True)
-                      archive = ops.backup()
-                      print('MEMBER_OPERATION_PHASE=import', flush=True)
-                      result = command(['docker', 'exec', '-i', 'safecheck-bot-1', 'python', '-c', IMPORT_CODE], input=json.dumps(payload), timeout=720)
-                      summaries = [line.removeprefix('MEMBER_IMPORT=') for line in result.splitlines() if line.startswith('MEMBER_IMPORT=')]
-                      if len(summaries) != 1:
-                          raise ValueError('Import result is unavailable')
-                      imported = json.loads(summaries[0])
-                      if imported['failed'] or imported['imported'] != len(members):
-                          raise ValueError('Import did not complete')
-                      after = counts()
-                      duplicate_after = duplicates()
-                      if not all(after[key] >= value for key, value in before.items()):
-                          raise ValueError('Preserved row counts decreased')
-                      if duplicate_after['telegram_ids'] or duplicate_after['usernames'] > duplicate_before['usernames']:
-                          raise ValueError('Duplicate identities appeared')
-                      current = health()
-                      if states() != original_states or not current.get('healthy'):
-                          raise ValueError('A running service changed or became unhealthy')
-                      (output / 'import-summary.json').write_text(json.dumps(imported, indent=2))
-                      print('MEMBER_IMPORT=' + json.dumps(imported), flush=True)
-                      print('MEMBER_IMPORT_DUPLICATES=' + json.dumps(duplicate_after), flush=True)
-                      print('MEMBER_IMPORT_COUNTS_BEFORE=' + json.dumps(before), flush=True)
-                      print('MEMBER_IMPORT_COUNTS_AFTER=' + json.dumps(after), flush=True)
-                      print('MEMBER_IMPORT_BACKUP=' + str(archive), flush=True)
-                      print('MEMBER_IMPORT_HEALTH=' + json.dumps(current), flush=True)
-                      print('MEMBER_IMPORT_CSV=~/safecheck-exports/' + folder + '/members.csv', flush=True)
-                      print('MEMBER_IMPORT_SERVICES_UNCHANGED=true', flush=True)
-                      print('MEMBER_IMPORT_COMPLETE=true', flush=True)
-              finally:
-                  for file in output.iterdir():
-                      info = file.lstat()
-                      if not stat.S_ISREG(info.st_mode):
-                          raise ValueError('Unexpected export file')
-                      file.chmod(0o600)
-                      os.chown(file, owner.pw_uid, owner.pw_gid)
-                  output.chmod(0o700)
-                  os.chown(output, owner.pw_uid, owner.pw_gid)
-          
-          
-          try:
-              main()
-          except Exception as error:
-              print('MEMBER_OPERATION_ERROR=' + type(error).__name__, flush=True)
-              raise SystemExit(1) from None
+          code = '''import asyncio,json,runpy
+          from collections import Counter
+          from sqlalchemy import func,select
+          runpy.run_path('/run/configs/secret_entrypoint.py')['load_secrets']()
+          from app.config import Settings
+          from app.db import create_database
+          from app.models import User
+          from app.repositories import Repository
+          from app.services import Service
+          async def main():
+           settings=Settings()
+           engine,sessions=create_database(settings.database_url)
+           try:
+            async with sessions() as session:
+             core=Service(settings,session)
+             await core.require_admin(settings.group_owner)
+             directory,total=await core.repo.users(0,100000)
+             if len(directory)!=total:raise ValueError('Directory verification incomplete')
+             names=Counter(u.username.casefold() for u in directory if u.username)
+             ids=Counter(u.telegram_id for u in directory if u.telegram_id is not None)
+             grouped=(await session.execute(select(func.lower(User.username),func.count(User.id),func.count(User.telegram_id)).where(User.username.is_not(None)).group_by(func.lower(User.username)).having(func.count(User.id)>1))).all()
+             known_names=(await session.execute(select(func.lower(User.username),func.count(User.id)).where(User.username.is_not(None),User.telegram_id.is_not(None)).group_by(func.lower(User.username)).having(func.count(User.id)>1))).all()
+             result={'visible_users':total,'visible_username_duplicates':sum(n>1 for n in names.values()),'visible_telegram_id_duplicates':sum(n>1 for n in ids.values()),'known_identity_username_duplicates':len(known_names),'historical_username_pairs':sum(numeric==1 and count==2 for _,count,numeric in grouped),'other_duplicate_groups':sum(not(numeric==1 and count==2) for _,count,numeric in grouped)}
+             if result['visible_username_duplicates'] or result['visible_telegram_id_duplicates'] or result['known_identity_username_duplicates'] or result['other_duplicate_groups']:raise ValueError('Current directory still duplicates identities')
+             print('MEMBER_DUPLICATE_VERIFICATION='+json.dumps(result))
+           finally:await engine.dispose()
+          try:asyncio.run(main())
+          except Exception as error:print('MEMBER_VERIFICATION_ERROR='+type(error).__name__);raise SystemExit(1)
+          '''
+          result=subprocess.run(['docker','exec','safecheck-bot-1','python','-c',code],capture_output=True,text=True,timeout=60)
+          for line in result.stdout.splitlines():
+           if line.startswith(('MEMBER_DUPLICATE_VERIFICATION=','MEMBER_VERIFICATION_ERROR=')):print(line,flush=True)
+          if result.returncode:raise SystemExit(1)
+          health=subprocess.run(['docker','exec','safecheck-bot-1','python','-c','from app.health import snapshot; import json; print(json.dumps(snapshot()))'],capture_output=True,check=True,text=True,timeout=30)
+          value=json.loads(health.stdout)
+          assert value['healthy']
+          print('MEMBER_FINAL_HEALTH='+json.dumps(value),flush=True)
           PY
       - name: Remove runner key
         if: always()
