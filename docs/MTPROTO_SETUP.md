@@ -14,7 +14,25 @@ install -d -m 700 "$HOME/.config/safecheck-mtproto-account2" && sudo docker run 
 
 Enter API hash, phone, login code and any two-step password only in the hidden terminal prompts. Never put them or the session in chat, GitHub, screenshots or runtime logs. The helper stores `api.json` and `account.session` with mode 0600 in a 0700 directory and reuses a saved login. A failed staff check retains the authenticated session.
 
-Authenticated account `8876719157` is already logged in. Repeating login is unnecessary. The private runtime copy is `/etc/safecheck/mtproto`, owned by container UID/GID 10001. Provision with a SQLite backup of the session, not a copy of an open SQLite database. Keep the original login directory private for interactive maintenance; do not run two workers against the same session file.
+The private runtime copy is `/etc/safecheck/mtproto`, owned by container UID/GID 10001. A saved session
+can become unauthorized and require another login. Provision with a SQLite backup of the session,
+not a copy of an open SQLite database. Keep the original login directory private for interactive
+maintenance; do not run two workers against the same session file.
+
+To switch accounts, provision a separate private directory (`/etc/safecheck/mtproto-next`), with mode
+0700 and UID/GID 10001. The prepared helper accepts API credentials, the new account's phone number,
+login code and two-step password interactively:
+
+```bash
+sudo docker run --rm -it --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --mount type=bind,src=/etc/safecheck/mtproto-next,dst=/state safecheck-mtproto-tools:1.42.0-account-switch --state-dir /state
+```
+
+Join the configured Crimson Staff group with the new account and grant its required Group Help
+staff permissions. A fresh session obtains the private group's real entity from Telegram dialogs
+when the numeric ID is not cached; it matches the exact configured ID, never the group title. The
+helper verifies membership and the staff bot without sending moderation commands. Provisioning
+does not enable the relay or change the running bot. After login, verify the pinned staff bot ID and
+approved scope before selecting the new private directory and re-enabling the existing relay.
 
 ## Configuration and scope
 

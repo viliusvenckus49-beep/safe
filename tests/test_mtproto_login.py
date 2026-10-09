@@ -97,3 +97,70 @@ async def test_session_check_only_reads_staff_and_never_sends_ban():
 async def test_session_check_rejects_wrong_account_or_staff_bot(options):
     with pytest.raises(ValueError):
         await verify_staff(StaffClient(**options))
+
+
+class FreshStaffClient(StaffClient):
+    def __init__(self, dialogs, **options):
+        super().__init__(**options)
+        self.dialogs = dialogs
+        self.seen_staff = None
+
+    async def get_entity(self, value):
+        if value == STAFF_CHAT_ID:
+            self.calls.append(value)
+            raise ValueError("Could not find the input entity")
+        return await super().get_entity(value)
+
+    async def iter_dialogs(self):
+        for dialog in self.dialogs:
+            yield dialog
+
+    async def get_participants(self, staff):
+        self.seen_staff = staff
+        return await super().get_participants(staff)
+
+
+async def test_new_account_finds_the_exact_private_staff_entity_in_dialogs():
+    impostor = SimpleNamespace(id=STAFF_CHAT_ID - 1, title="Crimson Staff")
+    staff = SimpleNamespace(id=4300060813, left=False)
+    client = FreshStaffClient(
+        [
+            SimpleNamespace(id=STAFF_CHAT_ID - 1, entity=impostor),
+            SimpleNamespace(id=STAFF_CHAT_ID, entity=staff),
+        ]
+    )
+    assert await verify_staff(client)
+    assert client.seen_staff is staff
+    assert client.calls == [STAFF_CHAT_ID, STAFF_BOT]
+
+
+async def test_new_account_cannot_select_a_different_group_with_the_same_title():
+    client = FreshStaffClient(
+        [
+            SimpleNamespace(
+                id=STAFF_CHAT_ID - 1,
+                entity=SimpleNamespace(id=STAFF_CHAT_ID - 1, title="Crimson Staff"),
+            )
+        ]
+    )
+    with pytest.raises(ValueError, match="not in the account's dialogs"):
+        await verify_staff(client)
+    assert client.seen_staff is None
+
+
+@pytest.mark.parametrize("flags", [{"left": True}, {"deactivated": True}])
+async def test_new_account_must_still_be_a_member_of_the_staff_group(flags):
+    client = FreshStaffClient(
+        [SimpleNamespace(id=STAFF_CHAT_ID, entity=SimpleNamespace(id=4300060813, **flags))]
+    )
+    with pytest.raises(ValueError, match="Staff group membership"):
+        await verify_staff(client)
+
+
+async def test_new_account_fallback_still_requires_the_staff_bot():
+    client = FreshStaffClient(
+        [SimpleNamespace(id=STAFF_CHAT_ID, entity=SimpleNamespace(id=4300060813))],
+        joined=False,
+    )
+    with pytest.raises(ValueError, match="Staff bot is not"):
+        await verify_staff(client)

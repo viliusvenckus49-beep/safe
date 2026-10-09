@@ -66,7 +66,17 @@ async def verify_staff(client: Any) -> bool:
     me = await client.get_me()
     if me is None or getattr(me, "bot", False):
         raise ValueError("A user account is required")
-    staff = await client.get_entity(STAFF_CHAT_ID)
+    try:
+        staff = await client.get_entity(STAFF_CHAT_ID)
+    except ValueError:
+        # A fresh session has not cached the access hash of a private supergroup yet.
+        # Dialogs provide a real Telegram entity; never identify staff by its title.
+        async for dialog in client.iter_dialogs():
+            if dialog.id == STAFF_CHAT_ID:
+                staff = dialog.entity
+                break
+        else:
+            raise ValueError("Configured staff group is not in the account's dialogs") from None
     if getattr(staff, "left", False) or getattr(staff, "deactivated", False):
         raise ValueError("Staff group membership is required")
     bot = await client.get_entity(STAFF_BOT)
