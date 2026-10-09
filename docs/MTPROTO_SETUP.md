@@ -27,6 +27,15 @@ login code and two-step password interactively:
 sudo docker run --rm -it --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --mount type=bind,src=/etc/safecheck/mtproto-next,dst=/state safecheck-mtproto-tools:1.42.0-account-switch --state-dir /state
 ```
 
+When switching to a different staff group, use the prepared
+`safecheck-mtproto-tools:1.42.0-staff-switch` helper image and append
+`--staff-id <negative Telegram group ID>`. The optional `--staff-bot <username>` selects the bot
+to check during login; its default remains `ghStaffBot`. The selected group must appear in the
+new account's Telegram dialogs. Membership in the old group cannot satisfy the new group check.
+These options only verify the saved login; they do not change production configuration or send
+`/ban`. Before enabling a different staff group, set its runtime staff ID, verify the pinned bot
+identity and reconcile the exact staff-linked protected group scope.
+
 Join the configured Crimson Staff group with the new account and grant its required Group Help
 staff permissions. A fresh session obtains the private group's real entity from Telegram dialogs
 when the numeric ID is not cached; it matches the exact configured ID, never the group title. The
