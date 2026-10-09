@@ -1,0 +1,57 @@
+name: SAFECheck UI Studio encrypted activation
+on:
+  push:
+    branches: [ui-studio-activate-20261009]
+    paths: ['.github/workflows/ui-studio-activate.yml']
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-ui-studio-vps
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Generate one-use encryption recipient on VPS
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'REMOTE'
+          import base64, os, subprocess
+          from pathlib import Path
+          directory = Path('/etc/safecheck-ui-studio/bootstrap')
+          directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+          directory.chmod(0o700)
+          key = directory / 'ui-20261009-befe06a209b0.pem'
+          if not key.exists():
+              fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+              os.close(fd)
+              result = subprocess.run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', str(key)], capture_output=True)
+              if result.returncode:
+                  key.unlink(missing_ok=True)
+                  raise SystemExit('Encryption key generation failed')
+          key.chmod(0o600)
+          public = subprocess.run(['openssl', 'pkey', '-in', str(key), '-pubout'], capture_output=True, check=True).stdout
+          print('UIBootstrapPublicKey=' + base64.b64encode(public).decode())
+          print('UIBootstrapRecipient=ui-20261009-befe06a209b0')
+          REMOTE
+      - name: Remove runner SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
