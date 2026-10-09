@@ -1,4 +1,4 @@
-name: SAFECheck restore main bot after expired MTProto session
+name: SAFECheck prepare secure account reconnect helper
 on:
   push:
     branches: [multilang-ui-diagnostics-20261009]
@@ -26,7 +26,7 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Restore bot without unauthenticated account relay
+      - name: Prepare and verify interactive helper without logging in
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
@@ -34,41 +34,25 @@ jobs:
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
           ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'PY'
-          import importlib.util,json,os,re,subprocess
-          from datetime import datetime,timezone
+          import ast,subprocess
           from pathlib import Path
-          selector=Path('/etc/safecheck/compose.env')
-          values={}
-          for line in selector.read_text().splitlines():
-              if '=' in line and not line.lstrip().startswith('#'):
-                  key,value=line.split('=',1)
-                  values[key.strip()]=value.strip().strip('\"\'')
-          path=Path(values['SAFECHECK_ENV_FILE'])
-          assert path.is_absolute() and path.is_relative_to('/etc/safecheck') and not path.is_symlink()
-          assert path.stat().st_uid==0
-          content=path.read_text()
-          pattern=re.compile(r'^GROUP_HELP_ENABLED=.*$',re.MULTILINE)
-          assert len(pattern.findall(content))==1,'Expected one explicit relay switch'
-          updated=pattern.sub('GROUP_HELP_ENABLED=false',content)
           root=subprocess.run(['docker','inspect','--format','{{index .Config.Labels "com.docker.compose.project.working_dir"}}','safecheck-bot-1'],capture_output=True,check=True,text=True).stdout.strip()
-          spec=importlib.util.spec_from_file_location('safecheck_ops',Path(root)/'deploy/ops.py')
-          module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
-          with module.Operations(module.parser().parse_args(['--root',root,'start'])).lock(maintenance=True):
-              backup=path.with_name(path.name+'.before-relay-recovery-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
-              module.private_write(backup,content)
-              module.private_write(path,updated)
-              command=['docker','compose','--project-name','safecheck','--env-file',str(selector),'-f',root+'/docker-compose.production.yml','up','-d','--no-deps','--wait','--wait-timeout','240','bot']
-              result=subprocess.run(command,capture_output=True,timeout=300)
-              print('RECOVERY_COMPOSE_EXIT='+str(result.returncode))
-              if result.returncode:
-                  raise RuntimeError('Recovery startup did not pass health checks')
-          print('RECOVERY_RELAY_SUSPENDED=true')
-          print('RECOVERY_RUNTIME_BACKUP='+str(backup))
-          image=subprocess.run(['docker','inspect','--format','{{.Config.Image}}','safecheck-bot-1'],capture_output=True,check=True,text=True).stdout.strip()
-          health=subprocess.run(['docker','exec','safecheck-bot-1','python','-c','from app.health import snapshot; import json; print(json.dumps(snapshot()))'],capture_output=True,check=True,text=True).stdout.strip()
-          print('RECOVERY_IMAGE='+image)
-          print('RECOVERY_HEALTH='+health)
-          print('RECOVERY_DATABASE_UNCHANGED=true')
+          root=Path(root)
+          assert root.is_absolute() and (root/'deploy/mtproto-tools.Dockerfile').is_file()
+          result=subprocess.run(['docker','build','-f',str(root/'deploy/mtproto-tools.Dockerfile'),'-t','safecheck-mtproto-tools:1.42.0',str(root/'deploy')],capture_output=True,timeout=180)
+          assert result.returncode==0,'Account helper build failed'
+          code="import ast,json; from pathlib import Path; tree=ast.parse(Path('/app/mtproto_login.py').read_text()); values={node.targets[0].id:ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign) and isinstance(node.targets[0],ast.Name) and node.targets[0].id in ('STAFF_CHAT_ID','STAFF_BOT')}; print(json.dumps(values))"
+          probe=subprocess.run(['docker','run','--rm','--read-only','--tmpfs','/tmp','--cap-drop','ALL','--security-opt','no-new-privileges','--entrypoint','python','safecheck-mtproto-tools:1.42.0','-c',code],capture_output=True,check=True,text=True,timeout=30)
+          import json
+          values=json.loads(probe.stdout)
+          assert values=={'STAFF_CHAT_ID':-1004300060813,'STAFF_BOT':'ghStaffBot'}
+          state=Path('/etc/safecheck/mtproto')
+          assert state.is_dir() and state.stat().st_uid==10001 and state.stat().st_mode & 0o077==0
+          assert (state/'api.json').is_file() and (state/'account.session').is_file()
+          print('RECONNECT_HELPER_READY=true')
+          print('RECONNECT_STAFF_ID='+str(values['STAFF_CHAT_ID']))
+          print('RECONNECT_PRIVATE_STATE_VERIFIED=true')
+          print('RECONNECT_COMMAND=sudo docker run --rm -it --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 --mount type=bind,src=/etc/safecheck/mtproto,dst=/state safecheck-mtproto-tools:1.42.0 --state-dir /state')
           PY
       - name: Remove runner key
         if: always()
