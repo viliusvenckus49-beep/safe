@@ -10,12 +10,13 @@ from aiogram.methods import EditMessageText, SendMessage, SendPhoto
 from app.bot import group_keyboards, keyboards
 from app.bot.scam_admin import listing
 from app.bot.session import _request
-from app.i18n import t, use_language
+from app.i18n import t, use_button_icons, use_language
 from app.locales.button_icons import CATALOGS as ICONS
 
 
-def test_promoted_icons_reach_recovery_and_top_without_changing_dynamic_names():
-    with use_language("lt"):
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_promoted_icons_reach_recovery_and_top_without_changing_dynamic_names(lang):
+    with use_language(lang):
         for markup in (
             group_keyboards.menu([], admin=True),
             group_keyboards.consent(-100),
@@ -44,15 +45,15 @@ def test_promoted_icons_reach_recovery_and_top_without_changing_dynamic_names():
         assert top[-1][0].callback_data == "sc|home|"
 
 
-@pytest.mark.parametrize("lang", ["en", "ru"])
-def test_other_locales_and_dynamic_button_names_do_not_inherit_lithuanian_icons(lang):
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_all_locales_share_icons_and_keep_dynamic_names_unchanged(lang):
     with use_language(lang):
-        assert all(
-            b.icon_custom_emoji_id is None
-            for row in keyboards.home(True).inline_keyboard
-            for b in row
-        )
-    with use_language("lt"):
+        buttons = {b.callback_data: b for row in keyboards.home(True).inline_keyboard for b in row}
+        assert buttons["sc|lookup|"].icon_custom_emoji_id == "5357123175136118943"
+        assert buttons["sc|profile|"].icon_custom_emoji_id == "5242466051052023689"
+        assert buttons["sc|admin|"].icon_custom_emoji_id == "6129805886383723340"
+        assert ICONS[lang] == ICONS["lt"]
+        assert len(ICONS[lang]) == 25
         button = group_keyboards.menu(
             [SimpleNamespace(title="Original Group", chat_id=-100)], admin=False
         ).inline_keyboard[0][0]
@@ -93,7 +94,7 @@ async def test_rejected_native_icons_retry_once_preserving_all_content_and_callb
 
 @pytest.mark.parametrize("icon_fallback,lang", [(False, "lt"), (True, "en")])
 async def test_studio_or_non_icon_errors_do_not_retry(icon_fallback, lang):
-    with use_language(lang):
+    with use_language(lang), use_button_icons({}):
         method = SendMessage(chat_id=900, text="Same", reply_markup=keyboards.home())
     request = AsyncMock(side_effect=TelegramBadRequest(method, "OTHER_API_ERROR"))
     with pytest.raises(TelegramBadRequest, match="OTHER_API_ERROR"):
@@ -122,21 +123,51 @@ async def test_network_failure_does_not_repeat_a_possibly_delivered_message():
     assert request.await_count == 1
 
 
-async def test_scam_registry_keeps_native_back_icon_when_combining_pagination(monkeypatch):
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_scam_registry_keeps_native_back_icon_when_combining_pagination(monkeypatch, lang):
     render = AsyncMock()
     monkeypatch.setattr("app.bot.scam_admin.flow_screen", render)
     service = SimpleNamespace(require_admin=AsyncMock(), scams=AsyncMock(return_value=([], 0)))
     state = AsyncMock()
     state.get_data.return_value = {}
-    with use_language("lt"):
+    with use_language(lang):
         await listing(SimpleNamespace(chat=SimpleNamespace(id=900)), state, service)
+        expected_back = t("button.back")
     service.require_admin.assert_awaited_once_with(900)
     markup = render.await_args.kwargs["reply_markup"]
     buttons = [b for row in markup.inline_keyboard for b in row]
     back = next(b for b in buttons if b.callback_data == "sc|admin|")
-    assert back.text == "ᴀᴛɢᴀʟ" and back.icon_custom_emoji_id == "5321143340744329564"
+    assert back.text == expected_back and back.icon_custom_emoji_id == "5321143340744329564"
     assert [b.callback_data for b in buttons[:3]] == [
         "sc|admin_scams|0",
         "sc|noop|",
         "sc|admin_scams|0",
     ]
+
+
+def test_main_admin_and_result_routes_are_identical_in_every_language():
+    routes = []
+    for lang in ("lt", "en", "ru"):
+        with use_language(lang):
+            routes.append(
+                [
+                    [[(b.callback_data, b.url) for b in row] for row in markup.inline_keyboard]
+                    for markup in (
+                        keyboards.home(True, owner=True),
+                        keyboards.admin(owner=True),
+                        keyboards.result("u:8425927753"),
+                        group_keyboards.consent(-100),
+                    )
+                ]
+            )
+    assert routes[0] == routes[1] == routes[2]
+
+
+def test_translated_button_labels_keep_their_language():
+    assert t("button.lookup", "en") == "ᴄʜᴇᴄᴋ"
+    assert t("button.profile", "en") == "ᴘʀᴏꜰɪʟᴇ"
+    assert t("button.scams", "en") == "ꜱᴄᴀᴍ ʀᴇɢɪꜱᴛʀʏ"
+    assert t("button.lookup", "ru") == "ПРОВЕРИТЬ"
+    assert t("button.profile", "ru") == "ПРОФИЛЬ"
+    assert t("button.scams", "ru") == "РЕЕСТР ꜱᴄᴀᴍ"
+    assert t("button.lookup", "lt") == "ᴛɪᴋʀɪɴᴛɪ"

@@ -64,4 +64,8 @@ catalogs and their native icons in `app/locales/button_icons.py`. There were no 
 Production uses these shipped values; UI Studio keeps its separately scoped text/icon overrides.
 Premium icon rejection in production retries the same keyboard once without native icons, preserving
 its text, callbacks and permissions. Other errors remain errors and network failures are not retried.
-This promotion does not apply result-message overrides or change EN/RU translations.
+The same 25 native icons also apply to English and Russian buttons. English static labels use the
+saved smallcaps style. Russian labels preserve Cyrillic lettering (Unicode has no complete Cyrillic
+smallcaps alphabet); their Latin REP, SCAM and TOP terms use the same smallcaps. The translated
+actions, dynamic names, callback values and layouts remain unchanged. Result-message overrides are
+not part of this promotion.

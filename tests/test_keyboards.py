@@ -57,9 +57,7 @@ def test_reputation_buttons_keep_original_vote_routes_in_all_languages():
     for lang in ("lt", "en", "ru"):
         with use_language(lang):
             row = keyboards.result("u:42").inline_keyboard[1]
-            assert [button.text for button in row] == (
-                ["+ʀᴇᴘ", "-ʀᴇᴘ"] if lang == "lt" else ["＋ REP", "− REP"]
-            )
+            assert [button.text for button in row] == ["+ʀᴇᴘ", "-ʀᴇᴘ"]
             assert [button.callback_data for button in row] == [
                 keyboards.action("vote+", "u:42"),
                 keyboards.action("vote-", "u:42"),
