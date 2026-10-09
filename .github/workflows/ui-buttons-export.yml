@@ -1,0 +1,51 @@
+name: SAFECheck read saved UI buttons
+on:
+  push:
+    branches: [ui-buttons-export-20261009]
+    paths: ['.github/workflows/ui-buttons-export.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare pinned read-only VPS access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Read only saved button settings
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          path=Path('/var/lib/safecheck-ui-studio/design.json')
+          assert path.stat().st_size <= 2000000
+          data=json.loads(path.read_text())
+          assert data['version']==1
+          BUTTON_KEYS=["admin_access.button", "admin_help.button", "admin_help.menu", "button.add_scam", "button.admin", "button.approve", "button.audit", "button.back", "button.back_admin", "button.cancel", "button.close", "button.confirm_action", "button.evidence", "button.group_approve", "button.group_remove", "button.group_remove_confirm", "button.group_rights", "button.groups", "button.home", "button.info", "button.language", "button.lookup", "button.lookup_other", "button.members", "button.negative", "button.next", "button.pending", "button.positive", "button.preview", "button.profile", "button.reason", "button.recovery", "button.recovery_link", "button.registry", "button.reject", "button.remove_scam", "button.rep", "button.rep_add", "button.rep_admin", "button.rep_list", "button.rep_pending", "button.rep_reset", "button.rep_sub", "button.report", "button.scams", "button.search", "button.send_subscribers", "button.stats", "button.status", "button.submit", "button.subscribe", "button.top", "button.top_exclude", "button.top_include", "button.unsubscribe", "button.users", "diagnostic.button", "sm.id", "sm.refresh", "sm.remove", "sm.retry", "sm.unban", "sm.unban_retry", "sm.username", "tm.clear", "tm.confirm", "tm.menu", "tm.remove", "tm.search"]
+          texts={lang:{k:v for k,v in entries.items() if k in BUTTON_KEYS} for lang,entries in data['texts'].items()}
+          icons={lang:{k:v for k,v in entries.items() if k in BUTTON_KEYS} for lang,entries in data.get('icons',{}).items()}
+          snapshot={'version':1,'texts':texts,'icons':icons,'layouts':data['layouts']}
+          encoded=json.dumps(snapshot,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+          print('BUTTON_DESIGN='+encoded)
+          print('BUTTON_DESIGN_SHA256='+hashlib.sha256(encoded.encode()).hexdigest())
+          print('ReadOnlyButtonSnapshot=true')
+          PY
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
