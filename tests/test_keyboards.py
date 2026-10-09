@@ -27,13 +27,13 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
     with use_language("lt"):
         rows = keyboards.home().inline_keyboard
         assert [[button.text for button in row] for row in rows] == [
-            ["🔍 TIKRINTI"],
-            ["👤 PROFILIS", "🚨 PRANEŠTI"],
-            ["🏆 TOP 10", "🚷SCAM REGISTRAS"],
-            ["＋ ĮVERTINTI", "ⓘ INFORMACIJA"],
-            ["↻ GRUPĖS ATKŪRIMAS"],
-            ["🌐 KALBA"],
-            ["× UŽDARYTI"],
+            ["ᴛɪᴋʀɪɴᴛɪ"],
+            ["ᴘʀᴏꜰɪʟɪꜱ", "ᴘʀᴀɴᴇꜱᴛɪ"],
+            ["ᴛᴏᴘ 10", "ꜱᴄᴀᴍᴇʀɪᴀɪ"],
+            ["ɪᴠᴇʀᴛɪɴᴛɪ", "ɪɴꜰᴏʀᴍᴀᴄɪᴊᴀ"],
+            ["ɢʀᴜᴘᴇꜱ ᴀᴛᴋᴜʀɪᴍᴀꜱ"],
+            ["ᴋᴀʟʙᴀ"],
+            ["ᴜᴢᴅᴀʀʏᴛɪ"],
         ]
         assert [[button.callback_data for button in row] for row in rows] == [
             [keyboards.action("lookup")],
@@ -57,7 +57,9 @@ def test_reputation_buttons_keep_original_vote_routes_in_all_languages():
     for lang in ("lt", "en", "ru"):
         with use_language(lang):
             row = keyboards.result("u:42").inline_keyboard[1]
-            assert [button.text for button in row] == ["＋ REP", "− REP"]
+            assert [button.text for button in row] == (
+                ["+ʀᴇᴘ", "-ʀᴇᴘ"] if lang == "lt" else ["＋ REP", "− REP"]
+            )
             assert [button.callback_data for button in row] == [
                 keyboards.action("vote+", "u:42"),
                 keyboards.action("vote-", "u:42"),
@@ -111,5 +113,5 @@ def test_admin_circled_buttons_use_emoji_with_original_routes():
     assert labels[keyboards.action("audit")] == "📜 Veiksmų istorija"
     assert labels[keyboards.action("rep_admin")] == "🏆 REP ir TOP valdymas"
     assert labels[keyboards.action("rep_pending", "0")] == "＋ Laukiantys REP"
-    assert labels[keyboards.action("add_sc")] == "＋ Pridėti SCAM"
-    assert labels[keyboards.action("del_sc")] == "− Pašalinti SCAM"
+    assert labels[keyboards.action("add_sc")] == "+ᴘʀɪᴅᴇᴛɪ ꜱᴄᴀᴍ"
+    assert labels[keyboards.action("del_sc")] == "+ᴘᴀꜱᴀʟɪɴᴛɪ ꜱᴄᴀᴍ"

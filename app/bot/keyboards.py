@@ -3,6 +3,7 @@ from typing import Any
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from app.bot.buttons import inline_button
 from app.bot.callbacks import (
     Action,
     AdminAccess,
@@ -22,11 +23,7 @@ def keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for row in rows:
         for label, callback in row:
-            builder.button(
-                text=str(label),
-                callback_data=callback,
-                icon_custom_emoji_id=getattr(label, "icon_custom_emoji_id", None),
-            )
+            builder.add(inline_button(label, callback_data=callback))
         builder.adjust(*[len(row) for row in rows])
     return builder.as_markup()
 
@@ -187,7 +184,7 @@ def leaderboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
             builder.button(text=f"{index}. {name}", url=f"tg://user?id={user.telegram_id}")
         else:
             builder.button(text=f"{index}. {name}", callback_data=action("lookup"))
-    builder.button(text=t("button.home"), callback_data=action("home"))
+    builder.add(inline_button(t("button.home"), callback_data=action("home")))
     builder.adjust(1)
     return builder.as_markup()
 

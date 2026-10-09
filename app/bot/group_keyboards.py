@@ -4,6 +4,7 @@ from typing import Any
 from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from app.bot.buttons import inline_button
 from app.i18n import t
 
 
@@ -14,8 +15,8 @@ class GroupAction(CallbackData, prefix="sg", sep="|"):
 
 
 def button(text: str, action: str, chat_id: int = 0, nonce: str = "") -> InlineKeyboardButton:
-    return InlineKeyboardButton(
-        text=text, callback_data=GroupAction(action=action, chat_id=chat_id, nonce=nonce).pack()
+    return inline_button(
+        text, callback_data=GroupAction(action=action, chat_id=chat_id, nonce=nonce).pack()
     )
 
 
@@ -25,11 +26,7 @@ def menu(groups: Sequence[Any], *, admin: bool) -> InlineKeyboardMarkup:
         for group in groups
     ]
     rows.append(
-        [
-            InlineKeyboardButton(
-                text=t("button.back"), callback_data="sc|admin|" if admin else "sc|home|"
-            )
-        ]
+        [inline_button(t("button.back"), callback_data="sc|admin|" if admin else "sc|home|")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -82,7 +79,7 @@ def preview(chat_id: int, nonce: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [button(t("button.send_subscribers"), "send", chat_id, nonce)],
             [button(t("button.back"), "recover", chat_id)],
-            [InlineKeyboardButton(text=t("button.cancel"), callback_data="sc|close|")],
+            [inline_button(t("button.cancel"), callback_data="sc|close|")],
         ]
     )
 
@@ -98,6 +95,6 @@ def recovery_input(chat_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [button(t("button.back"), "group", chat_id)],
-            [InlineKeyboardButton(text=t("button.cancel"), callback_data="sc|close|")],
+            [inline_button(t("button.cancel"), callback_data="sc|close|")],
         ]
     )

@@ -72,7 +72,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         health = RuntimeHealth()
         bot = Bot(
             settings.bot_token.get_secret_value(),
-            session=telegram_session(settings, on_poll=health.polling),
+            session=telegram_session(settings, on_poll=health.polling, icon_fallback=True),
             default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         )
         dispatcher = Dispatcher(storage=storage, events_isolation=isolation)

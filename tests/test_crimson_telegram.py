@@ -362,7 +362,7 @@ async def test_existing_numeric_scam_observation_bans_every_group_without_changi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sign,actor,target,label", [(1, 1, 42, "＋ REP"), (-1, 2, 43, "− REP")])
+@pytest.mark.parametrize("sign,actor,target,label", [(1, 1, 42, "+ʀᴇᴘ"), (-1, 2, 43, "-ʀᴇᴘ")])
 async def test_result_rep_buttons_require_five_character_comment_and_preserve_value(
     crimson, database, settings, sign, actor, target, label
 ):
@@ -405,13 +405,13 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
     ]
     if lang == "lt":
         assert [[button.text for button in row] for row in markup.inline_keyboard] == [
-            ["🔍 TIKRINTI"],
-            ["👤 PROFILIS", "🚨 PRANEŠTI"],
-            ["🏆 TOP 10", "🚷SCAM REGISTRAS"],
-            ["＋ ĮVERTINTI", "ⓘ INFORMACIJA"],
-            ["↻ GRUPĖS ATKŪRIMAS"],
-            ["🌐 KALBA"],
-            ["× UŽDARYTI"],
+            ["ᴛɪᴋʀɪɴᴛɪ"],
+            ["ᴘʀᴏꜰɪʟɪꜱ", "ᴘʀᴀɴᴇꜱᴛɪ"],
+            ["ᴛᴏᴘ 10", "ꜱᴄᴀᴍᴇʀɪᴀɪ"],
+            ["ɪᴠᴇʀᴛɪɴᴛɪ", "ɪɴꜰᴏʀᴍᴀᴄɪᴊᴀ"],
+            ["ɢʀᴜᴘᴇꜱ ᴀᴛᴋᴜʀɪᴍᴀꜱ"],
+            ["ᴋᴀʟʙᴀ"],
+            ["ᴜᴢᴅᴀʀʏᴛɪ"],
         ]
     for callback in [value for row in rows[:-1] for value in row]:
         before = len(crimson.transport.calls)
