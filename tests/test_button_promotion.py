@@ -8,6 +8,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 from aiogram.methods import EditMessageText, SendMessage, SendPhoto
 
 from app.bot import group_keyboards, keyboards
+from app.bot.scam_admin import listing
 from app.bot.session import _request
 from app.i18n import t, use_language
 from app.locales.button_icons import CATALOGS as ICONS
@@ -119,3 +120,23 @@ async def test_network_failure_does_not_repeat_a_possibly_delivered_message():
     with pytest.raises(TelegramNetworkError):
         await _request(request, None, method, icon_fallback=True)
     assert request.await_count == 1
+
+
+async def test_scam_registry_keeps_native_back_icon_when_combining_pagination(monkeypatch):
+    render = AsyncMock()
+    monkeypatch.setattr("app.bot.scam_admin.flow_screen", render)
+    service = SimpleNamespace(require_admin=AsyncMock(), scams=AsyncMock(return_value=([], 0)))
+    state = AsyncMock()
+    state.get_data.return_value = {}
+    with use_language("lt"):
+        await listing(SimpleNamespace(chat=SimpleNamespace(id=900)), state, service)
+    service.require_admin.assert_awaited_once_with(900)
+    markup = render.await_args.kwargs["reply_markup"]
+    buttons = [b for row in markup.inline_keyboard for b in row]
+    back = next(b for b in buttons if b.callback_data == "sc|admin|")
+    assert back.text == "ᴀᴛɢᴀʟ" and back.icon_custom_emoji_id == "5321143340744329564"
+    assert [b.callback_data for b in buttons[:3]] == [
+        "sc|admin_scams|0",
+        "sc|noop|",
+        "sc|admin_scams|0",
+    ]
