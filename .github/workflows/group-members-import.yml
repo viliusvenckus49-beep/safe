@@ -1,10 +1,4 @@
 name: SAFECheck preview selected user removal
-true:
-  push:
-    branches:
-    - group-members-import-20261009
-    paths:
-    - .github/workflows/group-members-import.yml
 permissions:
   contents: read
 concurrency:
@@ -92,3 +86,9 @@ jobs:
     - name: Remove runner key
       if: always()
       run: rm -f "$HOME/.ssh/safecheck_deploy"
+'on':
+  push:
+    branches:
+    - group-members-import-20261009
+    paths:
+    - .github/workflows/group-members-import.yml
