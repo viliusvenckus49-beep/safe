@@ -1,0 +1,26 @@
+services:
+  studio:
+    image: ${SAFECHECK_TEST_IMAGE:?Set the tested UI studio image}
+    command: ["python", "-m", "app.test_ui"]
+    env_file: ${SAFECHECK_TEST_ENV_FILE:-/etc/safecheck-ui-studio/runtime.env}
+    environment:
+      TEST_UI_STATE_FILE: /state/design.json
+    volumes:
+      - /var/lib/safecheck-ui-studio:/state
+    init: true
+    read_only: true
+    tmpfs: [/tmp:size=8m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 192m
+    cpus: 0.4
+    pids_limit: 128
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.test_ui", "--health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      safecheck.ui-studio: "true"

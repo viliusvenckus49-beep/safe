@@ -1,0 +1,39 @@
+# SAFECheck UI Studio
+
+UI Studio is a separate Telegram bot for changing and previewing SAFECheck text and buttons.
+It uses the same catalogs and presentation/keyboard builders with synthetic user data.
+It never registers production handlers, opens a reputation database, starts moderation workers,
+or connects to MTProto / Group Help. The Telegram transport rejects moderation API methods.
+
+## In Telegram
+
+1. Open the test bot and send `/start` or `/ui`. Access is limited to explicitly configured administrators in private chat.
+2. Select **Buttons** or **Texts**. Browse, or search for part of the text.
+3. Select an item, choose **Edit**, then send the replacement. Emoji are supported. Required placeholders must stay present. Buttons stay on one line, up to 64 UTF-16 units; templates up to 3500 units with supported Telegram HTML.
+4. Choose **Preview** to see a single item, or preview whole main/admin menus, profile, information, SCAM and TRUSTED messages.
+5. **Button layout** lets you reorder the main and administration menus. Send numbered rows; every existing button must appear exactly once. Its callback identity never changes. Normal-user main-menu previews exclude administration controls.
+6. **Language** selects LT / EN / RU. Edits are independent per language. Layout is shared across languages.
+7. **Restore default** removes an individual override; **Restore layout** restores menu ordering.
+8. **Download design** exports `safecheck-design.json`, containing only version, text overrides and layouts. Exporting does not apply anything to production.
+
+Design changes persist across restarts in `/var/lib/safecheck-ui-studio/design.json`.
+Editing the same field concurrently detects a stale draft rather than overwriting another administrator's edit.
+All user identities and status counters in previews are examples. Clicking production-style action
+buttons shows a demo notice or navigates preview screens; it never bans/unbans or changes reputation.
+
+## Deployment
+
+Create a separate bot through BotFather `/newbot`. Store its token as the GitHub Actions secret
+`SAFECHECK_TEST_BOT_TOKEN`; never paste tokens into chats, source files or issue descriptions.
+Run **SAFECheck UI Studio deploy** against the tested code.
+
+The workflow uses the existing pinned VPS SSH connection. It builds an independent image and runs
+only Compose project `safecheck-ui-studio`, service `studio`. It refuses a token for the production
+bot, copies only its configured administrator IDs, saves a private design backup on updates, and
+verifies production container identities/images/start times are unchanged. It never runs production
+Compose or database migrations. Initial failure stops only the new preview service; update failure
+restores its previous private configuration and image. The runtime file is
+`/etc/safecheck-ui-studio/runtime.env`, mode 0600. The editor state is a separate private mount.
+
+Production SAFECheck does not load exported design files. Moving a chosen design into production is
+a separate code update using its unchanged action callbacks and localization keys.
