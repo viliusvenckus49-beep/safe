@@ -1,0 +1,75 @@
+name: SAFECheck deployment diagnostics
+on:
+  push:
+    branches: [multilang-ui-diagnostics-20261009]
+    paths: ['.github/workflows/multilang-ui-diagnostics.yml']
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare pinned read-only VPS access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Inspect deployment without changing it
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'PY'
+          import json,subprocess,time
+          from collections import Counter
+          
+          def run(args):
+              result=subprocess.run(args,capture_output=True,timeout=40)
+              if result.returncode:
+                  raise RuntimeError('Read-only inspection failed')
+              return result.stdout.decode()
+          for name in ('safecheck-bot-1','safecheck-postgres-1','safecheck-redis-1','safecheck-ui-studio-studio-1'):
+              data=json.loads(run(['docker','inspect','--format','{{json .State}}',name]))
+              print('DIAGNOSTIC_CONTAINER='+json.dumps({'name':name,'image':run(['docker','inspect','--format','{{.Config.Image}}',name]).strip(),'running':data['Running'],'status':data['Status'],'health':data.get('Health',{}).get('Status'),'exit_code':data['ExitCode']}))
+          root=run(['docker','inspect','--format','{{index .Config.Labels "com.docker.compose.project.working_dir"}}','safecheck-bot-1']).strip()
+          print('DIAGNOSTIC_ROOT='+root)
+          logs=subprocess.run(['docker','logs','--tail','1500','safecheck-bot-1'],capture_output=True,timeout=30)
+          assert logs.returncode==0
+          counts=Counter()
+          errors=[]
+          for line in (logs.stdout+logs.stderr).decode().splitlines():
+              try:
+                  item=json.loads(line)
+              except ValueError:
+                  continue
+              event=item.get('event','')
+              counts[event]+=1
+              if item.get('level') in ('warning','error','critical') or any(term in event for term in ('fail','error','invalid','unavailable')):
+                  errors.append({key:item[key] for key in ('timestamp','event','level','operation','exception_type','user_id','chat_id') if key in item})
+          print('DIAGNOSTIC_EVENTS='+json.dumps(counts))
+          print('DIAGNOSTIC_ERRORS='+json.dumps(errors[-20:]))
+          health=subprocess.run(['docker','exec','safecheck-bot-1','python','-c',"from app.health import snapshot; import json; print(json.dumps(snapshot()))"],capture_output=True,timeout=20)
+          print('DIAGNOSTIC_HEALTH='+health.stdout.decode().strip())
+          from pathlib import Path
+          for selector in ('/etc/safecheck/compose.env','/var/lib/safecheck/github-candidate.env'):
+              path=Path(selector)
+              if path.exists():
+                  for line in path.read_text().splitlines():
+                      if line.startswith('SAFECHECK_IMAGE='):
+                          print('DIAGNOSTIC_SELECTOR='+json.dumps({'path':selector,'image':line.split('=',1)[1]}))
+          print('DIAGNOSTIC_READONLY=true')
+          PY
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
