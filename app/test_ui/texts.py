@@ -1,6 +1,126 @@
 """Editor chrome is separate from the editable SAFECheck catalogs."""
 
 TEXTS = {
+    "premium_icon": ("✨ Premium emoji", "✨ Premium emoji", "✨ Premium эмодзи"),
+    "remove_icon": ("× Pašalinti ikoną", "× Remove icon", "× Удалить иконку"),
+    "current_icon": ("Premium ikona: {id}", "Premium icon: {id}", "Premium иконка: {id}"),
+    "no_icon": ("nenustatyta", "not set", "не задана"),
+    "icon_prompt": (
+        "Atsiųsk vieną tikrą Premium emoji iš Telegram emoji pasirinkimo arba jo skaitinį ID. Ikona bus rodoma prieš mygtuko tekstą šioje kalboje.\n\nBoto savininkui reikia Telegram Premium arba botui papildomo vardo iš Fragment.",
+        "Send one genuine Premium emoji from Telegram's emoji picker, or its numeric ID. The icon will appear before this button's text in the selected language.\n\nThe bot's owner needs Telegram Premium, or the bot needs an additional username from Fragment.",
+        "Отправьте один настоящий Premium эмодзи из меню Telegram или его числовой ID. Иконка появится перед текстом кнопки в выбранном языке.\n\nВладельцу бота нужен Telegram Premium либо боту — дополнительное имя с Fragment.",
+    ),
+    "icon_invalid": (
+        "Atsiųsk vieną tikrą Premium emoji arba galiojantį jo ID. Paprastas tekstinis emoji šiai ikonai netinka.",
+        "Send one genuine Premium emoji or its valid ID. A plain Unicode emoji cannot be used as this icon.",
+        "Отправьте один настоящий Premium эмодзи или его действительный ID. Обычный текстовый эмодзи не подходит для этой иконки.",
+    ),
+    "icon_lookup_failed": (
+        "Telegram emoji patikra nepavyko. Pasirinkimas nepakeistas; pabandyk atsiųsti dar kartą.",
+        "Telegram could not verify the emoji. The selection is unchanged; try sending it again.",
+        "Telegram не смог проверить эмодзи. Настройка не изменена; отправьте его ещё раз.",
+    ),
+    "premium_unavailable": (
+        "Telegram atmetė Premium emoji; peržiūra parodyta be jo. Pasirinkimas išsaugotas. Patikrink, ar boto savininkas turi Telegram Premium, arba botas turi papildomą vardą iš Fragment.",
+        "Telegram rejected the Premium emoji; this preview is shown without it. Your selection is saved. Check whether the bot's owner has Telegram Premium, or the bot has an additional username from Fragment.",
+        "Telegram отклонил Premium эмодзи; просмотр показан без него. Настройка сохранена. Проверьте Telegram Premium у владельца бота либо дополнительное имя бота с Fragment.",
+    ),
+    "use_icon_picker": (
+        "Premium ikoną priskirk per mygtuko „✨ Premium emoji“ nustatymą. Čia keičiamas mygtuko tekstas.",
+        "Set the Premium icon through this button's “✨ Premium emoji” option. This field changes the button text.",
+        "Назначьте Premium иконку через настройку «✨ Premium эмодзи». Здесь меняется текст кнопки.",
+    ),
+    "result": ("📑 Rezultato tekstai", "📑 Result texts", "📑 Тексты результата"),
+    "result_preview": ("👀 Peržiūrėti rezultatą", "👀 Preview result", "👀 Просмотр результата"),
+    "result_clear": ("Rezultatas · SCAM nėra", "Result · no SCAM", "Результат · нет SCAM"),
+    "result_unknown": (
+        "Rezultatas · ID nežinomas",
+        "Result · unknown ID",
+        "Результат · ID неизвестен",
+    ),
+    "result_scam": ("Rezultatas · SCAM", "Result · SCAM", "Результат · SCAM"),
+    "result.p.profile_title": ("Rezultato antraštė", "Result heading", "Заголовок результата"),
+    "result.p.profile_card": (
+        "Reputacija ir REP skaičiai",
+        "Reputation and REP counts",
+        "Репутация и количество REP",
+    ),
+    "result.p.lookup_status": ("Statuso antraštė", "Status heading", "Заголовок статуса"),
+    "result.p.lookup_clear_status": (
+        "SCAM įrašų nerasta",
+        "No SCAM record found",
+        "Записей SCAM не найдено",
+    ),
+    "result.p.no_scam": (
+        "Paaiškinimas · SCAM nėra",
+        "Explanation · no SCAM",
+        "Пояснение · нет SCAM",
+    ),
+    "result.p.lookup_identity_known": (
+        "Susieta su Telegram ID",
+        "Linked to Telegram ID",
+        "Связано с Telegram ID",
+    ),
+    "result.p.unknown_identity": (
+        "Tapatybė nepatvirtinta",
+        "Identity not confirmed",
+        "Личность не подтверждена",
+    ),
+    "result.p.warning": (
+        "Patikimumo garantijos pastaba",
+        "Reliability disclaimer",
+        "Примечание о надёжности",
+    ),
+    "result.p.lookup_scam_status": (
+        "SCAM įrašas rastas",
+        "SCAM record found",
+        "Запись SCAM найдена",
+    ),
+    "result.p.lookup_scam_description": ("SCAM paaiškinimas", "SCAM explanation", "Пояснение SCAM"),
+    "result.p.lookup_reason": ("SCAM priežastis", "SCAM reason", "Причина SCAM"),
+    "result.p.lookup_reference": ("SCAM įrašo numeris", "SCAM record number", "Номер записи SCAM"),
+    "result.p.lookup_scam_date": ("SCAM įrašo data", "SCAM record date", "Дата записи SCAM"),
+    "result.p.scam_admin_confirmation": (
+        "Administracijos patvirtinimas",
+        "Administrator confirmation",
+        "Подтверждение администрации",
+    ),
+    "result.p.lookup_caution": ("SCAM atsargumo pastaba", "SCAM caution", "Предостережение SCAM"),
+    "result.p.trusted_status": ("TRUSTED statusas", "TRUSTED status", "Статус TRUSTED"),
+    "result.p.lookup_trusted_manual": (
+        "TRUSTED paaiškinimas",
+        "TRUSTED explanation",
+        "Пояснение TRUSTED",
+    ),
+    "result.p.lookup_trusted_date": (
+        "TRUSTED atnaujinimo data",
+        "TRUSTED update date",
+        "Дата обновления TRUSTED",
+    ),
+    "result.p.lookup_trusted_top": (
+        "TOP 10 · TRUSTED statusas",
+        "TOP 10 · TRUSTED status",
+        "TOP 10 · статус TRUSTED",
+    ),
+    "result.p.lookup_trusted_top_description": (
+        "TOP 10 · TRUSTED paaiškinimas",
+        "TOP 10 · TRUSTED explanation",
+        "TOP 10 · пояснение TRUSTED",
+    ),
+    "result.p.lookup_trusted_role": ("TRUSTED pagal rolę", "Role-based TRUSTED", "TRUSTED по роли"),
+    "result.p.role": ("Rolės antraštė", "Role heading", "Заголовок роли"),
+    "result.p.role_founder": ("Įkūrėjo rolė", "Founder role", "Роль основателя"),
+    "result.p.role_moderator": ("Moderatoriaus rolė", "Moderator role", "Роль модератора"),
+    "result.p.lookup_username_match": (
+        "Username sutapimo statusas",
+        "Username match status",
+        "Статус совпадения имени",
+    ),
+    "result.p.lookup_username_match_description": (
+        "Username sutapimo paaiškinimas",
+        "Username match explanation",
+        "Пояснение совпадения имени",
+    ),
     "editors": ("👥 Redaktoriai", "👥 Editors", "👥 Редакторы"),
     "add_editor": ("➕ Pridėti pagal ID", "➕ Add by ID", "➕ Добавить по ID"),
     "access_list": (

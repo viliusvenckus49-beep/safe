@@ -25,6 +25,7 @@ ALLOWED_METHODS = frozenset(
     {
         "GetMe",
         "GetWebhookInfo",
+        "GetCustomEmojiStickers",
         "GetUpdates",
         "SetMyCommands",
         "SendMessage",

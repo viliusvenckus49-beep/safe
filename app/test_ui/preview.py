@@ -11,7 +11,19 @@ from app.bot.scam_admin import controls
 from app.i18n import t
 from app.test_ui.profile import Design, fields
 
-SCREENS = ("home_user", "home_admin", "admin", "info", "scam", "scam_unknown", "trusted", "profile")
+SCREENS = (
+    "home_user",
+    "home_admin",
+    "admin",
+    "info",
+    "scam",
+    "scam_unknown",
+    "trusted",
+    "profile",
+    "result_clear",
+    "result_unknown",
+    "result_scam",
+)
 
 
 def sample(key: str, design: Design, lang: str) -> str:
@@ -66,15 +78,24 @@ def screen(name: str, design: Design, lang: str) -> tuple[str, InlineKeyboardMar
             ), controls(record)
         if name == "trusted":
             return p.trusted_granted(user), kb.back()
-        if name == "profile":
+        if name == "profile" or name.startswith("result_"):
+            if name == "result_unknown":
+                user.telegram_id = None
+            scam = (
+                SimpleNamespace(
+                    id=1, report_id=1, reason="Sample evidence", created_at=datetime.now(UTC)
+                )
+                if name == "result_scam"
+                else None
+            )
             return p.profile(
                 dict(
                     user=user,
-                    scam=None,
-                    trusted=True,
-                    score=12,
-                    positive=14,
-                    negative=2,
+                    scam=scam,
+                    trusted=name == "profile",
+                    score=12 if name == "profile" else 0,
+                    positive=14 if name == "profile" else 0,
+                    negative=2 if name == "profile" else 0,
                     trusted_updated_at=datetime.now(UTC),
                 )
             ), kb.result("u:1")

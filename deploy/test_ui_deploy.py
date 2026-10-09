@@ -133,7 +133,7 @@ def main():
             raise RuntimeError("UI-only deployment refused: unexpected services")
         # Render before polling starts, in a separate offline process. Loading another bot
         # process inside the live container would exceed its deliberately small memory limit.
-        probe = "from pathlib import Path; from app.test_ui.profile import Design; from app.test_ui.preview import screen,SCREENS; d=Design(Path('/state/design.json')); assert len(SCREENS)==8; [(screen(n,d,l)) for l in ('lt','en','ru') for n in SCREENS]; print('UIStudioPreviewsVerified=24 ProductionDatabase=disconnected Moderation=disabled')"
+        probe = "from pathlib import Path; from app.test_ui.profile import Design; from app.test_ui.preview import screen,SCREENS; d=Design(Path('/state/design.json')); assert len(SCREENS)>=8; [(screen(n,d,l)) for l in ('lt','en','ru') for n in SCREENS]; print(f'UIStudioPreviewsVerified={len(SCREENS)*3} ProductionDatabase=disconnected Moderation=disabled')"
         print(
             run(
                 [

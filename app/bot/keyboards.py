@@ -22,7 +22,11 @@ def keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for row in rows:
         for label, callback in row:
-            builder.button(text=label, callback_data=callback)
+            builder.button(
+                text=str(label),
+                callback_data=callback,
+                icon_custom_emoji_id=getattr(label, "icon_custom_emoji_id", None),
+            )
         builder.adjust(*[len(row) for row in rows])
     return builder.as_markup()
 
