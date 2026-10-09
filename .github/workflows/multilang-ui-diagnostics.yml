@@ -1,14 +1,17 @@
-name: SAFECheck deployment diagnostics
+name: SAFECheck restore main bot after expired MTProto session
 on:
   push:
     branches: [multilang-ui-diagnostics-20261009]
     paths: ['.github/workflows/multilang-ui-diagnostics.yml']
 permissions:
   contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
 jobs:
   read:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Prepare pinned read-only VPS access
         env:
@@ -23,7 +26,7 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Inspect deployment without changing it
+      - name: Restore bot without unauthenticated account relay
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
@@ -31,48 +34,41 @@ jobs:
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
           ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'PY'
-          import json,subprocess,time
-          from collections import Counter
-          
-          def run(args):
-              result=subprocess.run(args,capture_output=True,timeout=40)
-              if result.returncode:
-                  raise RuntimeError('Read-only inspection failed')
-              return result.stdout.decode()
-          for name in ('safecheck-bot-1','safecheck-postgres-1','safecheck-redis-1','safecheck-ui-studio-studio-1'):
-              data=json.loads(run(['docker','inspect','--format','{{json .State}}',name]))
-              print('DIAGNOSTIC_CONTAINER='+json.dumps({'name':name,'image':run(['docker','inspect','--format','{{.Config.Image}}',name]).strip(),'running':data['Running'],'status':data['Status'],'health':data.get('Health',{}).get('Status'),'exit_code':data['ExitCode']}))
-          root=run(['docker','inspect','--format','{{index .Config.Labels "com.docker.compose.project.working_dir"}}','safecheck-bot-1']).strip()
-          print('DIAGNOSTIC_ROOT='+root)
-          logs=subprocess.run(['docker','logs','--tail','1500','safecheck-bot-1'],capture_output=True,timeout=30)
-          assert logs.returncode==0
-          counts=Counter()
-          errors=[]
-          for line in (logs.stdout+logs.stderr).decode().splitlines():
-              try:
-                  item=json.loads(line)
-              except ValueError:
-                  continue
-              event=item.get('event','')
-              counts[event]+=1
-              if item.get('level') in ('warning','error','critical') or any(term in event for term in ('fail','error','invalid','unavailable')):
-                  errors.append({key:item[key] for key in ('timestamp','event','level','operation','exception_type','user_id','chat_id') if key in item})
-          print('DIAGNOSTIC_EVENTS='+json.dumps(counts))
-          print('DIAGNOSTIC_ERRORS='+json.dumps(errors[-20:]))
-          health=subprocess.run(['docker','exec','safecheck-bot-1','python','-c',"from app.health import snapshot; import json; print(json.dumps(snapshot()))"],capture_output=True,timeout=20)
-          print('DIAGNOSTIC_HEALTH='+health.stdout.decode().strip())
+          import importlib.util,json,os,re,subprocess
+          from datetime import datetime,timezone
           from pathlib import Path
-          for selector in ('/etc/safecheck/compose.env','/var/lib/safecheck/github-candidate.env'):
-              path=Path(selector)
-              if path.exists():
-                  for line in path.read_text().splitlines():
-                      if line.startswith('SAFECHECK_IMAGE='):
-                          print('DIAGNOSTIC_SELECTOR='+json.dumps({'path':selector,'image':line.split('=',1)[1]}))
-          code="import asyncio,json,os,traceback\nfrom pathlib import Path\nfrom app.config import Settings\nfrom app.db import create_database\nfrom app.models import ManagedGroup\nfrom sqlalchemy import select\nasync def inspect():\n    settings=Settings()\n    print('DIAGNOSTIC_RELAY_SETTINGS='+json.dumps({'enabled':settings.group_help_enabled,'scope':sorted(settings.group_help_scope),'staff_id':settings.group_help_staff_id,'state_dir':settings.group_help_state_dir,'owner_defined':settings.group_owner is not None}))\n    if settings.group_help_enabled:\n        directory=Path(settings.group_help_state_dir)\n        for name in ('','api.json','account.session'):\n            path=directory/name\n            info=path.stat()\n            print('DIAGNOSTIC_PRIVATE_FILE='+json.dumps({'name':name or 'directory','uid':info.st_uid,'runtime_uid':os.getuid(),'mode':oct(info.st_mode & 0o777)}))\n        from app.mtproto_relay import private_configuration\n        private_configuration(directory)\n        print('DIAGNOSTIC_PRIVATE_CONFIG_VALID=true')\n        import sqlite3,tempfile\n        from telethon import TelegramClient\n        temporary=Path(tempfile.mkdtemp(prefix='safecheck-session-probe-'))\n        source=sqlite3.connect('file:'+str(directory/'account.session')+'?mode=ro',uri=True)\n        target=sqlite3.connect(str(temporary/'account.session'))\n        source.backup(target)\n        target.close(); source.close()\n        os.chmod(temporary/'account.session',0o600)\n        config=private_configuration(directory)\n        client=TelegramClient(str(temporary/'account.session'),config['api_id'],config['api_hash'],flood_sleep_threshold=0,request_retries=1,connection_retries=1,timeout=5)\n        try:\n            await asyncio.wait_for(client.connect(),12)\n            authorized=await client.is_user_authorized()\n            print('DIAGNOSTIC_RELAY_AUTHORIZED='+str(authorized))\n            if authorized:\n                me=await client.get_me()\n                print('DIAGNOSTIC_RELAY_ACCOUNT='+json.dumps({'id':me.id if me else None,'is_bot':bool(me.bot) if me else None}))\n                staff=await client.get_entity(settings.group_help_staff_id)\n                print('DIAGNOSTIC_RELAY_STAFF='+json.dumps({'id':staff.id,'left':getattr(staff,'left',False)}))\n                staff_bot=await client.get_entity('ghStaffBot')\n                members=await client.get_participants(staff)\n                print('DIAGNOSTIC_RELAY_BOT='+json.dumps({'expected_id':settings.group_help_bot_id,'actual_id':staff_bot.id,'is_bot':staff_bot.bot,'present':any(user.id==staff_bot.id for user in members)}))\n        except Exception as error:\n            reason='staff_entity_not_available_to_account' if 'Could not find the input entity' in str(error) else 'entity_cannot_be_resolved' if 'Cannot find any entity' in str(error) else type(error).__name__\n            print('DIAGNOSTIC_RELAY_ERROR='+json.dumps({'type':type(error).__name__,'reason':reason,'frames':[{'file':Path(f.filename).name,'line':f.lineno,'function':f.name} for f in traceback.extract_tb(error.__traceback__)]}))\n        finally:\n            await client.disconnect()\n    engine,sessions=create_database(settings.database_url)\n    try:\n        async with sessions() as session:\n            groups=list((await session.scalars(select(ManagedGroup).where(ManagedGroup.chat_id.in_(settings.group_help_scope)))).all())\n            print('DIAGNOSTIC_SCOPE_GROUPS='+json.dumps([{'chat_id':g.chat_id,'title':g.title,'approved':g.approved,'enabled':g.enabled} for g in groups],ensure_ascii=False))\n            print('DIAGNOSTIC_SCOPE_VALID='+str(sum(bool(g.approved and g.enabled) for g in groups)==len(settings.group_help_scope)))\n    finally:\n        await engine.dispose()\ntry:\n    asyncio.run(inspect())\nexcept Exception as error:\n    print('DIAGNOSTIC_PROBE_ERROR='+json.dumps({'type':type(error).__name__,'frames':[{'file':Path(f.filename).name,'line':f.lineno,'function':f.name} for f in traceback.extract_tb(error.__traceback__)]}))\n"
-          result=subprocess.run(['docker','compose','--project-name','safecheck','--env-file','/etc/safecheck/compose.env','-f',root+'/docker-compose.production.yml','run','--rm','--no-deps','-T','bot','python','-'],input=code.encode(),capture_output=True,timeout=45)
-          print(result.stdout.decode())
-          print('DIAGNOSTIC_PROBE_EXIT='+str(result.returncode))
-          print('DIAGNOSTIC_READONLY=true')
+          selector=Path('/etc/safecheck/compose.env')
+          values={}
+          for line in selector.read_text().splitlines():
+              if '=' in line and not line.lstrip().startswith('#'):
+                  key,value=line.split('=',1)
+                  values[key.strip()]=value.strip().strip('\"\'')
+          path=Path(values['SAFECHECK_ENV_FILE'])
+          assert path.is_absolute() and path.is_relative_to('/etc/safecheck') and not path.is_symlink()
+          assert path.stat().st_uid==0
+          content=path.read_text()
+          pattern=re.compile(r'^GROUP_HELP_ENABLED=.*$',re.MULTILINE)
+          assert len(pattern.findall(content))==1,'Expected one explicit relay switch'
+          updated=pattern.sub('GROUP_HELP_ENABLED=false',content)
+          root=subprocess.run(['docker','inspect','--format','{{index .Config.Labels "com.docker.compose.project.working_dir"}}','safecheck-bot-1'],capture_output=True,check=True,text=True).stdout.strip()
+          spec=importlib.util.spec_from_file_location('safecheck_ops',Path(root)/'deploy/ops.py')
+          module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+          with module.Operations(module.parser().parse_args(['--root',root,'start'])).lock(maintenance=True):
+              backup=path.with_name(path.name+'.before-relay-recovery-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
+              module.private_write(backup,content)
+              module.private_write(path,updated)
+              command=['docker','compose','--project-name','safecheck','--env-file',str(selector),'-f',root+'/docker-compose.production.yml','up','-d','--no-deps','--wait','--wait-timeout','240','bot']
+              result=subprocess.run(command,capture_output=True,timeout=300)
+              print('RECOVERY_COMPOSE_EXIT='+str(result.returncode))
+              if result.returncode:
+                  raise RuntimeError('Recovery startup did not pass health checks')
+          print('RECOVERY_RELAY_SUSPENDED=true')
+          print('RECOVERY_RUNTIME_BACKUP='+str(backup))
+          image=subprocess.run(['docker','inspect','--format','{{.Config.Image}}','safecheck-bot-1'],capture_output=True,check=True,text=True).stdout.strip()
+          health=subprocess.run(['docker','exec','safecheck-bot-1','python','-c','from app.health import snapshot; import json; print(json.dumps(snapshot()))'],capture_output=True,check=True,text=True).stdout.strip()
+          print('RECOVERY_IMAGE='+image)
+          print('RECOVERY_HEALTH='+health)
+          print('RECOVERY_DATABASE_UNCHANGED=true')
           PY
       - name: Remove runner key
         if: always()
