@@ -1,0 +1,70 @@
+name: SAFECheck UI Studio live access verification
+on:
+  push:
+    branches: [ui-studio-access-verify-20261009]
+    paths: ['.github/workflows/ui-studio-access-verify.yml']
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-ui-studio-vps
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned VPS access and source archive
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/ui-studio-source.tar.gz"
+      - name: Verify running UI Studio without sending Telegram messages
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "sudo -n python3 -" <<'REMOTE'
+          import datetime, json, re, subprocess, time
+          from pathlib import Path
+          def read(args):
+              return subprocess.run(args, capture_output=True, check=True)
+          container = read(['docker', 'inspect', '--format', '{{json .State.StartedAt}} {{json .State.Health.Status}} {{json .Config.Image}}', 'safecheck-ui-studio-studio-1']).stdout.decode().strip().split()
+          started, health, image = [json.loads(value) for value in container]
+          assert image == 'safecheck-ui:c0a2a6bd449c' and health == 'healthy'
+          started_at = datetime.datetime.fromisoformat(started.replace('Z', '+00:00')).timestamp()
+          heartbeat = Path('/var/lib/safecheck-ui-studio/heartbeat').stat().st_mtime
+          assert started_at <= heartbeat <= time.time() and time.time() - heartbeat <= 180
+          access = json.loads(Path('/var/lib/safecheck-ui-studio/access.json').read_text())
+          assert 8425927753 in access['admins']
+          logs = read(['docker', 'logs', '--tail', '250', 'safecheck-ui-studio-studio-1'])
+          username = None
+          for line in (logs.stdout + logs.stderr).decode().splitlines():
+              try:
+                  event = json.loads(line)
+              except ValueError:
+                  continue
+              if event.get('event') == 'test_ui_started':
+                  username = event.get('username')
+          assert username and re.fullmatch(r'[A-Za-z0-9_]+', username)
+          print('UIStudioBot=https://t.me/' + username)
+          print('UIStudioPollingAfterRestart=true')
+          print('UIStudioTestAdministrator=8425927753')
+          print('UIStudioRuntimeHealth=healthy')
+          REMOTE
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
