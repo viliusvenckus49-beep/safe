@@ -1,3 +1,4 @@
+import argparse
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -66,9 +67,18 @@ def test_login_rejects_symlink_state_and_files(tmp_path):
 
 
 class StaffClient:
-    def __init__(self, *, account_bot=False, staff_bot=True, joined=True):
+    def __init__(
+        self,
+        *,
+        account_bot=False,
+        staff_bot=True,
+        joined=True,
+        staff_id=STAFF_CHAT_ID,
+        bot_username=STAFF_BOT,
+    ):
         self.me = SimpleNamespace(id=42, bot=account_bot)
-        self.bot = SimpleNamespace(id=99, bot=staff_bot, username=STAFF_BOT)
+        self.bot = SimpleNamespace(id=99, bot=staff_bot, username=bot_username)
+        self.staff_id = staff_id
         self.joined = joined
         self.calls = []
 
@@ -77,7 +87,7 @@ class StaffClient:
 
     async def get_entity(self, value):
         self.calls.append(value)
-        return SimpleNamespace(id=STAFF_CHAT_ID) if value == STAFF_CHAT_ID else self.bot
+        return SimpleNamespace(id=self.staff_id) if value == self.staff_id else self.bot
 
     async def get_participants(self, staff):
         return [self.me, self.bot] if self.joined else [self.me]
@@ -106,7 +116,7 @@ class FreshStaffClient(StaffClient):
         self.seen_staff = None
 
     async def get_entity(self, value):
-        if value == STAFF_CHAT_ID:
+        if value == self.staff_id:
             self.calls.append(value)
             raise ValueError("Could not find the input entity")
         return await super().get_entity(value)
@@ -164,3 +174,85 @@ async def test_new_account_fallback_still_requires_the_staff_bot():
     )
     with pytest.raises(ValueError, match="Staff bot is not"):
         await verify_staff(client)
+
+
+async def test_switching_staff_verifies_only_the_selected_group_and_bot():
+    selected_id = -1004430959898
+    selected_bot = "OtherStaffBot"
+    client = StaffClient(staff_id=selected_id, bot_username=selected_bot)
+    assert await verify_staff(client, staff_id=selected_id, staff_bot=selected_bot)
+    assert client.calls == [selected_id, selected_bot]
+
+
+async def test_fresh_session_selects_new_staff_instead_of_old_staff():
+    selected_id = -1004430959898
+    old_staff = SimpleNamespace(id=4300060813, title="Crimson Staff")
+    selected_staff = SimpleNamespace(id=4430959898, title="Crimson Staff")
+    client = FreshStaffClient(
+        [
+            SimpleNamespace(id=STAFF_CHAT_ID, entity=old_staff),
+            SimpleNamespace(id=selected_id, entity=selected_staff),
+        ],
+        staff_id=selected_id,
+    )
+    assert await verify_staff(client, staff_id=selected_id)
+    assert client.seen_staff is selected_staff
+    assert client.calls == [selected_id, STAFF_BOT]
+
+
+async def test_old_staff_membership_cannot_satisfy_new_staff_check():
+    client = FreshStaffClient(
+        [SimpleNamespace(id=STAFF_CHAT_ID, entity=SimpleNamespace(id=4300060813))],
+        staff_id=-1004430959898,
+    )
+    with pytest.raises(ValueError, match="not in the account's dialogs"):
+        await verify_staff(client, staff_id=-1004430959898)
+    assert client.seen_staff is None
+
+
+async def test_selected_staff_bot_identity_must_match():
+    with pytest.raises(ValueError, match="Unexpected staff bot identity"):
+        await verify_staff(StaffClient(), staff_bot="OtherStaffBot")
+
+
+@pytest.mark.parametrize("value", ["0", "42", "-0", "group", str(-(2**63) - 1)])
+def test_staff_id_cli_rejects_invalid_chat_ids(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        module.staff_chat_id(value)
+
+
+def test_staff_cli_accepts_negative_id_and_optional_username_prefix():
+    assert module.staff_chat_id("-1004430959898") == -1004430959898
+    assert module.staff_bot_username("@ghStaffBot") == "ghStaffBot"
+
+
+@pytest.mark.parametrize("value", ["", "https://t.me/ghStaffBot", "12345", "with spaces"])
+def test_staff_bot_cli_rejects_invalid_usernames(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        module.staff_bot_username(value)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected_id", "expected_bot"),
+    [
+        ([], STAFF_CHAT_ID, STAFF_BOT),
+        (
+            ["--staff-id", "-1004430959898", "--staff-bot", "@OtherStaffBot"],
+            -1004430959898,
+            "OtherStaffBot",
+        ),
+    ],
+)
+def test_cli_passes_selected_staff_to_login(
+    tmp_path, monkeypatch, arguments, expected_id, expected_bot
+):
+    seen = {}
+
+    async def fake_login(state_dir, *, staff_id, staff_bot):
+        seen.update(state_dir=state_dir, staff_id=staff_id, staff_bot=staff_bot)
+
+    monkeypatch.setattr(module, "login", fake_login)
+    monkeypatch.setattr(module.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(module.sys, "argv", ["login", "--state-dir", str(tmp_path), *arguments])
+    module.main()
+    assert seen == {"state_dir": tmp_path, "staff_id": expected_id, "staff_bot": expected_bot}

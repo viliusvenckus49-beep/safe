@@ -15,6 +15,19 @@ STAFF_CHAT_ID = -1004300060813
 STAFF_BOT = "ghStaffBot"
 
 
+def staff_chat_id(value: str) -> int:
+    if not re.fullmatch(r"-[0-9]+", value) or not -(2**63) <= int(value) < 0:
+        raise argparse.ArgumentTypeError("Staff group ID must be a negative Telegram chat ID")
+    return int(value)
+
+
+def staff_bot_username(value: str) -> str:
+    username = value.removeprefix("@")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{4,31}", username):
+        raise argparse.ArgumentTypeError("Staff bot must be a Telegram username")
+    return username
+
+
 def private_directory(path: Path) -> None:
     if path.is_symlink():
         raise ValueError("State directory must not be a symlink")
@@ -62,38 +75,42 @@ def credentials(path: Path) -> dict[str, Any]:
     return values
 
 
-async def verify_staff(client: Any) -> bool:
+async def verify_staff(
+    client: Any, *, staff_id: int = STAFF_CHAT_ID, staff_bot: str = STAFF_BOT
+) -> bool:
     me = await client.get_me()
     if me is None or getattr(me, "bot", False):
         raise ValueError("A user account is required")
     try:
-        staff = await client.get_entity(STAFF_CHAT_ID)
+        staff = await client.get_entity(staff_id)
     except ValueError:
         # A fresh session has not cached the access hash of a private supergroup yet.
         # Dialogs provide a real Telegram entity; never identify staff by its title.
         async for dialog in client.iter_dialogs():
-            if dialog.id == STAFF_CHAT_ID:
+            if dialog.id == staff_id:
                 staff = dialog.entity
                 break
         else:
             raise ValueError("Configured staff group is not in the account's dialogs") from None
     if getattr(staff, "left", False) or getattr(staff, "deactivated", False):
         raise ValueError("Staff group membership is required")
-    bot = await client.get_entity(STAFF_BOT)
+    bot = await client.get_entity(staff_bot)
     if not getattr(bot, "bot", False) or (
-        getattr(bot, "username", "").casefold() != STAFF_BOT.casefold()
+        getattr(bot, "username", "").casefold() != staff_bot.casefold()
     ):
         raise ValueError("Unexpected staff bot identity")
     members = await client.get_participants(staff)
     if not any(member.id == bot.id for member in members):
         raise ValueError("Staff bot is not in the configured group")
     print(f"MTProto paskyra prijungta. ID: {me.id}")
-    print(f"Staff grupė pasiekiama: {STAFF_CHAT_ID}; botas: @{STAFF_BOT}")
+    print(f"Staff grupė pasiekiama: {staff_id}; botas: @{staff_bot}")
     print("Blokavimo komandų nesiųsta. SAFECheck automatinis ryšys dar neįjungtas.")
     return True
 
 
-async def login(state_dir: Path) -> None:
+async def login(
+    state_dir: Path, *, staff_id: int = STAFF_CHAT_ID, staff_bot: str = STAFF_BOT
+) -> None:
     from telethon import TelegramClient
 
     os.umask(0o077)
@@ -112,10 +129,10 @@ async def login(state_dir: Path) -> None:
             password=lambda: getpass.getpass("Dviejų žingsnių slaptažodis (paslėptas): "),
         )
         try:
-            await verify_staff(client)
+            await verify_staff(client, staff_id=staff_id, staff_bot=staff_bot)
         except Exception as error:
             print(f"Sesija išsaugota; staff patikra nepraėjo: {type(error).__name__}.")
-            print(f"Pridėk šią paskyrą ir @{STAFF_BOT} į {STAFF_CHAT_ID}, tada paleisk dar kartą.")
+            print(f"Pridėk šią paskyrą ir @{staff_bot} į {staff_id}, tada paleisk dar kartą.")
             raise SystemExit(3) from None
     finally:
         await client.disconnect()
@@ -125,11 +142,15 @@ async def login(state_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path, default=Path.home() / ".config/safecheck-mtproto")
+    parser.add_argument("--staff-id", type=staff_chat_id, default=STAFF_CHAT_ID)
+    parser.add_argument("--staff-bot", type=staff_bot_username, default=STAFF_BOT)
     options = parser.parse_args()
     try:
         if not sys.stdin.isatty():
             raise ValueError("Interactive terminal required")
-        asyncio.run(login(options.state_dir))
+        asyncio.run(
+            login(options.state_dir, staff_id=options.staff_id, staff_bot=options.staff_bot)
+        )
     except (KeyboardInterrupt, EOFError):
         print("Prisijungimas nutrauktas.")
         raise SystemExit(1) from None
