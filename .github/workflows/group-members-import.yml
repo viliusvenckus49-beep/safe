@@ -1,0 +1,94 @@
+name: SAFECheck preview selected user removal
+true:
+  push:
+    branches:
+    - group-members-import-20261009
+    paths:
+    - .github/workflows/group-members-import.yml
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Prepare pinned read-only VPS access
+      env:
+        DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+        HOST: ${{ secrets.VPS_HOST }}
+        REMOTE_USER: ${{ secrets.VPS_USER }}
+      run: 'set -eu
+
+        test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+
+        install -d -m 700 "$HOME/.ssh"
+
+        umask 077
+
+        printf ''%s\n'' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+
+        ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+
+        printf ''%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n'' "$HOST" > "$HOME/.ssh/known_hosts"
+
+        '
+    - name: Read positions and save a private fixed selection
+      env:
+        HOST: ${{ secrets.VPS_HOST }}
+        REMOTE_USER: ${{ secrets.VPS_USER }}
+      run: 'set -eu
+
+        SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+
+        ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" ''sudo -n python3 -'' <<''PY''
+
+        import hashlib,json,os,pwd,subprocess
+
+        from pathlib import Path
+
+        os.umask(0o077)
+
+        code = ''"""Read current directory positions and references; never modify the production DB."""\nimport asyncio\nimport json\nimport runpy\n\nrunpy.run_path(\''/run/configs/secret_entrypoint.py\'')[\''load_secrets\'']()\nfrom sqlalchemy import func, or_, select\nfrom app.config import Settings\nfrom app.db import create_database\nfrom app.models import Administrator, Base, User\nfrom app.services import Service\n\nasync def main():\n    settings = Settings()\n    engine, sessions = create_database(settings.database_url)\n    try:\n        async with sessions() as session:\n            service = Service(settings, session)\n            await service.require_admin(settings.group_owner)\n            rows, total = await service.repo.users(136, 51)\n            if len(rows) != 51:\n                raise ValueError(\''Requested range is incomplete\'')\n            ids = [user.id for user in rows]\n            telegram_ids = [user.telegram_id for user in rows if user.telegram_id is not None]\n            references = {}\n            for table in Base.metadata.sorted_tables:\n                columns = [fk.parent for fk in table.foreign_keys if fk.column.table.name == \''users\'']\n                if columns:\n                    references[table.name] = await session.scalar(select(func.count()).select_from(table).where(or_(*(column.in_(ids) for column in columns))))\n            admin_count = await session.scalar(select(func.count()).select_from(Administrator).where(Administrator.telegram_id.in_(telegram_ids)))\n            result = {\n                \''source\'': \''current_safecheck_users_directory\'', \''first\'': 137, \''last\'': 187,\n                \''directory_total\'': total, \''references\'': references,\n                \''selected_administrator_records\'': admin_count,\n                \''owner_selected\'': settings.group_owner in telegram_ids,\n                \''users\'': [{\''position\'': 137+i, \''id\'': user.id, \''telegram_id\'': user.telegram_id,\n                           \''username\'': user.username, \''display_name\'': user.display_name,\n                           \''updated_at\'': user.updated_at.isoformat()} for i, user in enumerate(rows)],\n            }\n            print(json.dumps(result, ensure_ascii=False))\n    finally:\n        await engine.dispose()\n\ntry:\n    asyncio.run(main())\nexcept Exception as error:\n    print(json.dumps({\''error\'': type(error).__name__}))\n    raise SystemExit(1) from None\n''
+
+        result=subprocess.run([''docker'',''exec'',''safecheck-bot-1'',''python'',''-c'',code],capture_output=True,text=True,timeout=90)
+
+        if result.returncode:raise SystemExit(''CLEANUP_PREVIEW_ERROR=RuntimeReadFailed'')
+
+        preview=json.loads(result.stdout)
+
+        if ''error'' in preview:raise SystemExit(''CLEANUP_PREVIEW_ERROR=''+preview[''error''])
+
+        owner=pwd.getpwnam(''ubuntu'')
+
+        folder=Path(owner.pw_dir)/''safecheck-exports''
+
+        manifest=folder/''remove-users-137-187-20261009.json''
+
+        with manifest.open(''x'',encoding=''utf-8'') as handle:json.dump(preview,handle,ensure_ascii=False,indent=2)
+
+        manifest.chmod(0o600)
+
+        os.chown(manifest,owner.pw_uid,owner.pw_gid)
+
+        source=folder/''members-1003976343267-20261009T211134Z-03a86c''/''member-identities.jsonl''
+
+        export={r[''telegram_id'']:r for r in map(json.loads,source.read_text().splitlines())}
+
+        selected=[export.get(r[''telegram_id'']) for r in preview[''users'']]
+
+        summary={k:v for k,v in preview.items() if k!=''users''}
+
+        summary.update(selected=len(selected),in_recent_export=sum(r is not None for r in selected),telegram_bot_flag=sum(bool(r and r.get(''is_bot'')) for r in selected),telegram_deleted_flag=sum(bool(r and r.get(''deleted'')) for r in selected),manifest=str(manifest),manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest())
+
+        print(''CLEANUP_PREVIEW=''+json.dumps(summary),flush=True)
+
+
+        PY
+
+        '
+    - name: Remove runner key
+      if: always()
+      run: rm -f "$HOME/.ssh/safecheck_deploy"
