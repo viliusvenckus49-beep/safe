@@ -1,6 +1,38 @@
 """Editor chrome is separate from the editable SAFECheck catalogs."""
 
 TEXTS = {
+    "editors": ("👥 Redaktoriai", "👥 Editors", "👥 Редакторы"),
+    "add_editor": ("➕ Pridėti pagal ID", "➕ Add by ID", "➕ Добавить по ID"),
+    "access_list": (
+        "👥 Redagavimo prieiga · {count}\n\n👑 Administratorius · ✏️ Redaktorius\n\n{rows}",
+        "👥 Editing access · {count}\n\n👑 Administrator · ✏️ Editor\n\n{rows}",
+        "👥 Доступ к редактированию · {count}\n\n👑 Администратор · ✏️ Редактор\n\n{rows}",
+    ),
+    "editor_prompt": (
+        "Atsiųsk žmogaus Telegram ID, pvz. 8425927753. Jis galės redaguoti testinį dizainą.",
+        "Send the person's Telegram ID, e.g. 8425927753. They will be able to edit the test design.",
+        "Отправьте Telegram ID пользователя, например 8425927753. Он сможет редактировать тестовый дизайн.",
+    ),
+    "editor_invalid": (
+        "Įvesk tik teigiamą skaitinį Telegram ID, be @ ar kitų žodžių.",
+        "Enter a positive numeric Telegram ID, without @ or other words.",
+        "Введите положительный числовой Telegram ID, без @ и других слов.",
+    ),
+    "editor_added": (
+        "✓ ID {id} suteikta redagavimo prieiga. Gali atidaryti botą ir spausti Start.",
+        "✓ ID {id} can now edit. They can open the bot and press Start.",
+        "✓ ID {id} получил доступ к редактированию. Можно открыть бота и нажать Start.",
+    ),
+    "editor_exists": (
+        "ID {id} jau turi redagavimo prieigą.",
+        "ID {id} already has editing access.",
+        "ID {id} уже имеет доступ к редактированию.",
+    ),
+    "manage_denied": (
+        "Pridėti redaktorius gali tik testinio boto administratorius.",
+        "Only a test bot administrator can add editors.",
+        "Добавлять редакторов может только администратор тестового бота.",
+    ),
     "too_long": (
         "Šio ekrano tekstas viršija Telegram 4096 simbolių ribą. Sutrumpink pasirinktus tekstus.",
         "This screen exceeds Telegram's 4096-character limit. Shorten the selected texts.",
@@ -89,9 +121,9 @@ TEXTS = {
         "Это просмотр дизайна. Действие не выполняется.",
     ),
     "denied": (
-        "Šis testinis botas prieinamas tik administratoriams privačiai.",
-        "This test bot is available only to administrators in private.",
-        "Тестовый бот доступен только администраторам в личном чате.",
+        "Šis testinis botas prieinamas tik administratoriams ir redaktoriams privačiai.",
+        "This test bot is available only to administrators and editors in private.",
+        "Тестовый бот доступен только администраторам и редакторам в личном чате.",
     ),
     "stale": (
         "Atidaryk redaktorių iš naujo per /ui.",

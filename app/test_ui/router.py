@@ -14,6 +14,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, FSInputFile, Message
 from app.bot import keyboards as kb
 from app.i18n import LANGUAGES
 from app.presentation import display_text
+from app.test_ui.access import Access, user_id
 from app.test_ui.config import UISettings
 from app.test_ui.preview import SCREENS, sample, screen
 from app.test_ui.profile import BUTTON_KEYS, KEYS, MENUS, Design, fields, identifiers, units
@@ -31,6 +32,7 @@ class Input(StatesGroup):
     text = State()
     search = State()
     layout = State()
+    editor = State()
 
 
 def cb(action: str, value: str = "") -> str:
@@ -48,8 +50,8 @@ def short_label(value: str) -> str:
 
 
 class PrivateAdministrators(BaseMiddleware):
-    def __init__(self, settings: UISettings):
-        self.admins = settings.admins
+    def __init__(self, access: Access):
+        self.access = access
 
     async def __call__(self, handler, event, data):
         message = event.message if isinstance(event, CallbackQuery) else event
@@ -58,19 +60,21 @@ class PrivateAdministrators(BaseMiddleware):
             not isinstance(message, Message)
             or message.chat.type != "private"
             or actor is None
-            or actor.id not in self.admins
+            or not self.access.can_edit(actor.id)
         ):
             if isinstance(event, CallbackQuery):
                 await event.answer(text("denied"), show_alert=True)
             elif isinstance(message, Message) and message.chat.type == "private":
                 await message.answer(text("denied"))
             return None
+        data["ui_manager"] = self.access.is_admin(actor.id)
         return await handler(event, data)
 
 
-def create_router(settings: UISettings, design: Design) -> Router:
+def create_router(settings: UISettings, design: Design, access: Access | None = None) -> Router:
+    access = access or Access(design.path.with_name("access.json"), settings.admins)
     router = Router(name="test-ui-only")
-    guard = PrivateAdministrators(settings)
+    guard = PrivateAdministrators(access)
     router.message.outer_middleware(guard)
     router.callback_query.outer_middleware(guard)
 
@@ -80,21 +84,41 @@ def create_router(settings: UISettings, design: Design) -> Router:
     def back(lang: str):
         return kb.keyboard([[(text("editor", lang), cb("home"))]])
 
-    async def home(message: Message, state: FSMContext):
+    async def home(message: Message, state: FSMContext, *, manager: bool = False):
         await state.set_state(None)
         lang = await language(state)
+        rows = [
+            [
+                (text("buttons", lang), cb("list", "buttons.0")),
+                (text("texts", lang), cb("list", "texts.0")),
+            ],
+            [(text("order", lang), cb("menus"))],
+            [(text("preview", lang), cb("previews"))],
+            [(text("language", lang), cb("languages"))],
+            [(text("export", lang), cb("export"))],
+        ]
+        if manager:
+            rows.append([(text("editors", lang), cb("editors"))])
         await message.answer(
             text("title", lang) + "\n\n" + text("intro", lang) + f"\n\n{lang.upper()}",
+            reply_markup=kb.keyboard(rows),
+        )
+
+    async def editors(message: Message, state: FSMContext):
+        await state.set_state(None)
+        lang = await language(state)
+        members = [(actor, "👑") for actor in sorted(access.admins)] + [
+            (actor, "✏️") for actor in sorted(access.editors)
+        ]
+        rows = "\n".join(f"{icon} <code>{actor}</code>" for actor, icon in members[:30])
+        if len(members) > 30:
+            rows += "\n…"
+        await message.answer(
+            text("access_list", lang, rows=rows, count=len(members)),
             reply_markup=kb.keyboard(
                 [
-                    [
-                        (text("buttons", lang), cb("list", "buttons.0")),
-                        (text("texts", lang), cb("list", "texts.0")),
-                    ],
-                    [(text("order", lang), cb("menus"))],
-                    [(text("preview", lang), cb("previews"))],
-                    [(text("language", lang), cb("languages"))],
-                    [(text("export", lang), cb("export"))],
+                    [(text("add_editor", lang), cb("add_editor"))],
+                    [(text("editor", lang), cb("home"))],
                 ]
             ),
         )
@@ -187,22 +211,32 @@ def create_router(settings: UISettings, design: Design) -> Router:
             await message.answer(body, reply_markup=markup)
 
     @router.message(Command("start", "ui", "menu", "admin", "cancel"))
-    async def start(message: Message, state: FSMContext):
-        await home(message, state)
+    async def start(message: Message, state: FSMContext, ui_manager: bool):
+        await home(message, state, manager=ui_manager)
 
     @router.message(Command("preview"))
     async def preview_command(message: Message, state: FSMContext):
         await previews(message, state)
 
     @router.callback_query(Edit.filter())
-    async def callback(callback: CallbackQuery, callback_data: Edit, state: FSMContext):
+    async def callback(
+        callback: CallbackQuery, callback_data: Edit, state: FSMContext, ui_manager: bool
+    ):
         assert isinstance(callback.message, Message)
         message = callback.message
         await callback.answer()
         name, value = callback_data.action, callback_data.value
         lang = await language(state)
+        if name in {"editors", "add_editor"} and not ui_manager:
+            await message.answer(text("manage_denied", lang), reply_markup=back(lang))
+            return
         if name == "home":
-            await home(message, state)
+            await home(message, state, manager=ui_manager)
+        elif name == "editors":
+            await editors(message, state)
+        elif name == "add_editor":
+            await state.set_state(Input.editor)
+            await message.answer(text("editor_prompt", lang), reply_markup=back(lang))
         elif name in {"list", "clear_search"}:
             if name == "clear_search":
                 await state.update_data(query="")
@@ -228,7 +262,7 @@ def create_router(settings: UISettings, design: Design) -> Router:
             if value not in LANGUAGES:
                 raise ValueError("invalid")
             await state.update_data(lang=value)
-            await home(message, state)
+            await home(message, state, manager=ui_manager)
         elif name == "search":
             if value not in {"buttons", "texts"}:
                 raise ValueError("invalid")
@@ -348,13 +382,26 @@ def create_router(settings: UISettings, design: Design) -> Router:
             await callback.answer(text("demo", await language(state)), show_alert=True)
 
     @router.message()
-    async def input_handler(message: Message, state: FSMContext):
+    async def input_handler(message: Message, state: FSMContext, ui_manager: bool):
         lang = await language(state)
         if not message.text or message.text.startswith("/"):
             await message.answer(text("demo", lang), reply_markup=back(lang))
             return
         current, data = await state.get_state(), await state.get_data()
-        if current == Input.search.state:
+        if current == Input.editor.state:
+            if not ui_manager:
+                await state.set_state(None)
+                await message.answer(text("manage_denied", lang), reply_markup=back(lang))
+                return
+            try:
+                actor = user_id(message.text)
+            except ValueError:
+                await message.answer(text("editor_invalid", lang), reply_markup=back(lang))
+                return
+            added = access.add_editor(actor)
+            await message.answer(text("editor_added" if added else "editor_exists", lang, id=actor))
+            await editors(message, state)
+        elif current == Input.search.state:
             await state.update_data(query=message.text[:80])
             await listing(message, state, data["kind"], 0)
         elif current == Input.text.state:
@@ -379,6 +426,6 @@ def create_router(settings: UISettings, design: Design) -> Router:
             await message.answer(text("saved", lang), reply_markup=back(lang))
             await render(message, state, "home_admin" if data["menu"] == "home" else "admin")
         else:
-            await home(message, state)
+            await home(message, state, manager=ui_manager)
 
     return router

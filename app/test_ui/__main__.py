@@ -15,6 +15,7 @@ from aiogram.types import BotCommand, ErrorEvent
 from app.bot.session import telegram_session
 from app.config import Settings
 from app.logging import configure_logging
+from app.test_ui.access import Access
 from app.test_ui.config import UISettings
 from app.test_ui.profile import Design
 from app.test_ui.router import create_router
@@ -44,6 +45,8 @@ async def serve(settings: UISettings):
     configure_logging(settings.log_level)
     design = Design(settings.state_file)
     design.save()
+    access = Access(settings.state_file.with_name("access.json"), settings.admins)
+    access.save()
     heartbeat = settings.state_file.parent / "heartbeat"
     heartbeat.unlink(missing_ok=True)
 
@@ -67,7 +70,7 @@ async def serve(settings: UISettings):
     )
     storage, isolation = MemoryStorage(), SimpleEventIsolation()
     dispatcher = Dispatcher(storage=storage, events_isolation=isolation)
-    dispatcher.include_router(create_router(settings, design))
+    dispatcher.include_router(create_router(settings, design, access))
 
     @dispatcher.errors()
     async def errors(event: ErrorEvent):
@@ -75,11 +78,7 @@ async def serve(settings: UISettings):
             "test_ui_update_failed", exception_type=type(event.exception).__name__
         )
         source = event.update.message or getattr(event.update.callback_query, "message", None)
-        if (
-            source is not None
-            and source.chat.type == "private"
-            and source.chat.id in settings.admins
-        ):
+        if source is not None and source.chat.type == "private" and access.can_edit(source.chat.id):
             try:
                 await source.answer(text("error"))
             except Exception:

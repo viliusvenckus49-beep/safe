@@ -16,6 +16,7 @@ from app.bot import keyboards as kb
 from app.bot.callbacks import Action
 from app.i18n import CATALOGS, t
 from app.test_ui.__main__ import only_ui_requests
+from app.test_ui.access import Access
 from app.test_ui.config import UISettings
 from app.test_ui.preview import SCREENS, screen
 from app.test_ui.profile import KEYS, Design, identifiers, validate_text
@@ -26,15 +27,87 @@ from app.test_ui.router import Input, cb, create_router
 async def studio(tmp_path):
     design = Design(tmp_path / "design.json")
     settings = UISettings(bot_token="654321:TEST_ONLY", admin_ids="900,901")
+    access = Access(design.path.with_name("access.json"), settings.admins)
     transport = Transport()
     bot = Bot(settings.bot_token.get_secret_value(), session=transport)
     dispatcher = Dispatcher(storage=MemoryStorage())
-    dispatcher.include_router(create_router(settings, design))
+    dispatcher.include_router(create_router(settings, design, access))
     journey = Journey(bot, dispatcher, transport)
     journey.design = design
+    journey.access = access
     yield journey
     await dispatcher.storage.close()
     await bot.session.close()
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_administrator_adds_editor_by_id_with_immediate_editing_access(studio, lang):
+    await studio.send("/start", actor=900)
+    await studio.click(cb("lang", lang), actor=900)
+    buttons = [b for row in studio.transport.calls[-1].reply_markup.inline_keyboard for b in row]
+    assert cb("editors") in [b.callback_data for b in buttons]
+    await studio.click(cb("editors"), actor=900)
+    await studio.click(cb("add_editor"), actor=900)
+    assert await studio.state(900) == Input.editor.state
+    await studio.send("8425927753", actor=900)
+    assert await studio.state(900) is None
+    assert studio.access.can_edit(8425927753)
+    assert not studio.access.is_admin(8425927753)
+    assert Access(studio.access.path, frozenset({900, 901})).can_edit(8425927753)
+    await studio.send("/start", actor=8425927753)
+    buttons = [b for row in studio.transport.calls[-1].reply_markup.inline_keyboard for b in row]
+    assert cb("editors") not in [b.callback_data for b in buttons]
+    await studio.click(cb("edit", value("button.lookup")), actor=8425927753)
+    await studio.send("🔎 EDITOR", actor=8425927753)
+    assert studio.design.text("lt", "button.lookup") == "🔎 EDITOR"
+    await studio.click(cb("export"), actor=8425927753)
+    assert b"8425927753" not in studio.transport.calls[-1].document.data
+
+
+async def test_persisted_test_administrator_has_editor_management_button(studio):
+    studio.access.add_admin(8425927753)
+    await studio.send("/start", actor=8425927753)
+    buttons = [b for row in studio.transport.calls[-1].reply_markup.inline_keyboard for b in row]
+    assert cb("editors") in [b.callback_data for b in buttons]
+    await studio.click(cb("add_editor"), actor=8425927753)
+    await studio.send("888", actor=8425927753)
+    assert studio.access.can_edit(888)
+
+
+async def test_editor_cannot_forge_access_management_or_injected_input_state(studio):
+    studio.access.add_editor(888)
+    await studio.click(cb("editors"), actor=888)
+    assert "900" not in studio.text()
+    await studio.click(cb("add_editor"), actor=888)
+    assert await studio.state(888) is None
+    state = studio.dp.fsm.get_context(bot=studio.bot, chat_id=888, user_id=888)
+    await state.set_state(Input.editor)
+    await studio.send("777", actor=888)
+    assert not studio.access.can_edit(777)
+    assert await studio.state(888) is None
+
+
+@pytest.mark.parametrize(
+    "candidate", ["0", "-1", "@username", "8425927753 abc", "９００", "9223372036854775808"]
+)
+async def test_invalid_editor_id_does_not_grant_or_cancel_input(studio, candidate):
+    await studio.click(cb("add_editor"), actor=900)
+    await studio.send(candidate, actor=900)
+    assert await studio.state(900) == Input.editor.state
+    assert studio.access.editors == frozenset()
+    await studio.click(cb("home"), actor=900)
+    await studio.send("8425927753", actor=900)
+    assert not studio.access.can_edit(8425927753)
+
+
+async def test_duplicate_editor_is_idempotent_and_groups_still_cannot_edit(studio):
+    for _ in range(2):
+        await studio.click(cb("add_editor"), actor=900)
+        await studio.send("888", actor=900)
+    assert studio.access.data["editors"] == [888]
+    await studio.click(cb("edit", value("button.lookup")), actor=888, chat=-1000)
+    await studio.send("GROUP EDIT", actor=888, chat=-1000)
+    assert studio.design.data["texts"] == {}
 
 
 def value(key):

@@ -1,0 +1,90 @@
+name: SAFECheck UI Studio editor access deployment
+on:
+  push:
+    branches: [ui-studio-access-20261009]
+    paths: ['.github/workflows/ui-studio-access-deploy.yml']
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-ui-studio-vps
+  cancel-in-progress: false
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: safecheck
+          POSTGRES_DB: safecheck_test
+          POSTGRES_PASSWORD: ci_only_disposable_password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U safecheck -d safecheck_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_POSTGRES_URL: postgresql+asyncpg://safecheck:ci_only_disposable_password@localhost:5432/safecheck_test
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.lock && pip install --no-deps -e .
+      - run: pytest -q && ruff check . && ruff format --check . && mypy && pip check
+      - name: Validate UI-only Compose without runtime credentials
+        run: |
+          env_file=$(mktemp)
+          trap 'rm -f "$env_file"' EXIT
+          SAFECHECK_TEST_IMAGE=safecheck-ui:ci SAFECHECK_TEST_ENV_FILE="$env_file" docker compose -f docker-compose.test-ui.yml config --quiet
+  deploy:
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned VPS access and source archive
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/ui-studio-source.tar.gz"
+      - name: Upload isolated UI Studio
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "mkdir -p \"\$HOME/safecheck-ui-releases/$GITHUB_SHA\""
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/ui-studio-source.tar.gz" "$REMOTE_USER@$HOST:safecheck-ui-releases/$GITHUB_SHA/source.tar.gz"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "tar -xzf \"\$HOME/safecheck-ui-releases/$GITHUB_SHA/source.tar.gz\" -C \"\$HOME/safecheck-ui-releases/$GITHUB_SHA\""
+      - name: Deploy UI Studio without changing production services
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "sudo -n python3 \"\$HOME/safecheck-ui-releases/$GITHUB_SHA/deploy/test_ui_deploy.py\" $GITHUB_SHA --reuse-config --grant-admin 8425927753" </dev/null
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
