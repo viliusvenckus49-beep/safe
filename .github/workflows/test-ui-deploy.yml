@@ -1,8 +1,5 @@
 name: SAFECheck UI Studio deploy
 on:
-  push:
-    branches: [test-ui-editor-20261009]
-    paths: ['.github/workflows/test-ui-deploy.yml']
   workflow_dispatch:
 permissions:
   contents: read
