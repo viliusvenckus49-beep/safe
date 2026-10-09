@@ -1,0 +1,82 @@
+name: SAFECheck UI Studio Premium runtime verification
+on:
+  push:
+    branches: [ui-studio-premium-verify-20261009]
+    paths: ['.github/workflows/ui-studio-premium-verify.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare pinned read-only VPS access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Verify fresh UI polling, editor capabilities and persisted administrator
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "sudo -n python3 - safecheck-ui:9b212df5a2cf" <<'PY'
+          import json
+          import subprocess
+          import sys
+          import time
+          from datetime import datetime
+          from pathlib import Path
+          
+          container = 'safecheck-ui-studio-studio-1'
+          expected_image = sys.argv[1]
+          
+          def run(args):
+              result = subprocess.run(args, capture_output=True, timeout=45)
+              if result.returncode:
+                  raise RuntimeError('Read-only UI runtime check failed')
+              return result.stdout
+          
+          state = json.loads(run(['docker', 'inspect', '--format', '{{json .State}}', container]))
+          image = run(['docker', 'inspect', '--format', '{{.Config.Image}}', container]).decode().strip()
+          assert image == expected_image, 'Unexpected UI image'
+          assert state['Running'] and state['Health']['Status'] == 'healthy', 'UI is not healthy'
+          started = datetime.fromisoformat(state['StartedAt'].replace('Z', '+00:00')).timestamp()
+          heartbeat = Path('/var/lib/safecheck-ui-studio/heartbeat').stat().st_mtime
+          assert heartbeat >= started and time.time() - heartbeat < 180, 'No fresh Telegram polling heartbeat'
+          access = json.loads(Path('/var/lib/safecheck-ui-studio/access.json').read_text())
+          assert 8425927753 in access['admins'], 'Expected test administrator is missing'
+          design = json.loads(Path('/var/lib/safecheck-ui-studio/design.json').read_text())
+          assert design['version'] == 1 and all(isinstance(design[k], dict) for k in ('texts', 'layouts', 'icons'))
+          probe = "from pathlib import Path; import sysconfig; p=Path(sysconfig.get_paths()['purelib'])/'app'; assert 'icon_custom_emoji_id=' in (p/'bot/keyboards.py').read_text(); assert 'Input.icon.state' in (p/'test_ui/router.py').read_text(); assert 'RESULT_KEYS' in (p/'test_ui/profile.py').read_text(); assert 'GetCustomEmojiStickers' in (p/'test_ui/__main__.py').read_text(); print('UIStudioPremiumAndResultEditor=available')"
+          print(run(['docker', 'exec', container, 'python', '-c', probe]).decode().strip())
+          logs = subprocess.run(['docker', 'logs', '--tail', '250', container], capture_output=True, timeout=30)
+          assert logs.returncode == 0
+          username = None
+          for line in (logs.stdout + logs.stderr).decode().splitlines():
+              try:
+                  event = json.loads(line)
+              except ValueError:
+                  continue
+              if event.get('event') == 'test_ui_started':
+                  username = event.get('username')
+          assert username == 'CrimsonSafeTestBot', 'Expected UI bot startup event is missing'
+          print('UIStudioBot=https://t.me/' + username)
+          print('UIStudioPollingAfterRestart=true')
+          print('UIStudioTestAdministrator=8425927753')
+          print('UIStudioRuntimeHealth=healthy')
+          print('UIStudioDesignAndAccess=preserved')
+          PY
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
