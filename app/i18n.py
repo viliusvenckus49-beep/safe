@@ -1,6 +1,6 @@
 """One locale boundary with per-update context and Lithuanian fallback."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -16,6 +16,9 @@ from app.locales.trusted_management import CATALOGS as TRUSTED_MANAGEMENT
 
 LANGUAGES = frozenset({"lt", "en", "ru"})
 language: ContextVar[str] = ContextVar("language", default="lt")
+overrides: ContextVar[Mapping[str, Mapping[str, str]] | None] = ContextVar(
+    "ui_overrides", default=None
+)
 CATALOGS = {
     lang: {
         **CORE[lang],
@@ -38,10 +41,21 @@ def use_language(lang: str | None) -> Iterator[None]:
         language.reset(token)
 
 
+@contextmanager
+def use_overrides(catalog: Mapping[str, Mapping[str, str]]) -> Iterator[None]:
+    """Scoped preview overrides; normal bot updates continue using the shipped catalogs."""
+    token = overrides.set(catalog)
+    try:
+        yield
+    finally:
+        overrides.reset(token)
+
+
 def t(key: str, lang: str | None = None, **values: Any) -> str:
     selected = lang or language.get()
     selected = selected if selected in LANGUAGES else "lt"
-    template = CATALOGS[selected].get(key) or CATALOGS["lt"].get(key)
+    template = (overrides.get() or {}).get(selected, {}).get(key) or CATALOGS[selected].get(key)
+    template = template or CATALOGS["lt"].get(key)
     if template is None:
         structlog.get_logger().warning("translation_missing", translation_key=key)
         return CATALOGS[selected]["core.error"]
