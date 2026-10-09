@@ -58,3 +58,10 @@ errors still propagate through the normal error handling. See the official
 
 Production SAFECheck does not load exported design files. Moving a chosen design into production is
 a separate code update using its unchanged action callbacks and localization keys.
+
+The saved Lithuanian button design was promoted on 2026-10-09: 25 labels in the existing locale
+catalogs and their native icons in `app/locales/button_icons.py`. There were no saved layout changes.
+Production uses these shipped values; UI Studio keeps its separately scoped text/icon overrides.
+Premium icon rejection in production retries the same keyboard once without native icons, preserving
+its text, callbacks and permissions. Other errors remain errors and network failures are not retried.
+This promotion does not apply result-message overrides or change EN/RU translations.

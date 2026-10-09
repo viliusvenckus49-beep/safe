@@ -2,7 +2,7 @@
 
 CATALOGS: dict[str, dict[str, str]] = {
     "lt": {
-        "admin_access.button": "👑 Administratoriai",
+        "admin_access.button": "ᴀᴅᴍɪɴɪꜱᴛʀᴀᴛᴏʀɪᴀɪ",
         "admin_access.title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◇ <b>ADMINISTRATORIAI</b>",
         "admin_access.description": "Teises suteikia ir atšaukia tik savininkas. Pasirink administratorių, kurį nori pašalinti.",
         "admin_access.add": "＋ Pridėti administratorių",

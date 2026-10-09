@@ -84,11 +84,9 @@ async def listing(message: Message, state: FSMContext, service: Service, page: i
         ]
         for r in rows
     ]
-    buttons.extend(
-        [(button.text, button.callback_data or "") for button in row]
-        for row in pages(page, total, admin=True).inline_keyboard
-    )
-    await flow_screen(message, state, text, reply_markup=keyboard(buttons))
+    markup = keyboard(buttons)
+    markup.inline_keyboard.extend(pages(page, total, admin=True).inline_keyboard)
+    await flow_screen(message, state, text, reply_markup=markup)
 
 
 def register_scam_handlers(router: Router):

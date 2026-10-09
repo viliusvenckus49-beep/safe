@@ -14,6 +14,7 @@ from test_ui_studio import value
 from app.bot import keyboards as kb
 from app.bot.callbacks import Action
 from app.i18n import CATALOGS, t
+from app.locales.button_icons import CATALOGS as SHIPPED_ICONS
 from app.test_ui.__main__ import only_ui_requests
 from app.test_ui.preview import screen
 from app.test_ui.profile import RESULT_KEYS, Design, identifiers
@@ -158,9 +159,12 @@ def test_identical_button_labels_keep_distinct_icons_and_callbacks(tmp_path):
     buttons = {b.callback_data: b for row in markup.inline_keyboard for b in row}
     assert buttons[Action(name="profile").pack()].icon_custom_emoji_id == ICON
     assert buttons[Action(name="rep").pack()].icon_custom_emoji_id == OTHER_ICON
-    assert all(b.icon_custom_emoji_id is None for row in kb.home().inline_keyboard for b in row)
+    assert (
+        kb.home().inline_keyboard[1][0].icon_custom_emoji_id
+        == SHIPPED_ICONS["lt"]["button.profile"]
+    )
     assert t("button.profile", "lt") == CATALOGS["lt"]["button.profile"]
-    assert type(t("button.profile", "lt")) is str
+    assert t("button.profile", "lt").icon_custom_emoji_id == SHIPPED_ICONS["lt"]["button.profile"]
 
 
 async def test_icons_do_not_leak_out_of_concurrent_preview_contexts(tmp_path):
@@ -176,7 +180,9 @@ async def test_icons_do_not_leak_out_of_concurrent_preview_contexts(tmp_path):
 
     task = asyncio.create_task(preview())
     await entered.wait()
-    assert kb.home().inline_keyboard[0][0].icon_custom_emoji_id is None
+    assert (
+        kb.home().inline_keyboard[0][0].icon_custom_emoji_id == SHIPPED_ICONS["lt"]["button.lookup"]
+    )
     release.set()
     assert await task == ICON
 

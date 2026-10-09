@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 
 from app.locales.administrators import CATALOGS as ADMINISTRATORS
+from app.locales.button_icons import CATALOGS as BUTTON_ICONS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
 from app.locales.presentation import CATALOGS as PRESENTATION
@@ -25,7 +26,7 @@ button_icons: ContextVar[Mapping[str, Mapping[str, str]] | None] = ContextVar(
 
 
 class ButtonText(str):
-    """Preview-only icon metadata travels with the exact translated button key."""
+    """Native icon metadata travels with the exact translated button key."""
 
     icon_custom_emoji_id: str
 
@@ -86,7 +87,9 @@ def t(key: str, lang: str | None = None, **values: Any) -> str:
         return CATALOGS[selected]["core.error"]
     try:
         rendered = template.format(**values)
-        icon = (button_icons.get() or {}).get(selected, {}).get(key)
+        selected_icons = button_icons.get()
+        selected_icons = BUTTON_ICONS if selected_icons is None else selected_icons
+        icon = selected_icons.get(selected, {}).get(key)
         return ButtonText(rendered, icon) if icon else rendered
     except (KeyError, ValueError, IndexError):
         structlog.get_logger().warning("translation_format_failed", translation_key=key)
