@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from aiogram.types import InlineKeyboardMarkup
 
 from app.bot import keyboards as kb
-from app.i18n import CATALOGS, LANGUAGES, use_language, use_overrides
+from app.i18n import CATALOGS, LANGUAGES, use_button_icons, use_language, use_overrides
 
 KEYS = tuple(sorted(CATALOGS["lt"]))
 BUTTON_KEYS = frozenset(
@@ -42,6 +42,48 @@ BUTTON_KEYS = frozenset(
 )
 MENUS = ("home", "admin")
 MAX_FILE = 2_000_000
+
+RESULT_KEYS = (
+    "p.profile_title",
+    "p.profile_card",
+    "p.lookup_status",
+    "p.lookup_clear_status",
+    "p.no_scam",
+    "p.lookup_identity_known",
+    "p.unknown_identity",
+    "p.warning",
+    "p.lookup_scam_status",
+    "p.lookup_scam_description",
+    "p.lookup_reason",
+    "p.lookup_reference",
+    "p.lookup_scam_date",
+    "p.scam_admin_confirmation",
+    "p.lookup_caution",
+    "p.trusted_status",
+    "p.lookup_trusted_manual",
+    "p.lookup_trusted_date",
+    "p.lookup_trusted_top",
+    "p.lookup_trusted_top_description",
+    "p.lookup_trusted_role",
+    "p.role",
+    "p.role_founder",
+    "p.role_moderator",
+    "p.lookup_username_match",
+    "p.lookup_username_match_description",
+)
+
+
+def validate_icon(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.isascii()
+        or not value.isdigit()
+        or value.startswith("0")
+        or len(value) > 20
+        or not 0 < int(value) <= 18446744073709551615
+    ):
+        raise ValueError("icon")
+    return value
 
 
 def fields(template: str) -> set[str]:
@@ -188,14 +230,14 @@ def validate_layout(menu: str, rows: Any) -> None:
 class Design:
     def __init__(self, path: Path):
         self.path = path
-        self.data: dict[str, Any] = {"version": 1, "texts": {}, "layouts": {}}
+        self.data: dict[str, Any] = {"version": 1, "texts": {}, "layouts": {}, "icons": {}}
         if path.exists():
             if path.stat().st_size > MAX_FILE:
                 raise ValueError("Design file too large")
             loaded = json.loads(path.read_text())
             if (
                 not isinstance(loaded, dict)
-                or set(loaded) != set(self.data)
+                or not {"version", "texts", "layouts"} <= set(loaded) <= set(self.data)
                 or loaded["version"] != 1
             ):
                 raise ValueError("Invalid design file")
@@ -208,6 +250,16 @@ class Design:
                     validate_text(lang, key, value)
             for menu, rows in loaded["layouts"].items():
                 validate_layout(menu, rows)
+            icons = loaded.setdefault("icons", {})
+            if not isinstance(icons, dict):
+                raise ValueError("Invalid design icons")
+            for lang, entries in icons.items():
+                if lang not in LANGUAGES or not isinstance(entries, dict):
+                    raise ValueError("Invalid icon language")
+                for key, icon in entries.items():
+                    if key not in BUTTON_KEYS:
+                        raise ValueError("Invalid icon key")
+                    validate_icon(icon)
             self.data = loaded
 
     def text(self, lang: str, key: str) -> str:
@@ -215,8 +267,30 @@ class Design:
 
     @contextmanager
     def preview(self, lang: str):
-        with use_language(lang), use_overrides(self.data["texts"]):
+        with (
+            use_language(lang),
+            use_overrides(self.data["texts"]),
+            use_button_icons(self.data["icons"]),
+        ):
             yield
+
+    def icon(self, lang: str, key: str) -> str | None:
+        return self.data["icons"].get(lang, {}).get(key)
+
+    def set_icon(self, lang: str, key: str, icon: str) -> None:
+        if lang not in LANGUAGES or key not in BUTTON_KEYS:
+            raise ValueError("icon")
+        validate_icon(icon)
+        updated = deepcopy(self.data)
+        updated["icons"].setdefault(lang, {})[key] = icon
+        self.save(updated)
+
+    def reset_icon(self, lang: str, key: str) -> None:
+        if lang not in LANGUAGES or key not in BUTTON_KEYS:
+            raise ValueError("icon")
+        updated = deepcopy(self.data)
+        updated["icons"].get(lang, {}).pop(key, None)
+        self.save(updated)
 
     def save(self, updated: dict[str, Any] | None = None) -> None:
         data = self.data if updated is None else updated

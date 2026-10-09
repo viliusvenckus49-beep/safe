@@ -19,6 +19,22 @@ language: ContextVar[str] = ContextVar("language", default="lt")
 overrides: ContextVar[Mapping[str, Mapping[str, str]] | None] = ContextVar(
     "ui_overrides", default=None
 )
+button_icons: ContextVar[Mapping[str, Mapping[str, str]] | None] = ContextVar(
+    "ui_button_icons", default=None
+)
+
+
+class ButtonText(str):
+    """Preview-only icon metadata travels with the exact translated button key."""
+
+    icon_custom_emoji_id: str
+
+    def __new__(cls, value: str, icon: str):
+        result = super().__new__(cls, value)
+        result.icon_custom_emoji_id = icon
+        return result
+
+
 CATALOGS = {
     lang: {
         **CORE[lang],
@@ -51,6 +67,15 @@ def use_overrides(catalog: Mapping[str, Mapping[str, str]]) -> Iterator[None]:
         overrides.reset(token)
 
 
+@contextmanager
+def use_button_icons(icons: Mapping[str, Mapping[str, str]]) -> Iterator[None]:
+    token = button_icons.set(icons)
+    try:
+        yield
+    finally:
+        button_icons.reset(token)
+
+
 def t(key: str, lang: str | None = None, **values: Any) -> str:
     selected = lang or language.get()
     selected = selected if selected in LANGUAGES else "lt"
@@ -60,7 +85,9 @@ def t(key: str, lang: str | None = None, **values: Any) -> str:
         structlog.get_logger().warning("translation_missing", translation_key=key)
         return CATALOGS[selected]["core.error"]
     try:
-        return template.format(**values)
+        rendered = template.format(**values)
+        icon = (button_icons.get() or {}).get(selected, {}).get(key)
+        return ButtonText(rendered, icon) if icon else rendered
     except (KeyError, ValueError, IndexError):
         structlog.get_logger().warning("translation_format_failed", translation_key=key)
         return CATALOGS[selected]["core.error"]

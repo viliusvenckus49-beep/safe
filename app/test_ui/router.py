@@ -4,7 +4,9 @@ import re
 from html import escape, unescape
 from importlib.resources import files
 
+import structlog
 from aiogram import BaseMiddleware, Router
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
@@ -16,8 +18,18 @@ from app.i18n import LANGUAGES
 from app.presentation import display_text
 from app.test_ui.access import Access, user_id
 from app.test_ui.config import UISettings
+from app.test_ui.emojis import edited_text, icon_from_message
 from app.test_ui.preview import SCREENS, sample, screen
-from app.test_ui.profile import BUTTON_KEYS, KEYS, MENUS, Design, fields, identifiers, units
+from app.test_ui.profile import (
+    BUTTON_KEYS,
+    KEYS,
+    MENUS,
+    RESULT_KEYS,
+    Design,
+    fields,
+    identifiers,
+    units,
+)
 from app.test_ui.texts import text
 
 PAGE_SIZE = 12
@@ -33,6 +45,7 @@ class Input(StatesGroup):
     search = State()
     layout = State()
     editor = State()
+    icon = State()
 
 
 def cb(action: str, value: str = "") -> str:
@@ -93,6 +106,7 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
                 (text("texts", lang), cb("list", "texts.0")),
             ],
             [(text("order", lang), cb("menus"))],
+            [(text("result", lang), cb("list", "result.0"))],
             [(text("preview", lang), cb("previews"))],
             [(text("language", lang), cb("languages"))],
             [(text("export", lang), cb("export"))],
@@ -124,22 +138,29 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
         )
 
     async def listing(message: Message, state: FSMContext, kind: str, page: int):
-        if kind not in {"buttons", "texts"} or not 0 <= page <= 1000:
+        if kind not in {"buttons", "texts", "result"} or not 0 <= page <= 1000:
             raise ValueError("invalid")
         await state.set_state(None)
         lang = await language(state)
         query = (await state.get_data()).get("query", "").casefold()
         options = [
             key
-            for key in KEYS
-            if (key in BUTTON_KEYS) == (kind == "buttons")
+            for key in (RESULT_KEYS if kind == "result" else KEYS)
+            if (kind == "result" or (key in BUTTON_KEYS) == (kind == "buttons"))
             and (not query or query in design.text(lang, key).casefold() or query in key)
         ]
         last = max(0, (len(options) - 1) // PAGE_SIZE)
         page = min(page, last)
         await state.update_data(kind=kind, page=page)
         rows = [
-            [(short_label(design.text(lang, key)), cb("key", str(KEYS.index(key))))]
+            [
+                (
+                    text("result." + key, lang)
+                    if kind == "result"
+                    else short_label(design.text(lang, key)),
+                    cb("key", str(KEYS.index(key))),
+                )
+            ]
             for key in options[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
         ]
         navigation = []
@@ -158,6 +179,8 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
         if query:
             caption += "\n\n🔍 " + escape(display_text(query, 80))
             rows.insert(-1, [("× 🔍", cb("clear_search", kind))])
+        if kind == "result":
+            rows.insert(-1, [(text("result_preview", lang), cb("preview", "result_clear"))])
         await message.answer(caption, reply_markup=kb.keyboard(rows))
 
     async def detail(message: Message, state: FSMContext, key: str, *, saved: bool = False):
@@ -166,15 +189,40 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
         await state.update_data(key=key)
         header = text("saved", lang) + "\n\n" if saved else ""
         header += text("current", lang) + f" · {lang.upper()}\n\n"
+        kind = (await state.get_data()).get("kind")
+        destination = (
+            "result"
+            if kind == "result" and key in RESULT_KEYS
+            else "buttons"
+            if key in BUTTON_KEYS
+            else "texts"
+        )
         rows = [
             [
                 (text("edit", lang), cb("edit", str(KEYS.index(key)))),
                 (text("preview", lang), cb("sample", str(KEYS.index(key)))),
             ],
             [(text("reset", lang), cb("reset", str(KEYS.index(key))))],
-            [(text("back", lang), cb("list", f"{'buttons' if key in BUTTON_KEYS else 'texts'}.0"))],
+            [(text("back", lang), cb("list", f"{destination}.0"))],
             [(text("editor", lang), cb("home"))],
         ]
+        if key in BUTTON_KEYS:
+            icon = design.icon(lang, key)
+            header += (
+                text(
+                    "current_icon",
+                    lang,
+                    id=f"<code>{icon}</code>" if icon else text("no_icon", lang),
+                )
+                + "\n\n"
+            )
+            rows.insert(1, [(text("premium_icon", lang), cb("icon", str(KEYS.index(key))))])
+            if icon:
+                rows.insert(
+                    2, [(text("remove_icon", lang), cb("remove_icon", str(KEYS.index(key))))]
+                )
+        if key in RESULT_KEYS:
+            rows.insert(1, [(text("result_preview", lang), cb("preview", "result_clear"))])
         await message.answer(
             header + "<pre>" + escape(design.text(lang, key)) + "</pre>",
             reply_markup=kb.keyboard(rows),
@@ -202,13 +250,47 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
         rows = markup.inline_keyboard + back(lang).inline_keyboard
         markup = markup.model_copy(update={"inline_keyboard": rows})
         if name.startswith("home_") and units(body) <= 1000:
-            await message.answer_photo(
+            await visual(
+                message,
                 FSInputFile(str(files("app").joinpath("assets/home.jpg"))),
                 caption=body,
                 reply_markup=markup,
+                lang=lang,
             )
         else:
-            await message.answer(body, reply_markup=markup)
+            await visual(message, text_body=body, reply_markup=markup, lang=lang)
+
+    async def visual(message, photo=None, *, caption=None, text_body=None, reply_markup, lang):
+        async def send(markup, *, plain_emoji=False):
+            def body(value):
+                if value and plain_emoji:
+                    return re.sub(r"<tg-emoji\b[^>]*>(.*?)</tg-emoji>", r"\1", value, flags=re.S)
+                return value
+
+            if photo is not None:
+                return await message.answer_photo(photo, caption=body(caption), reply_markup=markup)
+            return await message.answer(body(text_body), reply_markup=markup)
+
+        try:
+            await send(reply_markup)
+        except TelegramBadRequest:
+            if not any(
+                b.icon_custom_emoji_id for row in reply_markup.inline_keyboard for b in row
+            ) and "<tg-emoji" not in (caption or text_body or ""):
+                raise
+            plain = reply_markup.model_copy(
+                update={
+                    "inline_keyboard": [
+                        [b.model_copy(update={"icon_custom_emoji_id": None}) for b in row]
+                        for row in reply_markup.inline_keyboard
+                    ]
+                }
+            )
+            await send(plain, plain_emoji=True)
+            structlog.get_logger().warning(
+                "test_ui_custom_emoji_preview_rejected", exception_type="TelegramBadRequest"
+            )
+            await message.answer(text("premium_unavailable", lang), reply_markup=back(lang))
 
     @router.message(Command("start", "ui", "menu", "admin", "cancel"))
     async def start(message: Message, state: FSMContext, ui_manager: bool):
@@ -264,16 +346,28 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
             await state.update_data(lang=value)
             await home(message, state, manager=ui_manager)
         elif name == "search":
-            if value not in {"buttons", "texts"}:
+            if value not in {"buttons", "texts", "result"}:
                 raise ValueError("invalid")
             await state.set_state(Input.search)
             await state.update_data(kind=value)
             await message.answer(text("search_prompt", lang), reply_markup=back(lang))
-        elif name in {"key", "edit", "reset", "sample"}:
+        elif name in {"key", "edit", "reset", "sample", "icon", "remove_icon"}:
             if not value.isascii() or not value.isdigit() or not 0 <= int(value) < len(KEYS):
                 raise ValueError("invalid")
             key = KEYS[int(value)]
-            if name == "reset":
+            if name in {"icon", "remove_icon"}:
+                if key not in BUTTON_KEYS:
+                    raise ValueError("invalid")
+                if name == "remove_icon":
+                    design.reset_icon(lang, key)
+                    await detail(message, state, key, saved=True)
+                else:
+                    await state.set_state(Input.icon)
+                    await state.update_data(
+                        key=key, editing_lang=lang, previous_icon=design.icon(lang, key)
+                    )
+                    await message.answer(text("icon_prompt", lang), reply_markup=back(lang))
+            elif name == "reset":
                 design.reset_text(lang, key)
                 await detail(message, state, key, saved=True)
             elif name == "key":
@@ -287,7 +381,7 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
                         [[(rendered, cb("demo"))], [(text("editor", lang), cb("home"))]]
                     )
                     rendered = text("preview", lang)
-                await message.answer(rendered, reply_markup=buttons)
+                await visual(message, text_body=rendered, reply_markup=buttons, lang=lang)
             else:
                 await state.set_state(Input.text)
                 await state.update_data(key=key, editing_lang=lang, previous=design.text(lang, key))
@@ -384,10 +478,43 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
     @router.message()
     async def input_handler(message: Message, state: FSMContext, ui_manager: bool):
         lang = await language(state)
+        current, data = await state.get_state(), await state.get_data()
+        if current == Input.icon.state:
+            key, edited_lang = data["key"], data["editing_lang"]
+            if design.icon(edited_lang, key) != data["previous_icon"]:
+                await message.answer(text("conflict", lang), reply_markup=back(lang))
+                await state.set_state(None)
+                return
+            if message.text and message.text.startswith("/"):
+                await message.answer(text("icon_invalid", lang), reply_markup=back(lang))
+                return
+            try:
+                icon = icon_from_message(message)
+            except ValueError:
+                await message.answer(text("icon_invalid", lang), reply_markup=back(lang))
+                return
+            try:
+                assert message.bot is not None
+                stickers = await message.bot.get_custom_emoji_stickers(custom_emoji_ids=[icon])
+            except TelegramAPIError as error:
+                structlog.get_logger().warning(
+                    "test_ui_custom_emoji_lookup_failed", exception_type=type(error).__name__
+                )
+                await message.answer(text("icon_lookup_failed", lang), reply_markup=back(lang))
+                return
+            if not any(s.type == "custom_emoji" and s.custom_emoji_id == icon for s in stickers):
+                await message.answer(text("icon_invalid", lang), reply_markup=back(lang))
+                return
+            if design.icon(edited_lang, key) != data["previous_icon"]:
+                await message.answer(text("conflict", lang), reply_markup=back(lang))
+                await state.set_state(None)
+                return
+            design.set_icon(edited_lang, key, icon)
+            await detail(message, state, key, saved=True)
+            return
         if not message.text or message.text.startswith("/"):
             await message.answer(text("demo", lang), reply_markup=back(lang))
             return
-        current, data = await state.get_state(), await state.get_data()
         if current == Input.editor.state:
             if not ui_manager:
                 await state.set_state(None)
@@ -411,7 +538,12 @@ def create_router(settings: UISettings, design: Design, access: Access | None = 
                 await state.set_state(None)
                 return
             try:
-                design.set_text(edited_lang, key, message.text)
+                if key in BUTTON_KEYS and any(
+                    e.type == "custom_emoji" for e in message.entities or []
+                ):
+                    await message.answer(text("use_icon_picker", lang), reply_markup=back(lang))
+                    return
+                design.set_text(edited_lang, key, edited_text(message))
             except ValueError:
                 await message.answer(text("invalid", lang), reply_markup=back(lang))
                 return
