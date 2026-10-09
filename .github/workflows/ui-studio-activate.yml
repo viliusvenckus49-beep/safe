@@ -9,9 +9,9 @@ concurrency:
   group: safecheck-ui-studio-vps
   cancel-in-progress: false
 jobs:
-  bootstrap:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Prepare pinned SSH access
         env:
@@ -26,31 +26,42 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Generate one-use encryption recipient on VPS
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive and upload tested UI Studio source
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           set -eu
           SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
-          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" 'sudo -n python3 -' <<'REMOTE'
-          import base64, os, subprocess
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/ui-studio-source.tar.gz"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "mkdir -p \"\$HOME/safecheck-ui-releases/$GITHUB_SHA\""
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/ui-studio-source.tar.gz" "$REMOTE_USER@$HOST:safecheck-ui-releases/$GITHUB_SHA/source.tar.gz"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "tar -xzf \"\$HOME/safecheck-ui-releases/$GITHUB_SHA/source.tar.gz\" -C \"\$HOME/safecheck-ui-releases/$GITHUB_SHA\""
+      - name: Decrypt only on VPS and activate isolated UI Studio
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "sudo -n python3 - '$GITHUB_SHA' '$REMOTE_USER'" <<'REMOTE'
+          import base64, pwd, subprocess, sys
           from pathlib import Path
-          directory = Path('/etc/safecheck-ui-studio/bootstrap')
-          directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-          directory.chmod(0o700)
-          key = directory / 'ui-20261009-befe06a209b0.pem'
-          if not key.exists():
-              fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-              os.close(fd)
-              result = subprocess.run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:3072', '-out', str(key)], capture_output=True)
-              if result.returncode:
-                  key.unlink(missing_ok=True)
-                  raise SystemExit('Encryption key generation failed')
-          key.chmod(0o600)
-          public = subprocess.run(['openssl', 'pkey', '-in', str(key), '-pubout'], capture_output=True, check=True).stdout
-          print('UIBootstrapPublicKey=' + base64.b64encode(public).decode())
-          print('UIBootstrapRecipient=ui-20261009-befe06a209b0')
+          sha = sys.argv[1]
+          source = Path(pwd.getpwnam(sys.argv[2]).pw_dir) / 'safecheck-ui-releases' / sha
+          key = Path('/etc/safecheck-ui-studio/bootstrap/ui-20261009-befe06a209b0.pem')
+          encrypted = base64.b64decode('iVPTWe6YgMrf4sXoB38Jyuw++jWNiymdly9nIPBWxNSRGCwxFL4MgFN8mYQTuAL6w/3ywKmNMCB6zXgTSNJQubSv7MQI/KSDWp229cy8fJigE6c2yYgy1Ry3h/4qujw4jWD08xpQSqyiDNiOSPR10ivcLKqLGkDQ4y30CgPzWEi6xTTsF6rgrmjoWjYP7x50e2Z4wNcmcjz+ZXPvu1ch4xVNDkziJYqTIa+82FlU9YPB+oMqSoyWSP3Nh12lcEu8VTtqO4ZKN5xwF1iaWviTFe36TKaD98aKj+ejAODeRhDuF+IE9j49RKmiHROvc07NeP65ggxEbFVFnAGU0AV3ilML8U1OPmNhl4qVs3L+OIafGxtWGxYNMqYglk/poWTJU+t4QabMtZR5RWIL3FIFhAoRb2uDjVKQjnurSSsLtOmeL6Oy39v9kj0gcJJhe/pf9kvYTsaZSTM52Mk2upkiw4whvodlTsj+/GfX6Y/LsQnfpbSrqtI/ZO0YrOM0BWy+')
+          opened = subprocess.run(['openssl', 'pkeyutl', '-decrypt', '-inkey', str(key), '-pkeyopt', 'rsa_padding_mode:oaep', '-pkeyopt', 'rsa_oaep_md:sha256', '-pkeyopt', 'rsa_mgf1_md:sha256'], input=encrypted, capture_output=True)
+          if opened.returncode:
+              raise SystemExit('One-use token decryption failed')
+          result = subprocess.run([sys.executable, str(source / 'deploy/test_ui_deploy.py'), sha], input=opened.stdout)
+          if result.returncode:
+              raise SystemExit('UI deployment failed; encrypted handoff retained for retry')
+          key.unlink()
+          print('UIBootstrapKeyRemoved=true')
           REMOTE
       - name: Remove runner SSH key
         if: always()
