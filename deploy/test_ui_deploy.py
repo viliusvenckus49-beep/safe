@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Deploy only the isolated UI preview service. Never update production Compose."""
 
+import argparse
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -51,9 +53,27 @@ def production_identity():
 
 
 def main():
-    if os.geteuid() != 0 or len(sys.argv) != 2 or not re.fullmatch(r"[0-9a-f]{40}", sys.argv[1]):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("sha")
+    parser.add_argument("--reuse-config", action="store_true")
+    parser.add_argument("--grant-admin", type=int)
+    options = parser.parse_args()
+    if os.geteuid() != 0 or not re.fullmatch(r"[0-9a-f]{40}", options.sha):
         raise RuntimeError("Root and an exact tested commit SHA are required")
-    token = sys.stdin.buffer.read(1024).decode().strip()
+    if options.grant_admin is not None and not 0 < options.grant_admin <= 9223372036854775807:
+        raise RuntimeError("A positive Telegram administrator ID is required")
+    if options.reuse_config:
+        # Use only this service's designated credential file; never return it to the runner.
+        tokens = [
+            line.partition("=")[2]
+            for line in CONFIG.read_text().splitlines()
+            if line.startswith("TEST_UI_BOT_TOKEN=")
+        ]
+        if len(tokens) != 1:
+            raise RuntimeError("Existing UI studio token is unavailable")
+        token = tokens[0].strip()
+    else:
+        token = sys.stdin.buffer.read(1024).decode().strip()
     if not re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]{20,}", token):
         raise RuntimeError("Missing or invalid SAFECHECK_TEST_BOT_TOKEN")
     identity = production_identity()
@@ -66,7 +86,7 @@ def main():
         raise RuntimeError("Production administrator allowlist is unavailable")
     before = production_snapshot()
     root = Path(__file__).resolve().parent.parent
-    image = "safecheck-ui:" + sys.argv[1][:12]
+    image = "safecheck-ui:" + options.sha[:12]
     run(["docker", "build", "-t", image, str(root)])
     print("UI candidate image built.", flush=True)
     DATA.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -78,6 +98,12 @@ def main():
         os.chmod(backup, 0o600)
         os.chown(backup, 10001, 10001)
     previous = CONFIG.read_bytes() if CONFIG.exists() else None
+    access_file = DATA / "access.json"
+    previous_access = access_file.read_bytes() if access_file.exists() else None
+    if previous_access is not None:
+        backup = DATA / ("access-backup-" + str(time.time_ns()) + ".json")
+        private_write(backup, previous_access)
+        os.chown(backup, 10001, 10001)
     config = (
         f"TEST_UI_BOT_TOKEN={token}\nTEST_UI_ADMIN_IDS={admins}\nSAFECHECK_TEST_IMAGE={image}\n"
     ).encode()
@@ -93,6 +119,15 @@ def main():
     ]
     private_write(CONFIG, config)
     try:
+        if options.grant_admin is not None:
+            access_type = runpy.run_path(str(root / "app/test_ui/access.py"))["Access"]
+            access = access_type(
+                access_file, frozenset(int(item.strip()) for item in admins.split(","))
+            )
+            access.add_admin(options.grant_admin)
+            access.save()
+            os.chown(access_file, 10001, 10001)
+            print("UIStudioAdministratorGranted=" + str(options.grant_admin), flush=True)
         resolved = json.loads(run(dc + ["config", "--format", "json"]))
         if set(resolved["services"]) != {"studio"}:
             raise RuntimeError("UI-only deployment refused: unexpected services")
@@ -151,6 +186,13 @@ def main():
             raise RuntimeError("UI studio failed its polling health check")
         if production_snapshot() != before:
             raise RuntimeError("Production service identity changed during UI deployment")
+        if options.grant_admin is not None:
+            verified_access = access_type(
+                access_file, frozenset(int(item.strip()) for item in admins.split(","))
+            )
+            if not verified_access.is_admin(options.grant_admin):
+                raise RuntimeError("UI administrator permission was not persisted")
+            print("UIStudioAdministratorVerified=" + str(options.grant_admin), flush=True)
         print("ProductionContainersUnchanged=true", flush=True)
         print("UIStudioImage=" + image + " Health=healthy", flush=True)
         # Read only the public bot username from structured startup logging.
@@ -165,6 +207,11 @@ def main():
             ):
                 print("UIStudioBot=https://t.me/" + event["username"], flush=True)
     except Exception:
+        if previous_access is not None:
+            private_write(access_file, previous_access)
+            os.chown(access_file, 10001, 10001)
+        else:
+            access_file.unlink(missing_ok=True)
         if previous is not None:
             private_write(CONFIG, previous)
             run(dc + ["up", "-d", "--no-deps", "studio"])

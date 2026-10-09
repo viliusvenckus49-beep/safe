@@ -57,6 +57,56 @@ def test_production_bot_token_is_rejected_before_build_or_write(deployment, monk
     assert calls == [] and not module.CONFIG.exists() and not module.DATA.exists()
 
 
+def test_reuse_uses_installed_test_token_and_preserves_design_and_editor_roles(
+    deployment, monkeypatch, capsys
+):
+    module, calls = deployment
+    module.CONFIG.parent.mkdir()
+    token = "654321:TEST_TOKEN_abcdefghijklmnopqrstuvwxyz"
+    module.CONFIG.write_text("TEST_UI_BOT_TOKEN=" + token + "\nSAFECHECK_TEST_IMAGE=old\n")
+    module.DATA.mkdir()
+    old_access = {"version": 1, "admins": [901], "editors": [888]}
+    (module.DATA / "access.json").write_text(json.dumps(old_access))
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [module.__file__, "a" * 40, "--reuse-config", "--grant-admin", "8425927753"],
+    )
+    module.main()
+    stored = json.loads((module.DATA / "access.json").read_text())
+    assert stored["admins"] == [901, 8425927753] and stored["editors"] == [888]
+    assert token in module.CONFIG.read_text()
+    assert token not in capsys.readouterr().out
+    assert len(list(module.DATA.glob("access-backup-*.json"))) == 1
+    assert all(token not in " ".join(args) for args in calls)
+
+
+def test_failed_update_restores_previous_editor_access(deployment, monkeypatch):
+    module, _ = deployment
+    module.DATA.mkdir()
+    access = module.DATA / "access.json"
+    previous = b'{"version":1,"admins":[],"editors":[888]}'
+    access.write_bytes(previous)
+    monkeypatch.setattr(
+        module.sys, "argv", [module.__file__, "a" * 40, "--grant-admin", "8425927753"]
+    )
+    snapshots = iter([b"before", b"changed"])
+    monkeypatch.setattr(module, "production_snapshot", lambda: next(snapshots))
+    with pytest.raises(RuntimeError, match="Production service identity changed"):
+        module.main()
+    assert access.read_bytes() == previous
+
+
+def test_reused_production_token_is_still_rejected(deployment, monkeypatch):
+    module, calls = deployment
+    module.CONFIG.parent.mkdir()
+    module.CONFIG.write_text("TEST_UI_BOT_TOKEN=123456:TEST_TOKEN_abcdefghijklmnopqrstuvwxyz\n")
+    monkeypatch.setattr(module.sys, "argv", [module.__file__, "a" * 40, "--reuse-config"])
+    with pytest.raises(RuntimeError, match="production bot"):
+        module.main()
+    assert calls == []
+
+
 def test_preview_deployment_uses_only_isolated_project_and_retains_design(deployment, capsys):
     module, calls = deployment
     module.DATA.mkdir()
