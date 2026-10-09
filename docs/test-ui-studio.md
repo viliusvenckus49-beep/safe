@@ -34,6 +34,10 @@ verifies production container identities/images/start times are unchanged. It ne
 Compose or database migrations. Initial failure stops only the new preview service; update failure
 restores its previous private configuration and image. The runtime file is
 `/etc/safecheck-ui-studio/runtime.env`, mode 0600. The editor state is a separate private mount.
+The administrator allowlist is read through the production container's existing secret loader;
+only its numeric bot identity and administrator IDs leave that process. Preview validation runs
+offline before startup. A small standard-library health probe checks polling and persisted state
+without importing a second bot process; the editor container has a 256 MiB memory limit.
 
 Production SAFECheck does not load exported design files. Moving a chosen design into production is
 a separate code update using its unchanged action callbacks and localization keys.

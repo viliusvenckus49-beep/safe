@@ -3,6 +3,7 @@
 import importlib.util
 import io
 import json
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +26,7 @@ def deployment(tmp_path, monkeypatch):
         "stdin",
         SimpleNamespace(buffer=io.BytesIO(b"654321:TEST_TOKEN_abcdefghijklmnopqrstuvwxyz")),
     )
+    module.real_production_identity = module.production_identity
     monkeypatch.setattr(module, "production_identity", lambda: {"bot_id": 123456, "admins": "900"})
     monkeypatch.setattr(module, "production_snapshot", lambda: b"unchanged production images")
     calls = []
@@ -79,6 +81,18 @@ def test_preview_deployment_uses_only_isolated_project_and_retains_design(deploy
     assert "TEST_TOKEN" not in output
 
 
+def test_rendering_probe_is_offline_and_does_not_share_live_bot_memory(deployment):
+    module, calls = deployment
+    module.main()
+    probe = next(args for args in calls if args[:2] == ["docker", "run"])
+    assert probe[probe.index("--network") + 1] == "none"
+    assert "readonly" in probe[probe.index("--mount") + 1]
+    assert "--env-file" not in probe and "--env" not in probe
+    start = next(args for args in calls if args[-4:] == ["up", "-d", "--no-deps", "studio"])
+    assert calls.index(probe) < calls.index(start)
+    assert not any(args[:3] == ["docker", "exec", "safecheck-ui-studio-studio-1"] for args in calls)
+
+
 def test_changed_production_containers_fail_verification_and_stop_only_new_studio(
     deployment, monkeypatch
 ):
@@ -117,3 +131,34 @@ def test_unexpected_compose_services_are_rejected(deployment, monkeypatch):
     with pytest.raises(RuntimeError, match="unexpected services"):
         module.main()
     assert not any("up" in args for args in calls)
+
+
+def test_production_identity_uses_official_secret_loader_without_exposing_credentials(
+    deployment, monkeypatch
+):
+    module, _ = deployment
+    loaded = []
+
+    def loader():
+        loaded.append(True)
+
+    monkeypatch.setattr("runpy.run_path", lambda path: {"load_secrets": loader})
+
+    def settings():
+        assert loaded
+        return SimpleNamespace(
+            bot_token=SimpleNamespace(get_secret_value=lambda: "123456:DO_NOT_OUTPUT"),
+            admin_ids="900",
+        )
+
+    monkeypatch.setattr("app.config.Settings", settings)
+
+    def execute(args, **kwargs):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            exec(args[-1], {})
+        assert "DO_NOT_OUTPUT" not in buffer.getvalue()
+        return buffer.getvalue().encode()
+
+    monkeypatch.setattr(module, "run", execute)
+    assert module.real_production_identity() == {"bot_id": 123456, "admins": "900"}

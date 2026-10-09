@@ -46,7 +46,7 @@ def production_snapshot():
 
 def production_identity():
     # Read only the numeric bot identity and configured administrator IDs, never its token.
-    code = "from app.config import Settings; import json; s=Settings(); print(json.dumps({'bot_id':int(s.bot_token.get_secret_value().split(':')[0]),'admins':s.admin_ids}))"
+    code = "import runpy,json; runpy.run_path('/run/configs/secret_entrypoint.py')['load_secrets'](); from app.config import Settings; s=Settings(); print(json.dumps({'bot_id':int(s.bot_token.get_secret_value().split(':')[0]),'admins':s.admin_ids}))"
     return json.loads(run(["docker", "exec", "safecheck-bot-1", "python", "-c", code]))
 
 
@@ -96,6 +96,39 @@ def main():
         resolved = json.loads(run(dc + ["config", "--format", "json"]))
         if set(resolved["services"]) != {"studio"}:
             raise RuntimeError("UI-only deployment refused: unexpected services")
+        # Render before polling starts, in a separate offline process. Loading another bot
+        # process inside the live container would exceed its deliberately small memory limit.
+        probe = "from pathlib import Path; from app.test_ui.profile import Design; from app.test_ui.preview import screen,SCREENS; d=Design(Path('/state/design.json')); assert len(SCREENS)==8; [(screen(n,d,l)) for l in ('lt','en','ru') for n in SCREENS]; print('UIStudioPreviewsVerified=24 ProductionDatabase=disconnected Moderation=disabled')"
+        print(
+            run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    "none",
+                    "--read-only",
+                    "--memory",
+                    "256m",
+                    "--cpus",
+                    "0.4",
+                    "--pids-limit",
+                    "128",
+                    "--cap-drop",
+                    "ALL",
+                    "--security-opt",
+                    "no-new-privileges:true",
+                    "--mount",
+                    f"type=bind,src={DATA},dst=/state,readonly",
+                    image,
+                    "python",
+                    "-c",
+                    probe,
+                ]
+            )
+            .decode()
+            .strip()
+        )
         run(dc + ["up", "-d", "--no-deps", "studio"])
         for _ in range(60):
             status = (
@@ -118,12 +151,6 @@ def main():
             raise RuntimeError("UI studio failed its polling health check")
         if production_snapshot() != before:
             raise RuntimeError("Production service identity changed during UI deployment")
-        probe = "from app.test_ui.config import UISettings; from app.test_ui.profile import Design; from app.test_ui.preview import screen,SCREENS; s=UISettings(); d=Design(s.state_file); assert len(SCREENS)==8; [(screen(n,d,l)) for l in ('lt','en','ru') for n in SCREENS]; print('UIStudioPreviewsVerified=24 ProductionDatabase=disconnected Moderation=disabled')"
-        print(
-            run(["docker", "exec", "safecheck-ui-studio-studio-1", "python", "-c", probe])
-            .decode()
-            .strip()
-        )
         print("ProductionContainersUnchanged=true", flush=True)
         print("UIStudioImage=" + image + " Health=healthy", flush=True)
         # Read only the public bot username from structured startup logging.
