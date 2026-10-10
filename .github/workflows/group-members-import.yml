@@ -1,45 +1,26 @@
-name: SAFECheck REP group diagnostics
+name: SAFECheck dispatch tested REP release
+on:
+  push:
+    branches: [group-members-import-20261009]
+    paths: ['.github/workflows/group-members-import.yml']
 permissions:
   contents: read
+  actions: write
 concurrency:
   group: safecheck-vps
   cancel-in-progress: false
 jobs:
-  inspect:
+  dispatch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-    - name: Prepare pinned SSH access
-      env:
-        DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
-        HOST: ${{ secrets.VPS_HOST }}
-        REMOTE_USER: ${{ secrets.VPS_USER }}
-      run: 'set -eu
-
-        test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
-
-        install -d -m 700 "$HOME/.ssh"
-
-        umask 077
-
-        printf ''%s\n'' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
-
-        ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
-
-        printf ''%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n'' "$HOST" > "$HOME/.ssh/known_hosts"
-
-        '
-    - name: Read group permissions and recent REP diagnostics
-      env:
-        HOST: ${{ secrets.VPS_HOST }}
-        REMOTE_USER: ${{ secrets.VPS_USER }}
-      run: "ssh -i \"$HOME/.ssh/safecheck_deploy\" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \"$REMOTE_USER@$HOST\" 'sudo -n python3 -' <<'PY'\nimport collections,json,subprocess\ncode = '\"\"\"Read-only group and REP diagnostics; no Telegram messages or bans.\"\"\"\\nimport asyncio,json,runpy\\nfrom datetime import UTC,datetime,timedelta\\nrunpy.run_path(\\'/run/configs/secret_entrypoint.py\\')[\\'load_secrets\\']()\\nfrom aiogram import Bot\\nfrom sqlalchemy import func,select\\nfrom app.config import Settings\\nfrom app.db import create_database\\nfrom app.models import ManagedGroup,ReputationRequest,User\\nfrom app.health import snapshot\\nCHAT=-1003976343267\\nasync def main():\\n settings=Settings()\\n result={\\'chat_id\\':CHAT,\\'health\\':snapshot()}\\n engine,sessions=create_database(settings.database_url)\\n try:\\n  async with sessions() as session:\\n   group=await session.get(ManagedGroup,CHAT)\\n   result[\\'group\\']=None if group is None else {key:getattr(group,key) for key in (\\'approved\\',\\'enabled\\',\\'can_restrict_members\\',\\'chat_type\\')}\\n   requests=(await session.execute(select(ReputationRequest.status,func.count()).join(User,User.id==ReputationRequest.receiver_user_id).where(ReputationRequest.chat_id==CHAT,func.lower(User.username)==\\'karystamsu\\',ReputationRequest.created_at>=datetime.now(UTC)-timedelta(days=3)).group_by(ReputationRequest.status))).all()\\n   result[\\'target_rep_last_72h\\']={status:count for status,count in requests}\\n finally:await engine.dispose()\\n bot=Bot(settings.bot_token.get_secret_value())\\n try:\\n  me=await bot.get_me(request_timeout=15)\\n  member=await bot.get_chat_member(CHAT,me.id,request_timeout=15)\\n  result[\\'telegram\\']={\\'bot_status\\':str(member.status),\\'can_read_all_group_messages\\':me.can_read_all_group_messages,\\'can_restrict_members\\':getattr(member,\\'can_restrict_members\\',False)}\\n except Exception as error:result[\\'telegram\\']={\\'error_type\\':type(error).__name__}\\n finally:await bot.session.close()\\n print(\\'REP_PREFLIGHT=\\'+json.dumps(result))\\ntry:asyncio.run(main())\\nexcept Exception as error:print(\\'REP_PREFLIGHT_ERROR=\\'+type(error).__name__);raise SystemExit(1) from None\\n'\nresult=subprocess.run(['docker','exec','safecheck-bot-1','python','-c',code],capture_output=True,text=True,timeout=90)\nfor line in result.stdout.splitlines():\n if line.startswith(('REP_PREFLIGHT=','REP_PREFLIGHT_ERROR=')):print(line,flush=True)\nif result.returncode:raise SystemExit(1)\nresult=subprocess.run(['docker','logs','--since','72h','--tail','50000','safecheck-bot-1'],capture_output=True,text=True,timeout=45)\nevents=collections.Counter();errors=collections.Counter();api_errors=[];last=None\nfor line in (result.stdout+result.stderr).splitlines():\n try:data=json.loads(line)\n except ValueError:continue\n if data.get('chat_id')!=-1003976343267:continue\n event=data.get('event')\n if event=='telegram_request_failed':api_errors.append({key:data.get(key) for key in ('operation','exception_type','timestamp')})\n if isinstance(event,str):events[event]+=1\n error=data.get('error_code')\n if isinstance(error,str):errors[error]+=1\n if isinstance(data.get('timestamp'),str):last=data['timestamp']\nprint('REP_GROUP_LOG_SUMMARY='+json.dumps({'events':dict(events),'rejection_codes':dict(errors),'last_timestamp':last,'telegram_errors':api_errors[-20:]}),flush=True)\n\nPY\n"
-    - name: Remove runner key
-      if: always()
-      run: rm -f "$HOME/.ssh/safecheck_deploy"
-'on':
-  push:
-    branches:
-    - group-members-import-20261009
-    paths:
-    - .github/workflows/group-members-import.yml
+      - name: Dispatch the existing backup-first deployment for tested main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: 58a309a7f2e52652f26a525d5cd2d8b85504aa91
+        run: |
+          set -eu
+          current_main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          test "$current_main_sha" = "$EXPECTED_MAIN_SHA"
+          gh workflow run vps-deploy.yml --repo "$GITHUB_REPOSITORY" --ref main
+          printf 'DEPLOY_DISPATCHED_MAIN=%s\n' "$EXPECTED_MAIN_SHA"
