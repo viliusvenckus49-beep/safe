@@ -9,6 +9,10 @@ from app.services import DomainError
 TARGET = re.compile(r"^(?:@[A-Za-z][A-Za-z0-9_]{4,31}|[1-9][0-9]{0,18})$")
 
 
+def message_content(message: Message) -> str:
+    return message.text or message.caption or ""
+
+
 def actor_id(message: Message) -> int:
     if message.from_user is None or message.from_user.is_bot or message.sender_chat:
         raise DomainError("forbidden")

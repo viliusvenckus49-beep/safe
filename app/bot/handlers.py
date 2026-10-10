@@ -49,7 +49,7 @@ from app.bot.screens import (
 from app.bot.states import AdminRepFlow, InputFlow, ReportFlow
 from app.bot.trusted import open_panel as open_trusted_panel
 from app.bot.trusted import register_trusted_handlers
-from app.bot.validation import actor_id, valid_target
+from app.bot.validation import actor_id, message_content, valid_target
 from app.i18n import language, t
 from app.services import DomainError, Service
 
@@ -87,7 +87,7 @@ def callback_target(user: Any) -> str:
 
 
 async def target_from_message(message: Message, service: Service) -> tuple[str, str]:
-    parts = (message.text or "").split(maxsplit=2)
+    parts = message_content(message).split(maxsplit=2)
     # An explicit target takes priority over an incidental reply context.
     if len(parts) > 1 and valid_target(parts[1]):
         return parts[1], parts[2] if len(parts) > 2 else ""
@@ -257,7 +257,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
 
     @router.message(Command("ask", "rep", "profile"))
     async def check(message: Message, state: FSMContext, service: Service) -> None:
-        command = (message.text or "").split()[0].split("@")[0]
+        command = message_content(message).split()[0].split("@")[0]
         persistent = command == "/ask"
         await clear_flow(state)
         target, _ = await target_from_message(message, service)
@@ -323,14 +323,16 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 message, state, p.text(prompt), reply_markup=kb.report(data["nonce"], prompt)
             )
 
-    @router.message(F.text.regexp(r"(?i)^[+-]rep(?:\s|$)"))
+    @router.message(
+        F.text.regexp(r"(?i)^[+-]rep(?:\s|$)") | F.caption.regexp(r"(?i)^[+-]rep(?:\s|$)")
+    )
     async def vote(message: Message, state: FSMContext, service: Service) -> None:
         await clear_flow(state)
         target, comment = await target_from_message(message, service)
         if not target:
             await send_screen(message, p.text("rep_target"), None, False)
             return
-        value = 1 if (message.text or "").startswith("+") else -1
+        value = 1 if message_content(message).startswith("+") else -1
         if not comment:
             await begin_vote(message, state, service, actor_id(message), target, value)
             return
