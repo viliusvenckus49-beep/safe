@@ -323,7 +323,7 @@ async def test_result_category_edits_complete_live_template_with_dynamic_identit
         "p.lookup_clear_status",
         "p.no_scam",
         "p.lookup_identity_known",
-        "p.warning",
+        "p.lookup_warning",
     ):
         await studio.click(cb("edit", value(key)), actor=900)
         await studio.send("EDIT " + key, actor=900)
@@ -340,11 +340,11 @@ async def test_result_category_edits_complete_live_template_with_dynamic_identit
             "p.lookup_clear_status",
             "p.no_scam",
             "p.lookup_identity_known",
-            "p.warning",
+            "p.lookup_warning",
         )
     )
-    assert studio.design.text(lang, "p.warning") == "EDIT p.warning"
-    assert t("p.warning", lang) == CATALOGS[lang]["p.warning"]
+    assert studio.design.text(lang, "p.lookup_warning") == "EDIT p.lookup_warning"
+    assert t("p.lookup_warning", lang) == CATALOGS[lang]["p.lookup_warning"]
 
 
 async def test_premium_emoji_entities_in_result_text_keep_utf16_offsets_and_typed_html(studio):

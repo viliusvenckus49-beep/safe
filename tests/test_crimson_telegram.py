@@ -363,11 +363,16 @@ async def test_existing_numeric_scam_observation_bans_every_group_without_changi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sign,actor,target,label", [(1, 1, 42, "+ʀᴇᴘ"), (-1, 2, 43, "-ʀᴇᴘ")])
-async def test_result_rep_buttons_require_five_character_comment_and_preserve_value(
+async def test_legacy_rep_buttons_require_five_character_comment_and_preserve_value(
     crimson, database, settings, sign, actor, target, label
 ):
     await crimson.send(f"/ask {target}", actor=actor)
-    buttons = crimson.transport.calls[-1].reply_markup.inline_keyboard
+    from app.bot import keyboards as kb
+
+    # New checks have two buttons; existing REP callback identifiers stay compatible.
+    result = crimson.transport.calls[-1].reply_markup.inline_keyboard
+    assert [Action.unpack(row[0].callback_data).name for row in result] == ["profile", "home"]
+    buttons = kb.result(str(target)).inline_keyboard
     button = next(button for row in buttons for button in row if button.text == label)
     callback = Action.unpack(button.callback_data)
     assert callback.name == ("vote+" if sign == 1 else "vote-")

@@ -359,11 +359,11 @@ async def test_localized_lookup_top_registry_and_group_admin_actions(
     await send(localized_bot, "/add_sc @target_user Original scam reason", actor=900, chat=-100)
     assert "@target_user" in last_screen(localized_bot).text
     await send(localized_bot, "/ask 42", chat=-100)
-    assert t("p.alert_title", lang=lang) in last_screen(localized_bot).text
+    assert t("p.profile_title", lang=lang) in last_screen(localized_bot).text
     assert t("p.scam_admin_confirmation", lang=lang) in last_screen(localized_bot).text
     assert "Original scam reason" not in last_screen(localized_bot).text
     await send(localized_bot, "/rep 42")
-    assert t("p.alert_title", lang=lang) in last_screen(localized_bot).text
+    assert t("p.profile_title", lang=lang) in last_screen(localized_bot).text
     await send(localized_bot, "/scammers")
     assert t("p.scams_title", lang=lang) in last_screen(localized_bot).text
     await send(localized_bot, "/top")
@@ -377,7 +377,7 @@ async def test_localized_lookup_top_registry_and_group_admin_actions(
     clock[0] += 10
     await send(localized_bot, "/ask 42", chat=-100)
     assert t("p.no_scam", lang=lang) in last_screen(localized_bot).text
-    assert t("p.warning", lang=lang) in last_screen(localized_bot).text
+    assert t("p.lookup_warning", lang=lang) in last_screen(localized_bot).text
 
 
 @pytest.mark.asyncio

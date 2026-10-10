@@ -56,17 +56,22 @@ TEXTS = {
         "Explanation · no SCAM",
         "Пояснение · нет SCAM",
     ),
+    "result.p.lookup_identity_heading": (
+        "Tapatybės skyriaus antraštė",
+        "Identity section heading",
+        "Заголовок раздела личности",
+    ),
     "result.p.lookup_identity_known": (
         "Susieta su Telegram ID",
         "Linked to Telegram ID",
         "Связано с Telegram ID",
     ),
-    "result.p.unknown_identity": (
+    "result.p.lookup_identity_unknown": (
         "Tapatybė nepatvirtinta",
         "Identity not confirmed",
         "Личность не подтверждена",
     ),
-    "result.p.warning": (
+    "result.p.lookup_warning": (
         "Patikimumo garantijos pastaba",
         "Reliability disclaimer",
         "Примечание о надёжности",

@@ -30,7 +30,7 @@ def test_all_presentation_catalogs_have_matching_keys_and_placeholders():
 
 
 @pytest.mark.parametrize(
-    "lang,word", [("lt", "REPUTACIJA"), ("en", "REPUTATION"), ("ru", "РЕПУТАЦИЯ")]
+    "lang,word", [("lt", "Reputacijos"), ("en", "Reputation"), ("ru", "репутации")]
 )
 def test_dynamic_cards_localize_and_escape_user_content(lang, word):
     user = SimpleNamespace(username=None, display_name="<script>&", telegram_id=None)
