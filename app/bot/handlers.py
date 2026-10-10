@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app import presentation as p
 from app.bot import keyboards as kb
+from app.bot import redsafe_profile as rp
 from app.bot.administrators import register_administrator_handlers
 from app.bot.callbacks import (
     Action,
@@ -254,6 +255,21 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     @router.message(Command("cancel"))
     async def cancel(message: Message, state: FSMContext) -> None:
         await close_panel(message, state)
+
+    @router.message(Command("info"))
+    async def redsafe_info(message: Message, service: Service, state: FSMContext) -> None:
+        target, _ = await target_from_message(message, service)
+        if not target:
+            target = str(actor_id(message))
+        await clear_flow(state)
+        data = await rp.profile_data(service, message.bot, target)
+        await flow_screen(
+            message,
+            state,
+            rp.profile_text(data),
+            reply_markup=rp.controls(data["user"].id),
+            persistent=True,
+        )
 
     @router.message(Command("ask", "rep", "profile"))
     async def check(message: Message, state: FSMContext, service: Service) -> None:
@@ -540,7 +556,15 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             )
         elif name == "profile":
             await clear_flow(state)
-            await show_profile(message, service, str(actor), edit=True)
+            data = await rp.profile_data(service, message.bot, str(actor))
+            await render(message, rp.profile_text(data), reply_markup=rp.controls(data["user"].id))
+        elif name == "redsafe_names":
+            await clear_flow(state)
+            await render(
+                message,
+                await rp.names_text(service, value),
+                reply_markup=kb.keyboard([[(t("redsafe.home_button"), kb.action("home"))]]),
+            )
         elif name == "top":
             await clear_flow(state)
             top_rows = await service.leaderboard()

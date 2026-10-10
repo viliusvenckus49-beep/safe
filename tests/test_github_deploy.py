@@ -50,3 +50,16 @@ def test_failure_restores_previous_image_and_stays_failed():
         module.switch_release(candidate, original, "new", "old")
     assert candidate.events == ["deploy", ("rollback", "old")]
     assert original.events == [("persist", "old")]
+
+
+def test_only_reviewed_additive_profile_schema_is_allowed():
+    root = Path(__file__).parents[1]
+    current = module.migration_snapshot(root)
+    previous = {name: value for name, value in current.items() if not name.startswith("0010_")}
+    assert module.compatible_migrations(current, previous)
+    assert module.compatible_migrations(current, current)
+    assert not module.compatible_migrations({**current, "evil.py": b"drop tables"}, previous)
+    assert not module.compatible_migrations({**current, "0001_initial.py": b"changed"}, previous)
+    assert not module.compatible_migrations(
+        {**current, "0010_redsafe_profile.py": b"changed"}, previous
+    )

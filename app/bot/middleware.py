@@ -14,6 +14,7 @@ from app import presentation as p
 from app.bot.group_runtime import process_scam_bans
 from app.bot.lookup_limits import AskLimiter
 from app.bot.navigation import error_navigation
+from app.bot.redsafe_profile import record_activity
 from app.bot.screens import flow_screen, panel_state, preserved_source, render, send_screen
 from app.bot.states import InputFlow
 from app.bot.validation import message_content, valid_target
@@ -147,6 +148,7 @@ class ServiceMiddleware(BaseMiddleware):
                         event.chat.id, actor.id, actor.username, actor.full_name
                     )
                     await groups.check_member(event.chat.id, actor.id)
+                    await record_activity(event, groups.core)
                     if isinstance(event, Message):
                         for joined in event.new_chat_members or []:
                             if not joined.is_bot:
