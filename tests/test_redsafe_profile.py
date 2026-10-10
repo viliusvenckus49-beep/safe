@@ -7,6 +7,7 @@ from aiogram.methods import SendMessage
 from aiogram.types import Chat, Message
 from aiogram.types import User as TelegramUser
 from sqlalchemy import func, select
+from test_integration_contracts import postgres_contract as postgres_contract
 from test_telegram import journey as telegram_journey
 
 from app.bot import redsafe_profile as rp
@@ -179,3 +180,27 @@ async def test_real_group_messages_are_observed_without_commands(journey, databa
         assert await session.scalar(select(func.count()).select_from(ProfileActivity)) == 1
     async with database() as session:
         assert await session.scalar(select(func.count()).select_from(ProfileActivity)) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_delivery_is_counted_once(postgres_contract):
+    import asyncio
+
+    sessions, settings = postgres_contract
+    async with sessions() as session:
+        session.add(ManagedGroup(chat_id=-1001, title="Red", approved=True, enabled=True))
+        await session.commit()
+        await Service(settings, session).observe(123, "tester", "Name")
+
+    async def deliver():
+        async with sessions() as session:
+            await rp.record_activity(message(), Service(settings, session))
+            await session.commit()
+
+    await asyncio.gather(deliver(), deliver(), deliver())
+    async with sessions() as session:
+        bot = SimpleNamespace(
+            get_chat_member=AsyncMock(return_value=SimpleNamespace(status="member"))
+        )
+        data = await rp.profile_data(Service(settings, session), bot, "123")
+        assert (data["messages"], data["days"], data["groups"]) == (1, 1, 1)
