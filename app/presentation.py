@@ -357,6 +357,7 @@ def stats(data: dict[str, Any]) -> str:
 
 AUDIT_ACTIONS = {
     "scam_ban_attempt",
+    "scam_group_notice",
     "trusted_added",
     "trusted_removed",
     "administrator_added",

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot.group_presentation import recovery_notification
 from app.bot.moderation_lock import user_moderation_lock
 from app.bot.moderation_notices import notify_ban_failure
+from app.bot.scam_broadcasts import process_scam_announcements
 from app.config import Settings
 from app.group_services import BanSummary, GroupService, enqueue_scam_bans
 from app.i18n import t, use_language
@@ -207,6 +208,7 @@ async def process_group_jobs(bot: Bot, settings: Settings, sessions: Any) -> int
             )
             log.info("group_recovery_result", user_id=delivery.telegram_id, result=result)
             processed += 1
+    processed += await process_scam_announcements(bot, settings, sessions)
     return processed
 
 
