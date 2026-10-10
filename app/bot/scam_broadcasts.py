@@ -1,6 +1,7 @@
 """Registration announcements reuse the persisted, claimed audit-notice mechanism."""
 
 import asyncio
+from time import monotonic
 from typing import Any
 
 import structlog
@@ -16,6 +17,7 @@ from app.repositories import Repository
 
 ACTION = "scam_group_notice"
 LEASE_SECONDS = 120
+DELIVERY_BUDGET = 10.0
 
 
 async def queue_scam_announcements(
@@ -71,7 +73,10 @@ async def process_scam_announcements(bot: Any, settings: Settings, sessions: Any
     from app.bot.scam_admin import refresh_controls
 
     processed = 0
+    deadline = monotonic() + DELIVERY_BUDGET
     for _ in range(5):
+        if monotonic() >= deadline:
+            break
         async with sessions() as session:
             repo = Repository(session)
             await repo.lock_identity_metadata()
@@ -133,7 +138,8 @@ async def process_scam_announcements(bot: Any, settings: Settings, sessions: Any
             message_id = None
             try:
                 sent = await asyncio.wait_for(
-                    bot.send_message(chat_id, text, reply_markup=markup), timeout=10
+                    bot.send_message(chat_id, text, reply_markup=markup),
+                    timeout=max(0.001, deadline - monotonic()),
                 )
                 message_id = getattr(sent, "message_id", None)
             except TelegramRetryAfter as error:

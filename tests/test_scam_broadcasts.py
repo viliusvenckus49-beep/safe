@@ -11,6 +11,7 @@ from test_integration_contracts import postgres_contract as postgres_fixture
 from test_telegram import journey as telegram_journey
 
 from app.admin_services import AdminService
+from app.bot import scam_broadcasts
 from app.bot.group_runtime import process_group_jobs
 from app.bot.scam_broadcasts import ACTION, process_scam_announcements, queue_scam_announcements
 from app.bot.scam_notices import registered_scam_text
@@ -184,6 +185,27 @@ async def test_concurrent_workers_do_not_repeat_notices(journey, database, setti
         process_scam_announcements(bot, settings, database),
     )
     assert len(bot.calls) == 3
+
+
+async def test_slow_telegram_keeps_bounded_cycle_and_retries_later(
+    journey, database, settings, monkeypatch
+):
+    await prepare(database, settings)
+    await journey.send("/add_sc @example", actor=900)
+    monkeypatch.setattr(scam_broadcasts, "DELIVERY_BUDGET", 0.05)
+
+    class SlowBot(NoticeBot):
+        async def send_message(self, chat_id, text, **kwargs):
+            await asyncio.sleep(1)
+            return await super().send_message(chat_id, text, **kwargs)
+
+    assert await process_scam_announcements(SlowBot(), settings, database) == 1
+    states = [n.details["status"] for n in await notices(database)]
+    assert states.count("RETRY") == 1 and states.count("PENDING") == 2
+    monkeypatch.setattr(scam_broadcasts, "DELIVERY_BUDGET", 10.0)
+    bot = NoticeBot()
+    assert await process_scam_announcements(bot, settings, database) == 2
+    assert len(bot.calls) == 2
 
 
 async def test_worker_sends_honest_summary_and_refresh_does_not_rebroadcast(
