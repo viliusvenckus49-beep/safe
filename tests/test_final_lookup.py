@@ -26,7 +26,7 @@ async def test_known_id_matching_unresolved_record_warns_without_binding(databas
             assert t("p.lookup_clear_status") not in text
             assert t("p.lookup_scam_status") not in text
             assert t("p.lookup_username_match_description") in text
-            assert "[<code>41</code>]" in text
+            assert "🆔 ID: <code>41</code>" in text
         assert await session.scalar(select(func.count()).select_from(BanAction)) == 0
         await core.observe(41, "renamedowner", "Current owner")
         renamed = await core.profile("41")

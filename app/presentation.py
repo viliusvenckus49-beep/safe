@@ -187,64 +187,79 @@ def reputation_score(value: int) -> str:
 def profile(data: dict[str, Any]) -> str:
     user, scam = data["user"], data["scam"]
     trusted = bool(data.get("trusted")) and scam is None
+    user_text = (
+        f"👤 {label(user, max_units=120)}\n"
+        f"🆔 ID: <code>{user.telegram_id if user.telegram_id is not None else escape(t('p.lookup_id_unknown'))}</code>"
+    )
     result = (
         t(
             "p.profile_card",
             title=t("p.profile_title"),
-            user=identity(user, max_units=120),
+            user=user_text,
             score=reputation_score(data["score"]),
             positive=data["positive"],
             negative=data["negative"],
         )
         + "\n\n"
+        + t("p.lookup_status")
+        + "\n\n"
     )
-    if data.get("role") in {"founder", "moderator"}:
-        result += t("p.role", role=t("p.role_" + data["role"])) + "\n\n"
-    result += t("p.lookup_status") + "\n"
     if scam:
         result += t("p.lookup_scam_status") + "\n\n" + t("p.lookup_scam_description")
         if getattr(scam, "report_id", None) is None:
-            result += "\n\n" + t("p.scam_admin_confirmation")
+            result += "\n\n<blockquote><i>" + t("p.scam_admin_confirmation") + "</i></blockquote>"
         elif scam.reason:
-            result += "\n\n" + t("p.lookup_reason", reason=escape(display_text(scam.reason, 1800)))
+            result += (
+                "\n\n<blockquote><i>"
+                + t("p.lookup_reason", reason=escape(display_text(scam.reason, 1800)))
+                + "</i></blockquote>"
+            )
         record_id = getattr(scam, "id", None)
         if isinstance(record_id, int) and record_id > 0:
             result += "\n\n" + t("p.lookup_reference", reference=f"SC-{record_id:05d}")
         result += "\n" + t("p.lookup_scam_date", date=f"{scam.created_at:%Y-%m-%d}")
-        result += "\n\n" + FOOTER_RULE + "\n" + t("p.lookup_caution")
     elif data.get("unresolved_scam"):
         unresolved = data["unresolved_scam"]
-        result += t("p.lookup_username_match") + "\n\n" + t("p.lookup_username_match_description")
+        result += (
+            t("p.lookup_username_match")
+            + "\n\n<blockquote><i>"
+            + t("p.lookup_username_match_description")
+            + "</i></blockquote>"
+        )
         result += "\n\n" + t("p.lookup_reference", reference=f"SC-{unresolved.id:05d}")
         result += "\n" + t("p.lookup_scam_date", date=f"{unresolved.created_at:%Y-%m-%d}")
     elif trusted:
         top = data.get("trusted_source") == "top"
         result += t("p.lookup_trusted_top" if top else "p.trusted_status")
-        result += "\n\n" + t(
+        result += "\n\n<blockquote><i>" + t(
             "p.lookup_trusted_top_description"
             if top
             else "p.lookup_trusted_role"
             if data.get("trusted_source") == "role"
             else "p.lookup_trusted_manual"
         )
+        if data.get("role") in {"founder", "moderator"}:
+            result += "\n\n" + t("p.role", role=t("p.role_" + data["role"]))
+        result += "</i></blockquote>"
         updated = data.get("trusted_updated_at")
         if updated is not None and not top:
             result += "\n\n" + t("p.lookup_trusted_date", date=f"{updated:%Y-%m-%d}")
     else:
         result += t("p.lookup_clear_status") + "\n\n" + t("p.no_scam")
-    if not scam or user.telegram_id is None:
-        result += (
-            "\n\n"
-            + FOOTER_RULE
-            + "\n"
-            + t("p.unknown_identity" if user.telegram_id is None else "p.lookup_identity_known")
-        )
-    if not scam and not trusted:
-        result += "\n\n" + warning()
+    result += (
+        "\n\n"
+        + t("p.lookup_identity_heading")
+        + "\n\n"
+        + t("p.lookup_identity_unknown" if user.telegram_id is None else "p.lookup_identity_known")
+    )
     lookup = data.get("identity_lookup")
     if lookup is not None and lookup.code != "resolved":
-        result += "\n\n" + identity_lookup_note(lookup, known=user.telegram_id is not None)
-    return result
+        result += (
+            "\n\n<blockquote><i>"
+            + identity_lookup_note(lookup, known=user.telegram_id is not None)
+            + "</i></blockquote>"
+        )
+    return result + "\n\n" + t("p.lookup_warning")
 
 
 def identity_lookup_note(lookup: Any, *, known: bool = False) -> str:

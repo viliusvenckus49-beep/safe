@@ -109,7 +109,7 @@ async def show_profile(
     await render(
         message,
         p.profile(data),
-        reply_markup=kb.result(callback_target(data["user"])),
+        reply_markup=kb.check_result(data["user"].telegram_id),
         edit=edit,
     )
 
@@ -285,7 +285,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 message,
                 state,
                 p.profile(data),
-                reply_markup=kb.result(callback_target(data["user"]), persistent=persistent),
+                reply_markup=kb.check_result(data["user"].telegram_id, persistent=persistent),
                 persistent=persistent,
             )
         else:
@@ -494,6 +494,18 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         if name in ADMIN_ACTIONS and message.chat.type != "private":
             await callback.answer(p.text("admin_private"), show_alert=True)
             return
+        if (
+            name == "profile"
+            and value
+            and (
+                not value.isascii()
+                or not value.isdigit()
+                or not valid_target(value)
+                or int(value) <= 0
+            )
+        ):
+            await callback.answer(t("p.lookup_profile_unavailable"), show_alert=True)
+            return
         await callback.answer()
         receipt = bool(
             message.reply_markup
@@ -556,7 +568,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             )
         elif name == "profile":
             await clear_flow(state)
-            data = await rp.profile_data(service, message.bot, str(actor))
+            data = await rp.profile_data(service, message.bot, value or str(actor))
             await render(message, rp.profile_text(data), reply_markup=rp.controls(data["user"].id))
         elif name == "redsafe_names":
             await clear_flow(state)
@@ -890,12 +902,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             message,
             state,
             p.profile(data),
-            reply_markup=kb.result(
-                callback_target(data["user"]),
-                back_name=parent if parent.startswith("admin") else None,
-                back_value=parent_value,
-                persistent=persistent,
-            ),
+            reply_markup=kb.check_result(data["user"].telegram_id, persistent=persistent),
             persistent=persistent,
         )
         await clear_flow(state)

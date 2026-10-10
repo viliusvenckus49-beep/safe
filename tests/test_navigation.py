@@ -182,7 +182,10 @@ async def test_registry_search_returns_to_same_admin_page(journey, database, set
     await journey.send("bad target", actor=900)
     assert kb.action("admin_scams", "1") in callbacks(last_message(journey).reply_markup)
     await journey.send("42", actor=900)
-    assert kb.action("admin_scams", "1") in callbacks(last_message(journey).reply_markup)
+    assert callbacks(last_message(journey).reply_markup) == [
+        kb.action("profile", "42"),
+        kb.action("home"),
+    ]
     await journey.click(kb.action("admin_scams", "1"), actor=900)
     assert kb.action("admin_scams", "0") in callbacks(last_message(journey).reply_markup)
     assert await journey.state(900) is None
@@ -245,7 +248,7 @@ async def test_report_decision_returns_to_pending_reports(journey, database, set
 
 @pytest.mark.parametrize("locale", ["lt", "en", "ru"])
 @pytest.mark.parametrize("chat", [None, -100])
-async def test_ask_results_stay_while_regular_results_keep_cancel(
+async def test_check_results_keep_two_buttons_and_existing_receipt_navigation(
     journey, database, settings, locale, chat
 ):
     async with database() as session:
@@ -255,14 +258,12 @@ async def test_ask_results_stay_while_regular_results_keep_cancel(
         markup = last_message(journey).reply_markup
         names = [Action.unpack(value).name for value in callbacks(markup)]
         persistent = command.startswith("/ask")
-        assert names == ["lookup", "vote+", "vote-", "home"] + ([] if persistent else ["close"])
+        assert names == ["profile", "home"]
         with use_language(locale):
-            assert markup.inline_keyboard[-1][0].text == t(
-                "button.back" if persistent else "button.cancel"
-            )
+            assert markup.inline_keyboard[-1][0].text == t("button.check_home")
         before = len(journey.transport.deletions)
         await journey.click(
-            kb.action("home", "receipt") if persistent else kb.action("close"), chat=chat
+            kb.action("home", "receipt") if persistent else kb.action("home"), chat=chat
         )
         if not persistent:
             assert len(journey.transport.deletions) == before + 1

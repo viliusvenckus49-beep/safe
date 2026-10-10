@@ -205,13 +205,13 @@ async def test_commands_discover_new_public_target_id(journey, database, setting
     if command != "report":
         assert "<code>22</code>" in journey.text()
         markup = journey.transport.calls[-1].reply_markup
-        vote = next(
+        profile_callback = next(
             button.callback_data
             for row in markup.inline_keyboard
             for button in row
-            if button.callback_data and button.callback_data.startswith("sc|vote+|")
+            if button.callback_data and button.callback_data.startswith("sc|profile|")
         )
-        assert Action.unpack(vote).value == "22"
+        assert Action.unpack(profile_callback).value == "22"
     async with database() as session:
         assert (
             await session.scalar(select(User).where(User.telegram_id == 22))

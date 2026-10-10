@@ -105,7 +105,7 @@ def test_manual_scam_confirmation_and_report_reason_preservation():
                 assert t("p.scam_admin_confirmation") in output
                 assert "proofs" not in output
             assert t("p.unknown_identity") not in p.scams([record])
-            assert t("p.unknown_identity") in p.profile(data)
+            assert t("p.lookup_identity_unknown") in p.profile(data)
             record.report_id = 1
             assert "proofs &lt;private note&gt;" in p.profile(data)
             assert "proofs &lt;private note&gt;" in p.scams([record])

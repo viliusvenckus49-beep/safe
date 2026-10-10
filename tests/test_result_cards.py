@@ -21,13 +21,15 @@ class ParsedText(HTMLParser):
         self.stack = []
 
     def handle_starttag(self, tag, attrs):
-        assert tag in {"b", "code", "pre"}
+        assert tag in {"b", "code", "pre", "blockquote", "i"}
         self.stack.append(tag)
 
     def handle_endtag(self, tag):
         assert self.stack.pop() == tag
 
     def handle_data(self, data):
+        if "blockquote" in self.stack and data.strip():
+            assert "i" in self.stack
         self.text += data
 
 
@@ -60,11 +62,19 @@ def test_result_identity_and_status_are_factual(locale, known, status):
     with use_language(locale):
         result = p.profile(data)
         assert t("p.profile_title") in result
-        assert f"[<code>{42 if known else t('p.id_unknown')}</code>]" in result
-        assert "━━━━━━━━━━━━━━━" in result
-        assert "＋ REP" in result and "− REP" in result
+        assert f"🆔 ID: <code>{42 if known else t('p.lookup_id_unknown')}</code>" in result
+        assert "⭐" in result and "👍" in result and "👎" in result
+        assert t("p.lookup_status") in result and t("p.lookup_identity_heading") in result
+        from app.bot import keyboards as kb
+        from app.bot.callbacks import Action
+
+        buttons = kb.check_result(user.telegram_id).inline_keyboard
+        assert len(buttons) == 2 and all(len(row) == 1 for row in buttons)
+        assert buttons[0][0].text == t("button.check_profile")
+        assert buttons[1][0].text == t("button.check_home")
+        assert Action.unpack(buttons[0][0].callback_data).value == ("42" if known else "unknown")
         if status == "scam":
-            assert " −4</b>" in result
+            assert "−4" in result
             assert t("p.lookup_scam_status") in result
             assert "SC-00421" in result and "2026-10-05" in result
             assert "Fraud &lt;evidence&gt;" in result
@@ -82,16 +92,12 @@ def test_result_identity_and_status_are_factual(locale, known, status):
                 assert t("p.lookup_trusted_manual") in result
                 assert "2026-10-04" in result
         if known:
-            assert t("p.unknown_identity") not in result
-            if status != "scam":
-                assert t("p.lookup_identity_known") in result
+            assert t("p.lookup_identity_unknown") not in result
+            assert t("p.lookup_identity_known") in result
         else:
-            assert t("p.unknown_identity") in result
+            assert t("p.lookup_identity_unknown") in result
             assert t("p.lookup_identity_known") not in result
-        if status == "clear":
-            assert t("p.warning") in result
-        else:
-            assert t("p.warning") not in result
+        assert result.endswith(t("p.lookup_warning"))
         assert len(parsed(result).encode("utf-16-le")) // 2 < 4096
 
 
@@ -106,7 +112,7 @@ def test_zero_score_and_missing_metadata_are_not_invented():
         trusted_source="manual",
     )
     result = p.profile(data)
-    assert " +0</b>" in result
+    assert "+0" in result
     assert "&lt;Name&gt; &amp; person" in result
     assert "STATUSAS ATNAUJINTAS" not in result
     assert "#SC-" not in result
@@ -178,3 +184,84 @@ def test_ids_in_people_lists_but_not_top(locale):
         top = p.leaderboard([dict(user=known, score=1), dict(user=unknown, score=0)])
         assert "8803241151" not in top
         assert t("p.id_unknown") not in top
+
+
+def test_lithuanian_check_matches_requested_design_and_html():
+    user = SimpleNamespace(id=8, username="owned1111", telegram_id=6575329720)
+    with use_language("lt"):
+        result = p.profile(dict(user=user, scam=None, score=0, positive=0, negative=0))
+    assert result == (
+        "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n"
+        "🔎 <b>REDSAFE PATIKRA</b>\n\n"
+        "👤 @owned1111\n🆔 ID: <code>6575329720</code>\n\n"
+        "⭐ <b>Reputacijos statistika</b>\n\n"
+        "⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0\n\n"
+        "🛡 <b>Saugumo statusas</b>\n\n☑ <b>SCAM ĮRAŠŲ NERASTA</b>\n\n"
+        "<blockquote><i>Patvirtintų sukčiavimo įrašų duomenų bazėje nėra.</i></blockquote>\n\n"
+        "🔐 <b>Tapatybės patvirtinimas</b>\n\n☑ <b>TELEGRAM ID SUSIETAS</b>\n\n"
+        "<blockquote><i>Paskyra identifikuota pagal unikalų Telegram ID, ne vien vartotojo vardą.</i></blockquote>\n\n"
+        "⚠️ <i>Patikros rezultatas</i> <b>negarantuoja vartotojo patikimumo.</b>"
+    )
+    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 2
+    parsed(result)
+
+
+@pytest.mark.asyncio
+async def test_checked_profile_keeps_numeric_target_after_username_change(
+    journey, database, settings
+):
+    from aiogram.methods import SendMessage
+
+    from app.bot import keyboards as kb
+
+    async with database() as session:
+        await Service(settings, session).observe(42, "checked_person", "Checked person")
+    await journey.send("/ask @checked_person")
+    result = next(
+        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+    )
+    assert [[button.text for button in row] for row in result.reply_markup.inline_keyboard] == [
+        ["🪪 REDSAFE PROFILIS"],
+        ["‹ Pagrindinis meniu"],
+    ]
+    profile_callback = result.reply_markup.inline_keyboard[0][0].callback_data
+    assert profile_callback == kb.action("profile", "42")
+    assert result.reply_markup.inline_keyboard[1][0].callback_data == kb.action("home", "receipt")
+    async with database() as session:
+        core = Service(settings, session)
+        await core.observe(42, "changed_person", "Checked person")
+        await core.observe(43, "checked_person", "Different person")
+    await journey.click(profile_callback)
+    profile = next(
+        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+    )
+    assert "REDSAFE PROFILIS" in profile.text and "🆔 ID: 42" in profile.text
+    assert "@changed_person" in profile.text and "Different person" not in profile.text
+    # The unchanged main-menu callback with an empty value still opens the actor's own profile.
+    await journey.click(kb.action("profile"))
+    own = next(call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage))
+    assert "🆔 ID: 1" in own.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["unknown", "@unknown_name", "u:1", "-123", "0"])
+async def test_unknown_or_invalid_profile_target_never_opens_another_user(journey, target):
+    from aiogram.methods import AnswerCallbackQuery, SendMessage
+
+    from app.bot import keyboards as kb
+
+    await journey.send("/ask @unknown_name")
+    result = next(
+        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+    )
+    assert result.reply_markup.inline_keyboard[0][0].callback_data == kb.action(
+        "profile", "unknown"
+    )
+    count = sum(isinstance(call, SendMessage) for call in journey.transport.calls)
+    await journey.click(kb.action("profile", target))
+    assert sum(isinstance(call, SendMessage) for call in journey.transport.calls) == count
+    notice = next(
+        call for call in reversed(journey.transport.calls) if isinstance(call, AnswerCallbackQuery)
+    )
+    assert notice.show_alert is True
+    assert notice.text == t("p.lookup_profile_unavailable")

@@ -240,13 +240,18 @@ async def test_untrusted_callback_no_mutation(journey, database, data, actor, ex
 async def test_rep_unknown_username_keyboard_self_and_cooldown(journey, database):
     await journey.send("/ask @unknown_name")
     markup = journey.transport.calls[-1].reply_markup
-    callback = next(
-        button.callback_data
-        for row in markup.inline_keyboard
-        for button in row
-        if Action.unpack(button.callback_data).name == "vote+"
-    )
-    assert Action.unpack(callback).value.startswith("u:")
+    assert [Action.unpack(row[0].callback_data).name for row in markup.inline_keyboard] == [
+        "profile",
+        "home",
+    ]
+    # Existing REP callback IDs still work on previously sent keyboards.
+    async with database() as session:
+        from app.models import User as DatabaseUser
+
+        unknown = await session.scalar(
+            select(DatabaseUser).where(DatabaseUser.username == "unknown_name")
+        )
+        callback = Action(name="vote+", value=f"u:{unknown.id}").pack()
     await journey.click(callback)
     await journey.send("Test comment")
     await journey.send("+rep 43 Test comment")

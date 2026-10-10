@@ -98,5 +98,5 @@ def screen(name: str, design: Design, lang: str) -> tuple[str, InlineKeyboardMar
                     negative=2 if name == "profile" else 0,
                     trusted_updated_at=datetime.now(UTC),
                 )
-            ), kb.result("u:1")
+            ), kb.check_result(user.telegram_id)
         raise ValueError("invalid")

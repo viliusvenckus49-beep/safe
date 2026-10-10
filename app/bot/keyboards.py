@@ -87,6 +87,21 @@ def result(
     return keyboard(rows)
 
 
+def check_result(telegram_id: int | None, *, persistent: bool = False) -> InlineKeyboardMarkup:
+    """Keep the checked numeric identity in the existing profile callback."""
+    return keyboard(
+        [
+            [
+                (
+                    t("button.check_profile"),
+                    action("profile", str(telegram_id) if telegram_id else "unknown"),
+                )
+            ],
+            [(t("button.check_home"), action("home", "receipt" if persistent else ""))],
+        ]
+    )
+
+
 def report(nonce: str, stage: str) -> InlineKeyboardMarkup:
 
     def step(name: str) -> str:
