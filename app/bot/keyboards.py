@@ -97,6 +97,7 @@ def check_result(telegram_id: int | None, *, persistent: bool = False) -> Inline
                     action("profile", str(telegram_id) if telegram_id else "unknown"),
                 )
             ],
+            [(t("button.lookup_other"), action("lookup"))],
             [(t("button.check_home"), action("home", "receipt" if persistent else ""))],
         ]
     )

@@ -44,10 +44,10 @@ def test_exact_design_escape_and_callbacks():
         text = rp.profile_text(dict(user=user, messages=1, days=1, groups=1, network_days=8))
         assert text == (
             rp.BRAND + "\n\n🪪 <b>REDSAFE PROFILIS</b>\n━━━━━━━━━━━━━━\n\n"
-            "👤 @juodojimaterija\n🏷 01 · NAUJOKAS\n🆔 ID: 28563234\n\n"
+            "👤 @juodojimaterija\n🏷 01 · <b>NAUJOKAS</b>\n🆔 ID: 28563234\n\n"
             "<blockquote>📊 <b>Veiklos statistika</b>\n\n💬 Žinutės: 1\n🔥 Aktyvios dienos: 1\n"
             "🌐 REDSAFE grupės: 1\n📅 REDSAFE tinkle: 8 d.</blockquote>\n\n"
-            "━━━━━━━━━━━━━━\n◈ <b>PROFILIO PROGRESAS</b>\n\n🏅 Kitas statusas: VIETINIS\n\n"
+            "━━━━━━━━━━━━━━\n◈ <b>PROFILIO PROGRESAS</b>\n\n🏅 Kitas statusas: <b>VIETINIS</b>\n\n"
             "▰▰▱▱▱▱▱▱▱▱ 20%"
         )
         buttons = rp.controls(7).inline_keyboard
@@ -204,3 +204,35 @@ async def test_postgres_concurrent_delivery_is_counted_once(postgres_contract):
         )
         data = await rp.profile_data(Service(settings, session), bot, "123")
         assert (data["messages"], data["days"], data["groups"]) == (1, 1, 1)
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+def test_moderator_status_is_bold_and_does_not_change_progression(lang):
+    with use_language(lang):
+        from app.i18n import t
+
+        data = dict(
+            user=SimpleNamespace(telegram_id=42, username="mod", display_name="Mod"),
+            messages=1,
+            days=1,
+            groups=1,
+            network_days=8,
+            moderator=True,
+        )
+        text = rp.profile_text(data)
+        assert f"🏷 01 · <b>{t('redsafe.moderator')}</b>" in text
+        assert f"<b>{t('redsafe.levels').split('|')[1]}</b>" in text
+        assert "20%" in text
+
+
+@pytest.mark.asyncio
+async def test_profile_moderator_uses_live_access_and_revocation(database, settings):
+    async with database() as session:
+        service = Service(settings, session)
+        bot = SimpleNamespace(get_chat_member=AsyncMock())
+        await service.access.change(900, "42", True, "a" * 32)
+        data = await rp.profile_data(service, bot, "42")
+        assert data["moderator"] is True
+        await service.access.change(900, "42", False, "b" * 32)
+        assert (await rp.profile_data(service, bot, "42"))["moderator"] is False
+        assert (await rp.profile_data(service, bot, "900"))["moderator"] is False

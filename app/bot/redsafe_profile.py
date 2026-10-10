@@ -142,8 +142,14 @@ async def profile_data(service: Any, bot: Any, target: str) -> dict[str, Any]:
             return False
 
     count = sum(await asyncio.gather(*(member(group) for group in groups)))
+    moderator = (
+        user.telegram_id is not None
+        and not service.access.is_owner(user.telegram_id)
+        and await service.access.is_admin(user.telegram_id)
+    )
     return {
         "user": user,
+        "moderator": moderator,
         "messages": row[0],
         "days": row[1],
         "groups": count,
@@ -157,12 +163,13 @@ def profile_text(data: dict[str, Any]) -> str:
     level, percent = progression(data["messages"], data["days"])
     levels = t("redsafe.levels").split("|")
     stats = t("redsafe.stats", **data)
+    status = t("redsafe.moderator") if data.get("moderator") else levels[level]
     return (
         f"{BRAND}\n\n🪪 <b>{t('redsafe.title')}</b>\n━━━━━━━━━━━━━━\n\n"
-        f"👤 {escape(name)}\n🏷 {level + 1:02d} · {levels[level]}\n"
+        f"👤 {escape(name)}\n🏷 {level + 1:02d} · <b>{status}</b>\n"
         f"🆔 ID: {user.telegram_id or 'UNKNOWN'}\n\n<blockquote>{stats}</blockquote>\n\n"
         f"━━━━━━━━━━━━━━\n◈ <b>{t('redsafe.progress')}</b>\n\n"
-        f"🏅 {t('redsafe.next')}: {levels[min(level + 1, 9)]}\n\n"
+        f"🏅 {t('redsafe.next')}: <b>{levels[min(level + 1, 9)]}</b>\n\n"
         f"{'▰' * (percent // 10)}{'▱' * (10 - percent // 10)} {percent}%"
     )
 

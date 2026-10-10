@@ -69,9 +69,11 @@ def test_result_identity_and_status_are_factual(locale, known, status):
         from app.bot.callbacks import Action
 
         buttons = kb.check_result(user.telegram_id).inline_keyboard
-        assert len(buttons) == 2 and all(len(row) == 1 for row in buttons)
+        assert len(buttons) == 3 and all(len(row) == 1 for row in buttons)
         assert buttons[0][0].text == t("button.check_profile")
-        assert buttons[1][0].text == t("button.check_home")
+        assert buttons[1][0].text == t("button.lookup_other")
+        assert Action.unpack(buttons[1][0].callback_data).name == "lookup"
+        assert buttons[2][0].text == t("button.check_home")
         assert Action.unpack(buttons[0][0].callback_data).value == ("42" if known else "unknown")
         if status == "scam":
             assert "−4" in result
@@ -90,7 +92,7 @@ def test_result_identity_and_status_are_factual(locale, known, status):
                 assert "2026-10-04" not in result  # no invented TOP confirmation date
             else:
                 assert t("p.lookup_trusted_manual") in result
-                assert "2026-10-04" in result
+                assert "2026-10-04" not in result
         if known:
             assert t("p.lookup_identity_unknown") not in result
             assert t("p.lookup_identity_known") in result
@@ -148,7 +150,7 @@ async def test_manual_trusted_date_comes_from_database_and_top_has_no_manual_dat
         top = await service.profile("43")
         assert top["trusted_source"] == "top" and top["trusted_updated_at"] is None
     await journey.send("/ask 42", chat=-100)
-    assert expected in journey.text()
+    assert expected not in journey.text()
     assert journey.transport.calls[-1].reply_markup is not None
     assert (
         journey.transport.calls[-1].reply_markup.inline_keyboard[-1][0].callback_data
@@ -195,14 +197,14 @@ def test_lithuanian_check_matches_requested_design_and_html():
         "🔎 <b>REDSAFE PATIKRA</b>\n\n"
         "👤 @owned1111\n🆔 ID: <code>6575329720</code>\n\n"
         "⭐ <b>Reputacijos statistika</b>\n\n"
-        "⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0\n\n"
+        "<blockquote><i>⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0</i></blockquote>\n\n"
         "🛡 <b>Saugumo statusas</b>\n\n☑ <b>SCAM ĮRAŠŲ NERASTA</b>\n\n"
         "<blockquote><i>Patvirtintų sukčiavimo įrašų duomenų bazėje nėra.</i></blockquote>\n\n"
         "🔐 <b>Tapatybės patvirtinimas</b>\n\n☑ <b>TELEGRAM ID SUSIETAS</b>\n\n"
         "<blockquote><i>Paskyra identifikuota pagal unikalų Telegram ID, ne vien vartotojo vardą.</i></blockquote>\n\n"
         "⚠️ <i>Patikros rezultatas</i> <b>negarantuoja vartotojo patikimumo.</b>"
     )
-    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 2
+    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 3
     parsed(result)
 
 
@@ -222,11 +224,12 @@ async def test_checked_profile_keeps_numeric_target_after_username_change(
     )
     assert [[button.text for button in row] for row in result.reply_markup.inline_keyboard] == [
         ["🪪 REDSAFE PROFILIS"],
+        ["ᴛɪᴋʀɪɴᴛɪ ᴋɪᴛᴀ"],
         ["‹ Pagrindinis meniu"],
     ]
     profile_callback = result.reply_markup.inline_keyboard[0][0].callback_data
     assert profile_callback == kb.action("profile", "42")
-    assert result.reply_markup.inline_keyboard[1][0].callback_data == kb.action("home", "receipt")
+    assert result.reply_markup.inline_keyboard[2][0].callback_data == kb.action("home", "receipt")
     async with database() as session:
         core = Service(settings, session)
         await core.observe(42, "changed_person", "Checked person")

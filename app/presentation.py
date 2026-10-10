@@ -231,19 +231,11 @@ def profile(data: dict[str, Any]) -> str:
     elif trusted:
         top = data.get("trusted_source") == "top"
         result += t("p.lookup_trusted_top" if top else "p.trusted_status")
-        result += "\n\n<blockquote><i>" + t(
-            "p.lookup_trusted_top_description"
-            if top
-            else "p.lookup_trusted_role"
-            if data.get("trusted_source") == "role"
-            else "p.lookup_trusted_manual"
+        result += (
+            "\n\n<blockquote><i>"
+            + t("p.lookup_trusted_top_description" if top else "p.lookup_trusted_manual")
+            + "</i></blockquote>"
         )
-        if data.get("role") in {"founder", "moderator"}:
-            result += "\n\n" + t("p.role", role=t("p.role_" + data["role"]))
-        result += "</i></blockquote>"
-        updated = data.get("trusted_updated_at")
-        if updated is not None and not top:
-            result += "\n\n" + t("p.lookup_trusted_date", date=f"{updated:%Y-%m-%d}")
     else:
         result += t("p.lookup_clear_status") + "\n\n" + t("p.no_scam")
     result += (
@@ -252,13 +244,6 @@ def profile(data: dict[str, Any]) -> str:
         + "\n\n"
         + t("p.lookup_identity_unknown" if user.telegram_id is None else "p.lookup_identity_known")
     )
-    lookup = data.get("identity_lookup")
-    if lookup is not None and lookup.code != "resolved":
-        result += (
-            "\n\n<blockquote><i>"
-            + identity_lookup_note(lookup, known=user.telegram_id is not None)
-            + "</i></blockquote>"
-        )
     return result + "\n\n" + t("p.lookup_warning")
 
 
