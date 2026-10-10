@@ -16,7 +16,7 @@ from app.bot.lookup_limits import AskLimiter
 from app.bot.navigation import error_navigation
 from app.bot.screens import flow_screen, panel_state, preserved_source, render, send_screen
 from app.bot.states import InputFlow
-from app.bot.validation import valid_target
+from app.bot.validation import message_content, valid_target
 from app.group_services import GroupService
 from app.i18n import use_language
 from app.models import AuditEvent
@@ -34,7 +34,7 @@ class ServiceMiddleware(BaseMiddleware):
     async def ask_target(self, event: TelegramObject, data: dict[str, Any]) -> str | None:
         if not isinstance(event, Message):
             return None
-        parts = (event.text or "").split(maxsplit=2)
+        parts = message_content(event).split(maxsplit=2)
         command = (parts[0] if parts else "").split("@", 1)
         if command[0] == "/ask":
             if len(command) == 2 and event.bot is not None:
@@ -88,13 +88,14 @@ class ServiceMiddleware(BaseMiddleware):
     ) -> Any:
         actor = getattr(event, "from_user", None)
         group_message = isinstance(event, Message) and event.chat.type in {"group", "supergroup"}
+        content = message_content(event) if isinstance(event, Message) else ""
         actionable = not group_message or (
             isinstance(event, Message)
             and bool(
-                event.text
+                content
                 and (
-                    event.text.startswith("/")
-                    or event.text.lower().split(maxsplit=1)[:1] in [["+rep"], ["-rep"]]
+                    content.startswith("/")
+                    or content.lower().split(maxsplit=1)[:1] in [["+rep"], ["-rep"]]
                 )
             )
         )
@@ -122,7 +123,7 @@ class ServiceMiddleware(BaseMiddleware):
                     groups = GroupService(self.settings, group_session)
                     if (
                         actor.id == self.settings.group_owner
-                        and (event.text or "").split("@", 1)[0].split(maxsplit=1)[0:1] == ["/start"]
+                        and content.split("@", 1)[0].split(maxsplit=1)[0:1] == ["/start"]
                         and event.bot is not None
                     ):
                         try:

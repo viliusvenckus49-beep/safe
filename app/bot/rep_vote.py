@@ -10,6 +10,7 @@ from app import presentation as p
 from app.bot import keyboards as kb
 from app.bot.screens import clear_flow, delete_panel, flow_screen
 from app.bot.states import RepVoteFlow
+from app.bot.validation import message_content
 from app.errors import DomainError
 from app.i18n import t
 from app.services import Service
@@ -50,7 +51,7 @@ def register_vote_handlers(router: Router):
         ):
             return
         try:
-            comment = service.validate_rep_comment(message.text)
+            comment = service.validate_rep_comment(message_content(message))
         except DomainError:
             if message.chat.type == "private":
                 await flow_screen(
