@@ -725,3 +725,42 @@ CATALOGS: dict[str, dict[str, str]] = {
         "p.receipt_scam_blocked": "⛔️ 𝗦𝗖𝗔𝗠 • 𝗕𝗟𝗢𝗖𝗞𝗘𝗗",
     },
 }
+
+
+# Public activity profile labels; dynamic user data is never styled or translated.
+for _lang, _values in {
+    "lt": {
+        "title": "REDSAFE PROFILIS",
+        "progress": "PROFILIO PROGRESAS",
+        "next": "Kitas statusas",
+        "levels": "NAUJOKAS|VIETINIS|NUOLATINIS NARYS|ĮSITVIRTINĘS|GERBIAMAS NARYS|PATYRĘS NARYS|VETERANAS|ELITINIS NARYS|AUTORITETAS|LEGENDA",
+        "stats": "📊 <b>Veiklos statistika</b>\n\n💬 Žinutės: {messages}\n🔥 Aktyvios dienos: {days}\n🌐 REDSAFE grupės: {groups}\n📅 REDSAFE tinkle: {network_days} d.",
+        "names_button": "👁️‍🗨️ Naudotojo vardai",
+        "home_button": "‹ Pagrindinis meniu",
+        "names_title": "NAUDOTOJO VARDAI",
+        "names_empty": "Naudotojo vardų istorijos dar nėra.",
+    },
+    "en": {
+        "title": "REDSAFE PROFILE",
+        "progress": "PROFILE PROGRESS",
+        "next": "Next status",
+        "levels": "NEWCOMER|LOCAL|REGULAR MEMBER|ESTABLISHED|RESPECTED MEMBER|EXPERIENCED MEMBER|VETERAN|ELITE MEMBER|AUTHORITY|LEGEND",
+        "stats": "📊 <b>Activity statistics</b>\n\n💬 Messages: {messages}\n🔥 Active days: {days}\n🌐 REDSAFE groups: {groups}\n📅 In REDSAFE network: {network_days} d.",
+        "names_button": "👁️‍🗨️ Usernames",
+        "home_button": "‹ Main menu",
+        "names_title": "USERNAME HISTORY",
+        "names_empty": "No username history has been observed yet.",
+    },
+    "ru": {
+        "title": "ПРОФИЛЬ REDSAFE",
+        "progress": "ПРОГРЕСС ПРОФИЛЯ",
+        "next": "Следующий статус",
+        "levels": "НОВИЧОК|МЕСТНЫЙ|ПОСТОЯННЫЙ УЧАСТНИК|ОСВОИВШИЙСЯ|УВАЖАЕМЫЙ УЧАСТНИК|ОПЫТНЫЙ УЧАСТНИК|ВЕТЕРАН|ЭЛИТНЫЙ УЧАСТНИК|АВТОРИТЕТ|ЛЕГЕНДА",
+        "stats": "📊 <b>Статистика активности</b>\n\n💬 Сообщения: {messages}\n🔥 Активные дни: {days}\n🌐 Группы REDSAFE: {groups}\n📅 В сети REDSAFE: {network_days} д.",
+        "names_button": "👁️‍🗨️ Имена пользователя",
+        "home_button": "‹ Главное меню",
+        "names_title": "ИСТОРИЯ ИМЁН ПОЛЬЗОВАТЕЛЯ",
+        "names_empty": "История имён пользователя пока не зафиксирована.",
+    },
+}.items():
+    CATALOGS[_lang].update({f"redsafe.{key}": value for key, value in _values.items()})

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deploy an uploaded, tested release to the existing VPS without replacing data services."""
 
+import hashlib
 import importlib.util
 import os
 import re
@@ -15,6 +16,20 @@ def migration_snapshot(root):
         for path in (root / "migrations" / "versions").glob("*.py")
         if path.name != "__init__.py"
     }
+
+
+def compatible_migrations(candidate, existing):
+    """Allow only the reviewed additive activity ledger; never rewrite existing migrations."""
+    if any(candidate.get(name) != content for name, content in existing.items()):
+        return False
+    reviewed = {
+        "0010_redsafe_profile.py": "47431ef8207005336c163c73c611ecadf70dafdeb03597f7aedc76df5e2ae214"
+    }
+    added = candidate.keys() - existing.keys()
+    return all(
+        name in reviewed and hashlib.sha256(candidate[name]).hexdigest() == reviewed[name]
+        for name in added
+    )
 
 
 def switch_release(candidate, original, image, old_image):
@@ -56,9 +71,9 @@ def main():
     )
     if not old_root.is_absolute() or not (old_root / "docker-compose.production.yml").is_file():
         raise module.OperationError("Existing production deployment could not be located")
-    # This workflow intentionally supports code-only updates. Schema releases need a separate review.
-    if migration_snapshot(root) != migration_snapshot(old_root):
-        raise module.OperationError("Schema differs: code-only deployment refused")
+    # Only this reviewed additive schema release is allowed through the verified-backup deploy.
+    if not compatible_migrations(migration_snapshot(root), migration_snapshot(old_root)):
+        raise module.OperationError("Unreviewed or changed schema: deployment refused")
     original_args = module.parser().parse_args(["--root", str(old_root), "deploy"])
     original = module.Operations(original_args)
     version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
