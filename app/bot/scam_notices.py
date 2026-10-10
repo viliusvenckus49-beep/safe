@@ -13,8 +13,25 @@ from app.services import Service
 
 
 async def registered_scam_text(
-    bot: Bot | None, core: Service, sessions: Any, record: ScamRecord
+    bot: Bot | None,
+    core: Service,
+    sessions: Any,
+    record: ScamRecord,
+    *,
+    announce: bool = False,
+    origin_chat_id: int | None = None,
 ) -> str:
+    if announce:
+        from app.bot.scam_broadcasts import queue_scam_announcements
+
+        try:
+            await queue_scam_announcements(core.settings, sessions, record.id, origin_chat_id)
+        except Exception as error:
+            structlog.get_logger().warning(
+                "scam_group_notice_queue_failed",
+                scam_record_id=record.id,
+                exception_type=type(error).__name__,
+            )
     try:
         if bot is None:
             async with sessions() as session:

@@ -418,7 +418,14 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             identity = f"u:{user.id}"
             if operation == "add_sc":
                 record = await service.add_scam(actor_id(message), identity, reason)
-                receipt = await registered_scam_text(message.bot, service, session_factory, record)
+                receipt = await registered_scam_text(
+                    message.bot,
+                    service,
+                    session_factory,
+                    record,
+                    announce=True,
+                    origin_chat_id=message.chat.id if message.chat.type != "private" else None,
+                )
             else:
                 removed = await service.remove_scam(actor_id(message), identity, reason)
                 if not removed:
@@ -897,7 +904,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await flow_screen(
                 message,
                 state,
-                await registered_scam_text(message.bot, service, session_factory, record),
+                await registered_scam_text(
+                    message.bot, service, session_factory, record, announce=True
+                ),
                 reply_markup=scam_controls(record, persistent=True),
                 persistent=True,
             )
@@ -930,7 +939,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         data = await state.get_data()
         if data.get("operation") == "add_sc":
             record = await service.add_scam(actor_id(message), data["target_identity"], reason)
-            receipt = await registered_scam_text(message.bot, service, session_factory, record)
+            receipt = await registered_scam_text(
+                message.bot, service, session_factory, record, announce=True
+            )
             key = "added"
         else:
             removed = await service.remove_scam(actor_id(message), data["target_identity"], reason)
