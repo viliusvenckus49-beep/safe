@@ -242,6 +242,7 @@ async def test_rep_unknown_username_keyboard_self_and_cooldown(journey, database
     markup = journey.transport.calls[-1].reply_markup
     assert [Action.unpack(row[0].callback_data).name for row in markup.inline_keyboard] == [
         "profile",
+        "lookup",
         "home",
     ]
     # Existing REP callback IDs still work on previously sent keyboards.

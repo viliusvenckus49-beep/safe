@@ -371,7 +371,11 @@ async def test_legacy_rep_buttons_require_five_character_comment_and_preserve_va
 
     # New checks have two buttons; existing REP callback identifiers stay compatible.
     result = crimson.transport.calls[-1].reply_markup.inline_keyboard
-    assert [Action.unpack(row[0].callback_data).name for row in result] == ["profile", "home"]
+    assert [Action.unpack(row[0].callback_data).name for row in result] == [
+        "profile",
+        "lookup",
+        "home",
+    ]
     buttons = kb.result(str(target)).inline_keyboard
     button = next(button for row in buttons for button in row if button.text == label)
     callback = Action.unpack(button.callback_data)

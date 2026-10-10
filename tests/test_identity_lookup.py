@@ -303,5 +303,5 @@ async def test_failed_live_check_reports_cause_and_preserves_known_numeric_ident
         assert profile["user"].telegram_id == 22 and profile["scam"].id == record.id
         assert profile["identity_lookup"].code == "invalid_username"
         text = p.profile(profile)
-        assert t("diagnostic.identity_invalid_username") in text
-        assert t("diagnostic.identity_saved") in text
+        assert t("diagnostic.identity_invalid_username") not in text
+        assert t("diagnostic.identity_saved") not in text

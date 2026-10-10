@@ -108,7 +108,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "p.user": "Vartotojas",
         "p.profile_title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n🔎 <b>REDSAFE PATIKRA</b>",
         "p.alert_title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◈ <b>REZULTATAS</b>",
-        "p.profile_card": "{title}\n\n{user}\n\n⭐ <b>Reputacijos statistika</b>\n\n⭐ Bendra reputacija: {score}\n👍 Teigiami įvertinimai: {positive}\n👎 Neigiami įvertinimai: {negative}",
+        "p.profile_card": "{title}\n\n{user}\n\n⭐ <b>Reputacijos statistika</b>\n\n<blockquote><i>⭐ Bendra reputacija: {score}\n👍 Teigiami įvertinimai: {positive}\n👎 Neigiami įvertinimai: {negative}</i></blockquote>",
         "p.scam_admin_confirmation": "✅ <b>Patvirtinta administracijos</b>",
         "p.scam_details_admin": "\n\n⛔ Statusas: <b>SCAM</b>\n{confirmation}\n📅 Įrašyta: {date}",
         "p.scam_details": "\n\n⛔ Statusas: <b>SCAM</b>\n\n<b>Priežastis</b>\n{reason}\n\n📅 Įrašyta: {date}",
@@ -356,7 +356,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "p.user": "User",
         "p.profile_title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n🔎 <b>REDSAFE CHECK</b>",
         "p.alert_title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◈ <b>RESULT</b>",
-        "p.profile_card": "{title}\n\n{user}\n\n⭐ <b>Reputation statistics</b>\n\n⭐ Total reputation: {score}\n👍 Positive ratings: {positive}\n👎 Negative ratings: {negative}",
+        "p.profile_card": "{title}\n\n{user}\n\n⭐ <b>Reputation statistics</b>\n\n<blockquote><i>⭐ Total reputation: {score}\n👍 Positive ratings: {positive}\n👎 Negative ratings: {negative}</i></blockquote>",
         "p.scam_admin_confirmation": "✅ <b>Confirmed by the administration</b>",
         "p.scam_details_admin": "\n\n⛔ Status: <b>SCAM</b>\n{confirmation}\n📅 Recorded: {date}",
         "p.scam_details": "\n\n⛔ Status: <b>SCAM</b>\n\n<b>Reason</b>\n{reason}\n\n📅 Recorded: {date}",
@@ -604,7 +604,7 @@ CATALOGS: dict[str, dict[str, str]] = {
         "p.user": "Пользователь",
         "p.profile_title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n🔎 <b>ПРОВЕРКА REDSAFE</b>",
         "p.alert_title": "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n◈ <b>РЕЗУЛЬТАТ</b>",
-        "p.profile_card": "{title}\n\n{user}\n\n⭐ <b>Статистика репутации</b>\n\n⭐ Общая репутация: {score}\n👍 Положительные оценки: {positive}\n👎 Отрицательные оценки: {negative}",
+        "p.profile_card": "{title}\n\n{user}\n\n⭐ <b>Статистика репутации</b>\n\n<blockquote><i>⭐ Общая репутация: {score}\n👍 Положительные оценки: {positive}\n👎 Отрицательные оценки: {negative}</i></blockquote>",
         "p.scam_admin_confirmation": "✅ <b>Подтверждено администрацией</b>",
         "p.scam_details_admin": "\n\n⛔ Статус: <b>SCAM</b>\n{confirmation}\n📅 Добавлено: {date}",
         "p.scam_details": "\n\n⛔ Статус: <b>SCAM</b>\n\n<b>Причина</b>\n{reason}\n\n📅 Добавлено: {date}",
@@ -752,6 +752,7 @@ CATALOGS: dict[str, dict[str, str]] = {
 for _lang, _values in {
     "lt": {
         "title": "REDSAFE PROFILIS",
+        "moderator": "MODERATORIUS",
         "progress": "PROFILIO PROGRESAS",
         "next": "Kitas statusas",
         "levels": "NAUJOKAS|VIETINIS|NUOLATINIS NARYS|ĮSITVIRTINĘS|GERBIAMAS NARYS|PATYRĘS NARYS|VETERANAS|ELITINIS NARYS|AUTORITETAS|LEGENDA",
@@ -763,6 +764,7 @@ for _lang, _values in {
     },
     "en": {
         "title": "REDSAFE PROFILE",
+        "moderator": "MODERATOR",
         "progress": "PROFILE PROGRESS",
         "next": "Next status",
         "levels": "NEWCOMER|LOCAL|REGULAR MEMBER|ESTABLISHED|RESPECTED MEMBER|EXPERIENCED MEMBER|VETERAN|ELITE MEMBER|AUTHORITY|LEGEND",
@@ -774,6 +776,7 @@ for _lang, _values in {
     },
     "ru": {
         "title": "ПРОФИЛЬ REDSAFE",
+        "moderator": "МОДЕРАТОР",
         "progress": "ПРОГРЕСС ПРОФИЛЯ",
         "next": "Следующий статус",
         "levels": "НОВИЧОК|МЕСТНЫЙ|ПОСТОЯННЫЙ УЧАСТНИК|ОСВОИВШИЙСЯ|УВАЖАЕМЫЙ УЧАСТНИК|ОПЫТНЫЙ УЧАСТНИК|ВЕТЕРАН|ЭЛИТНЫЙ УЧАСТНИК|АВТОРИТЕТ|ЛЕГЕНДА",

@@ -21,8 +21,9 @@ async def test_owner_and_dynamic_moderator_roles_and_revocation(database, settin
         with use_language(lang):
             for data in (owner, moderator):
                 card = p.profile(data)
-                assert t("p.role_" + data["role"]) in card
-                assert t("p.lookup_trusted_role") in card
+                assert t("p.role_" + data["role"]) not in card
+                assert t("p.lookup_trusted_role") not in card
+                assert t("p.lookup_trusted_manual") in card
                 assert t("p.warning") not in card
         await service.observe(42, "changed", "Moderator")
         assert (await service.profile("@changed"))["role"] == "moderator"
