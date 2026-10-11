@@ -1,0 +1,35 @@
+name: SAFECheck read target REP ledger
+on:
+  push:
+    branches: [group-members-import-20261009]
+    paths: ['.github/workflows/group-members-import.yml']
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Read only the requested target reputation ledger
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: "ssh -i \"$HOME/.ssh/safecheck_deploy\" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \"$REMOTE_USER@$HOST\" 'sudo -n python3 -' <<'PY'\nimport subprocess\ncode = \"import asyncio,json,runpy\\nrunpy.run_path('/run/configs/secret_entrypoint.py')['load_secrets']()\\nfrom sqlalchemy import select,func,or_,text\\nfrom app.config import Settings\\nfrom app.db import create_database\\nfrom app.models import User,UsernameHistory,ReputationRequest,ReputationEvent,ReputationAdjustment\\nfrom app.repositories import Repository\\nasync def main():\\n engine,sessions=create_database(Settings().database_url)\\n result={'target':'turguslyros3','users':[]}\\n try:\\n  async with sessions() as session:\\n   await session.execute(text('SET TRANSACTION READ ONLY'))\\n   history=select(UsernameHistory.user_id).where(func.lower(UsernameHistory.username)=='turguslyros3')\\n   users=list(await session.scalars(select(User).where(or_(func.lower(User.username)=='turguslyros3',User.id.in_(history)))))\\n   for user in users:\\n    item={'internal_id':user.id,'telegram_id':user.telegram_id,'username':user.username,'stats':await Repository(session).rep_stats(user.id),'requests':[],'legacy':[],'adjustments':[]}\\n    rows=list(await session.scalars(select(ReputationRequest).where(ReputationRequest.receiver_user_id==user.id).order_by(ReputationRequest.created_at.desc()).limit(50)))\\n    for row in rows:\\n     giver=await session.get(User,row.giver_user_id)\\n     item['requests'].append({'reference':row.reference,'value':row.value,'status':row.status,'giver_id':giver.telegram_id if giver else None,'chat_id':row.chat_id,'created_at':str(row.created_at),'moderator_id':row.moderator_id,'moderated_at':str(row.moderated_at),'comment_length':len(row.comment or '')})\\n    for row in await session.scalars(select(ReputationEvent).where(ReputationEvent.receiver_user_id==user.id)):\\n     item['legacy'].append({'value':row.value,'giver_user_id':row.giver_user_id,'created_at':str(row.created_at)})\\n    for row in await session.scalars(select(ReputationAdjustment).where(ReputationAdjustment.target_id==user.id)):\\n     item['adjustments'].append({'operation':row.operation,'positive_delta':row.positive_delta,'negative_delta':row.negative_delta,'created_at':str(row.created_at)})\\n    result['users'].append(item)\\n finally:await engine.dispose()\\n print('TARGET_REP_READ='+json.dumps(result))\\ntry:asyncio.run(main())\\nexcept Exception as error:print('TARGET_REP_ERROR='+type(error).__name__);raise SystemExit(1) from None\\n\"\nresult=subprocess.run(['docker','exec','safecheck-bot-1','python','-c',code],capture_output=True,text=True,timeout=90)\nfor line in result.stdout.splitlines():\n if line.startswith(('TARGET_REP_READ=','TARGET_REP_ERROR=')):print(line,flush=True)\nif result.returncode:raise SystemExit(1)\nPY\n"
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
