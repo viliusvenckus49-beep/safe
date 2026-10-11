@@ -28,7 +28,11 @@ class ParsedText(HTMLParser):
         assert self.stack.pop() == tag
 
     def handle_data(self, data):
-        if "blockquote" in self.stack and data.strip():
+        if (
+            "blockquote" in self.stack
+            and data.strip()
+            and not any(symbol in data for symbol in ("⭐", "👍", "👎"))
+        ):
             assert "i" in self.stack
         self.text += data
 
@@ -196,15 +200,16 @@ def test_lithuanian_check_matches_requested_design_and_html():
         "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™\n\n"
         "🔎 <b>REDSAFE PATIKRA</b>\n\n"
         "👤 @owned1111\n🆔 ID: <code>6575329720</code>\n\n"
-        "⭐ <b>Reputacijos statistika</b>\n\n"
-        "<blockquote><i>⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0</i></blockquote>\n\n"
-        "🛡 <b>Saugumo statusas</b>\n\n☑ <b>SCAM ĮRAŠŲ NERASTA</b>\n\n"
+        "⭐ <b>Reputacijos statistika</b>\n"
+        "<blockquote>⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0</blockquote>\n\n"
+        "🛡 <b>Saugumo statusas</b>\n\n☑ <b>SCAM ĮRAŠŲ NERASTA</b>\n"
         "<blockquote><i>Patvirtintų sukčiavimo įrašų duomenų bazėje nėra.</i></blockquote>\n\n"
-        "🔐 <b>Tapatybės patvirtinimas</b>\n\n☑ <b>TELEGRAM ID SUSIETAS</b>\n\n"
+        "🔐 <b>Tapatybės patvirtinimas</b>\n\n☑ <b>TELEGRAM ID SUSIETAS</b>\n"
         "<blockquote><i>Paskyra identifikuota pagal unikalų Telegram ID, ne vien vartotojo vardą.</i></blockquote>\n\n"
         "⚠️ <i>Patikros rezultatas</i> <b>negarantuoja vartotojo patikimumo.</b>"
     )
-    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 3
+    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 2
+    assert result.count("<blockquote>") == 3
     parsed(result)
 
 
@@ -268,3 +273,35 @@ async def test_unknown_or_invalid_profile_target_never_opens_another_user(journe
     )
     assert notice.show_alert is True
     assert notice.text == t("p.lookup_profile_unavailable")
+
+
+@pytest.mark.parametrize("locale", ["lt", "en", "ru"])
+@pytest.mark.parametrize("source", [None, "manual", "role"])
+def test_reference_spacing_and_quote_boundaries(locale, source):
+    with use_language(locale):
+        data = dict(
+            user=SimpleNamespace(username="owned11111", telegram_id=6961937011),
+            scam=None,
+            score=0,
+            positive=0,
+            negative=0,
+            trusted=source is not None,
+            trusted_source=source,
+            role="moderator" if source == "role" else None,
+            trusted_updated_at=datetime(2026, 10, 4, tzinfo=UTC),
+            identity_lookup=SimpleNamespace(code="not_found"),
+        )
+        card = p.profile(data)
+        assert card.count("<blockquote>") == card.count("</blockquote>") == 3
+        reputation = card.split("<blockquote>", 1)[1].split("</blockquote>", 1)[0]
+        assert len(reputation.splitlines()) == 3 and "<i>" not in reputation
+        assert "\n<blockquote>⭐" in card and "\n\n<blockquote>⭐" not in card
+        status = t("p.trusted_status" if source else "p.lookup_clear_status")
+        assert status + "\n<blockquote><i>" in card
+        assert t("p.lookup_identity_heading") + "\n\n" in card
+        assert "</b>\n<blockquote><i>" in t("p.lookup_identity_known")
+        assert t("p.lookup_trusted_role") not in card
+        assert t("p.role_moderator") not in card
+        assert "2026-10-04" not in card
+        assert card.endswith(t("p.lookup_warning"))
+        parsed(card)

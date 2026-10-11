@@ -205,7 +205,7 @@ def profile(data: dict[str, Any]) -> str:
         + "\n\n"
     )
     if scam:
-        result += t("p.lookup_scam_status") + "\n\n" + t("p.lookup_scam_description")
+        result += t("p.lookup_scam_status") + "\n" + t("p.lookup_scam_description")
         if getattr(scam, "report_id", None) is None:
             result += "\n\n<blockquote><i>" + t("p.scam_admin_confirmation") + "</i></blockquote>"
         elif scam.reason:
@@ -232,12 +232,12 @@ def profile(data: dict[str, Any]) -> str:
         top = data.get("trusted_source") == "top"
         result += t("p.lookup_trusted_top" if top else "p.trusted_status")
         result += (
-            "\n\n<blockquote><i>"
+            "\n<blockquote><i>"
             + t("p.lookup_trusted_top_description" if top else "p.lookup_trusted_manual")
             + "</i></blockquote>"
         )
     else:
-        result += t("p.lookup_clear_status") + "\n\n" + t("p.no_scam")
+        result += t("p.lookup_clear_status") + "\n" + t("p.no_scam")
     result += (
         "\n\n"
         + t("p.lookup_identity_heading")
