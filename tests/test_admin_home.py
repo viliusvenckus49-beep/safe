@@ -214,8 +214,14 @@ async def test_private_result_back_returns_to_authorized_home(journey, database,
     await prepare(database, settings, MODERATOR, "lt")
     await journey.send(command, actor=MODERATOR)
     back = kb.action("home", "receipt" if command.startswith("/ask") else "")
-    assert back in values(last_screen(journey).reply_markup)
-    await journey.click(back, actor=MODERATOR)
+    routes = values(last_screen(journey).reply_markup)
+    if command.startswith(("/ask", "/profile")):
+        assert back not in routes
+        assert kb.action("lookup") in routes
+        await journey.send("/start", actor=MODERATOR)
+    else:
+        assert back in routes
+        await journey.click(back, actor=MODERATOR)
     assert kb.action("admin") in values(last_screen(journey).reply_markup)
 
 
