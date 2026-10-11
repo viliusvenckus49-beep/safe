@@ -45,8 +45,8 @@ def test_exact_design_escape_and_callbacks():
         assert text == (
             rp.BRAND + "\n\n🪪 <b>REDSAFE PROFILIS</b>\n━━━━━━━━━━━━━━\n\n"
             "👤 @juodojimaterija\n🏷 01 · <b>NAUJOKAS</b>\n🆔 ID: 28563234\n\n"
-            "<blockquote>📊 <b>Veiklos statistika</b>\n\n💬 Žinutės: 1\n🔥 Aktyvios dienos: 1\n"
-            "🌐 REDSAFE grupės: 1\n📅 REDSAFE tinkle: 8 d.</blockquote>\n\n"
+            "<blockquote><i>📊 <b>Veiklos statistika</b>\n\n💬 Žinutės: 1\n🔥 Aktyvios dienos: 1\n"
+            "🌐 REDSAFE grupės: 1\n📅 REDSAFE tinkle: 8 d.</i></blockquote>\n\n"
             "━━━━━━━━━━━━━━\n◈ <b>PROFILIO PROGRESAS</b>\n\n🏅 Kitas statusas: <b>VIETINIS</b>\n\n"
             "▰▰▱▱▱▱▱▱▱▱ 20%"
         )

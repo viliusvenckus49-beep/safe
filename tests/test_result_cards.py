@@ -28,11 +28,7 @@ class ParsedText(HTMLParser):
         assert self.stack.pop() == tag
 
     def handle_data(self, data):
-        if (
-            "blockquote" in self.stack
-            and data.strip()
-            and not any(symbol in data for symbol in ("⭐", "👍", "👎"))
-        ):
+        if "blockquote" in self.stack and data.strip():
             assert "i" in self.stack
         self.text += data
 
@@ -201,14 +197,14 @@ def test_lithuanian_check_matches_requested_design_and_html():
         "🔎 <b>REDSAFE PATIKRA</b>\n\n"
         "👤 @owned1111\n🆔 ID: <code>6575329720</code>\n\n"
         "⭐ <b>Reputacijos statistika</b>\n"
-        "<blockquote>⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0</blockquote>\n\n"
+        "<blockquote><i>⭐ Bendra reputacija: +0\n👍 Teigiami įvertinimai: 0\n👎 Neigiami įvertinimai: 0</i></blockquote>\n\n"
         "🛡 <b>Saugumo statusas</b>\n\n☑ <b>SCAM ĮRAŠŲ NERASTA</b>\n"
         "<blockquote><i>Patvirtintų sukčiavimo įrašų duomenų bazėje nėra.</i></blockquote>\n\n"
         "🔐 <b>Tapatybės patvirtinimas</b>\n\n☑ <b>TELEGRAM ID SUSIETAS</b>\n"
         "<blockquote><i>Paskyra identifikuota pagal unikalų Telegram ID, ne vien vartotojo vardą.</i></blockquote>\n\n"
         "⚠️ <i>Patikros rezultatas</i> <b>negarantuoja vartotojo patikimumo.</b>"
     )
-    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 2
+    assert result.count("<blockquote><i>") == result.count("</i></blockquote>") == 3
     assert result.count("<blockquote>") == 3
     parsed(result)
 
@@ -294,8 +290,12 @@ def test_reference_spacing_and_quote_boundaries(locale, source):
         card = p.profile(data)
         assert card.count("<blockquote>") == card.count("</blockquote>") == 3
         reputation = card.split("<blockquote>", 1)[1].split("</blockquote>", 1)[0]
-        assert len(reputation.splitlines()) == 3 and "<i>" not in reputation
-        assert "\n<blockquote>⭐" in card and "\n\n<blockquote>⭐" not in card
+        assert (
+            len(reputation.splitlines()) == 3
+            and reputation.startswith("<i>")
+            and reputation.endswith("</i>")
+        )
+        assert "\n<blockquote><i>⭐" in card and "\n\n<blockquote><i>⭐" not in card
         status = t("p.trusted_status" if source else "p.lookup_clear_status")
         assert status + "\n<blockquote><i>" in card
         assert t("p.lookup_identity_heading") + "\n\n" in card

@@ -167,7 +167,7 @@ def profile_text(data: dict[str, Any]) -> str:
     return (
         f"{BRAND}\n\n🪪 <b>{t('redsafe.title')}</b>\n━━━━━━━━━━━━━━\n\n"
         f"👤 {escape(name)}\n🏷 {level + 1:02d} · <b>{status}</b>\n"
-        f"🆔 ID: {user.telegram_id or 'UNKNOWN'}\n\n<blockquote>{stats}</blockquote>\n\n"
+        f"🆔 ID: {user.telegram_id or 'UNKNOWN'}\n\n<blockquote><i>{stats}</i></blockquote>\n\n"
         f"━━━━━━━━━━━━━━\n◈ <b>{t('redsafe.progress')}</b>\n\n"
         f"🏅 {t('redsafe.next')}: <b>{levels[min(level + 1, 9)]}</b>\n\n"
         f"{'▰' * (percent // 10)}{'▱' * (10 - percent // 10)} {percent}%"
