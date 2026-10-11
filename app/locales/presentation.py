@@ -752,6 +752,8 @@ CATALOGS: dict[str, dict[str, str]] = {
 for _lang, _values in {
     "lt": {
         "title": "REDSAFE PROFILIS",
+        "profile_button": "‹ REDSAFE profilis",
+        "check_button": "‹ Reputacijos patikra",
         "moderator": "MODERATORIUS",
         "progress": "PROFILIO PROGRESAS",
         "next": "Kitas statusas",
@@ -764,6 +766,8 @@ for _lang, _values in {
     },
     "en": {
         "title": "REDSAFE PROFILE",
+        "profile_button": "‹ REDSAFE profile",
+        "check_button": "‹ Reputation check",
         "moderator": "MODERATOR",
         "progress": "PROFILE PROGRESS",
         "next": "Next status",
@@ -776,6 +780,8 @@ for _lang, _values in {
     },
     "ru": {
         "title": "ПРОФИЛЬ REDSAFE",
+        "profile_button": "‹ Профиль REDSAFE",
+        "check_button": "‹ Проверка репутации",
         "moderator": "МОДЕРАТОР",
         "progress": "ПРОГРЕСС ПРОФИЛЯ",
         "next": "Следующий статус",

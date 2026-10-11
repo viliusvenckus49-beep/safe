@@ -178,6 +178,21 @@ def controls(user_id: int):
     return kb.keyboard(
         [
             [(t("redsafe.names_button"), kb.action("redsafe_names", f"u:{user_id}"))],
+            [(t("redsafe.check_button"), kb.action("redsafe_check", f"u:{user_id}"))],
+        ]
+    )
+
+
+def names_controls(user: Any):
+    return kb.keyboard(
+        [
+            [
+                (
+                    t("redsafe.profile_button"),
+                    kb.action("profile", str(user.telegram_id) if user.telegram_id else "unknown"),
+                )
+            ],
+            [(t("redsafe.check_button"), kb.action("redsafe_check", f"u:{user.id}"))],
         ]
     )
 

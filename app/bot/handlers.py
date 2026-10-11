@@ -518,9 +518,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 for button in row
             )
         )
-        receipt = (check_source and name != "profile") or bool(
+        receipt = (check_source and name not in {"profile", "redsafe_check"}) or bool(
             message.reply_markup
-            and name != "profile"
+            and name not in {"profile", "redsafe_check"}
             and any(
                 button.callback_data == kb.action("home", "receipt")
                 for row in message.reply_markup.inline_keyboard
@@ -590,12 +590,19 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await clear_flow(state)
             data = await rp.profile_data(service, message.bot, value or str(actor))
             await render(message, rp.profile_text(data), reply_markup=rp.controls(data["user"].id))
+        elif name == "redsafe_check":
+            await clear_flow(state)
+            data = await service.profile(value)
+            await render(
+                message, p.profile(data), reply_markup=kb.check_result(data["user"].telegram_id)
+            )
         elif name == "redsafe_names":
             await clear_flow(state)
+            user = await service.resolve(value)
             await render(
                 message,
                 await rp.names_text(service, value),
-                reply_markup=kb.keyboard([[(t("redsafe.home_button"), kb.action("home"))]]),
+                reply_markup=rp.names_controls(user),
             )
         elif name == "top":
             await clear_flow(state)

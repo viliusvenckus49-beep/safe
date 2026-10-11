@@ -51,8 +51,10 @@ def test_exact_design_escape_and_callbacks():
             "▰▰▱▱▱▱▱▱▱▱ 20%"
         )
         buttons = rp.controls(7).inline_keyboard
-        assert [row[0].text for row in buttons] == ["👁️‍🗨️ Naudotojo vardai"]
+        assert [row[0].text for row in buttons] == ["👁️‍🗨️ Naudotojo vardai", "‹ Reputacijos patikra"]
         assert Action.unpack(buttons[0][0].callback_data).value == "u:7"
+        assert Action.unpack(buttons[1][0].callback_data).name == "redsafe_check"
+        assert Action.unpack(buttons[1][0].callback_data).value == "u:7"
         user.username = None
         user.display_name = "<script>&"
         assert "&lt;script&gt;&amp;" in rp.profile_text(
@@ -75,7 +77,7 @@ def test_localized_profile(lang):
         assert text.count("<blockquote>") == text.count("</blockquote>") == 1
         assert "▰▰▰▰▰▰▰▰▰▰ 100%" in text
         assert "redsafe." not in text
-        assert len(rp.controls(1).inline_keyboard) == 1
+        assert len(rp.controls(1).inline_keyboard) == 2
 
 
 @pytest.mark.asyncio
@@ -152,7 +154,7 @@ journey = telegram_journey
 
 
 @pytest.mark.asyncio
-async def test_info_and_history_routes_and_existing_home(journey):
+async def test_info_and_history_routes_and_existing_profile(journey):
     await journey.send("/info 42")
     screen = next(
         call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
@@ -165,7 +167,7 @@ async def test_info_and_history_routes_and_existing_home(journey):
     )
     assert "Naudotojo vardų istorijos dar nėra." in screen.text
     await journey.click(screen.reply_markup.inline_keyboard[0][0].callback_data)
-    assert "Pasirink veiksmą" in journey.text()
+    assert "🆔 ID: 42" in journey.text()
 
 
 @pytest.mark.asyncio

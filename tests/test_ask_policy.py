@@ -307,4 +307,58 @@ async def test_check_profile_replaces_source_but_check_another_keeps_history(jou
     assert "🆔 ID: 43" in profile.text
     assert [
         Action.unpack(row[0].callback_data).name for row in profile.reply_markup.inline_keyboard
-    ] == ["redsafe_names"]
+    ] == ["redsafe_names", "redsafe_check"]
+
+
+@pytest.mark.parametrize("chat", [None, -100])
+async def test_names_history_returns_to_same_profile_or_reputation_and_retires_panel(
+    journey, clock, chat
+):
+    await journey.send("/ask 42", chat=chat)
+    check = sent(journey)[-1]
+    await click_result(
+        journey, check, check[1].reply_markup.inline_keyboard[0][0].callback_data, chat=chat
+    )
+    profile = sent(journey)[-1]
+    await click_result(
+        journey, profile, profile[1].reply_markup.inline_keyboard[0][0].callback_data, chat=chat
+    )
+    history = sent(journey)[-1]
+    buttons = history[1].reply_markup.inline_keyboard
+    assert [Action.unpack(row[0].callback_data).name for row in buttons] == [
+        "profile",
+        "redsafe_check",
+    ]
+    assert Action.unpack(buttons[0][0].callback_data).value == "42"
+    await click_result(journey, history, buttons[0][0].callback_data, chat=chat)
+    restored = sent(journey)[-1]
+    assert "🆔 ID: 42" in restored[1].text
+    assert history[0] in [call.message_id for call in journey.transport.deletions]
+    await click_result(
+        journey, restored, restored[1].reply_markup.inline_keyboard[1][0].callback_data, chat=chat
+    )
+    restored_check = sent(journey)[-1]
+    assert "<code>42</code>" in restored_check[1].text
+    assert restored[0] in [call.message_id for call in journey.transport.deletions]
+    await click_result(
+        journey,
+        restored_check,
+        restored_check[1].reply_markup.inline_keyboard[0][0].callback_data,
+        chat=chat,
+    )
+    next_profile = sent(journey)[-1]
+    await click_result(
+        journey,
+        next_profile,
+        next_profile[1].reply_markup.inline_keyboard[0][0].callback_data,
+        chat=chat,
+    )
+    next_history = sent(journey)[-1]
+    await click_result(
+        journey,
+        next_history,
+        next_history[1].reply_markup.inline_keyboard[1][0].callback_data,
+        chat=chat,
+    )
+    assert "<code>42</code>" in sent(journey)[-1][1].text
+    assert next_history[0] in [call.message_id for call in journey.transport.deletions]
