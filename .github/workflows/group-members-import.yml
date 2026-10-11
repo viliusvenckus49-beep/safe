@@ -1,0 +1,35 @@
+name: SAFECheck read current TOP
+on:
+  push:
+    branches: [group-members-import-20261009]
+    paths: ['.github/workflows/group-members-import.yml']
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: Read current TOP and target eligibility
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: "ssh -i \"$HOME/.ssh/safecheck_deploy\" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \"$REMOTE_USER@$HOST\" 'sudo -n python3 -' <<'PY'\nimport subprocess\ncode = \"import asyncio,json,runpy\\nrunpy.run_path('/run/configs/secret_entrypoint.py')['load_secrets']()\\nfrom sqlalchemy import select,func,text\\nfrom app.config import Settings\\nfrom app.db import create_database\\nfrom app.models import User,TrustedDesignation,TopVisibility,ScamRecord\\nfrom app.repositories import Repository\\nfrom app.admin_services import AdminService\\nasync def main():\\n settings=Settings()\\n engine,sessions=create_database(settings.database_url)\\n result={'target':'turguslyros3'}\\n try:\\n  async with sessions() as session:\\n   await session.execute(text('SET TRANSACTION READ ONLY'))\\n   repo=Repository(session)\\n   rows=await repo.leaderboard_entries(owner_id=settings.group_owner,admin_ids=settings.admins)\\n   result['top']=[{'id':r['user'].telegram_id,'username':r['user'].username,'score':r['score']} for r in rows]\\n   user=await session.scalar(select(User).where(func.lower(User.username)=='turguslyros3'))\\n   if user:\\n    visibility=await session.get(TopVisibility,user.id)\\n    trusted=await session.get(TrustedDesignation,user.id)\\n    result['user']={'id':user.telegram_id,'stats':await repo.rep_stats(user.id),'top_visibility':visibility.visible if visibility else None,'manual_trusted':bool(trusted and trusted.active),'active_role':await AdminService(settings,session).is_admin(user.telegram_id) if user.telegram_id else False,'active_scam':await repo.has_scam_identity(user)}\\n finally:await engine.dispose()\\n print('TOP_READ='+json.dumps(result))\\ntry:asyncio.run(main())\\nexcept Exception as error:print('TOP_READ_ERROR='+type(error).__name__);raise SystemExit(1) from None\\n\"\nresult=subprocess.run(['docker','exec','safecheck-bot-1','python','-c',code],capture_output=True,text=True,timeout=90)\nfor line in result.stdout.splitlines():\n if line.startswith(('TOP_READ=','TOP_READ_ERROR=')):print(line,flush=True)\nif result.returncode:raise SystemExit(1)\nPY\n"
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
