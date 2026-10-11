@@ -178,7 +178,6 @@ def controls(user_id: int):
     return kb.keyboard(
         [
             [(t("redsafe.names_button"), kb.action("redsafe_names", f"u:{user_id}"))],
-            [(t("redsafe.home_button"), kb.action("home"))],
         ]
     )
 

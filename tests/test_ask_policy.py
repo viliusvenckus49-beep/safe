@@ -10,6 +10,7 @@ from sqlalchemy import select
 from test_telegram import journey as telegram_journey
 
 from app.bot import keyboards as kb
+from app.bot.callbacks import Action
 from app.bot.lookup_limits import AskLimiter
 from app.bot.middleware import ServiceMiddleware
 from app.bot.states import InputFlow, RepVoteFlow
@@ -267,3 +268,43 @@ async def test_general_throttle_also_silences_ask_and_resets_language(
     handler.assert_not_awaited()
     response.assert_not_awaited()
     assert language.get() == "lt"
+
+
+@pytest.mark.parametrize("chat", [None, -100])
+async def test_check_profile_replaces_source_but_check_another_keeps_history(journey, clock, chat):
+    from aiogram.types import ForceReply
+
+    await journey.send("/ask 42", chat=chat)
+    original = sent(journey)[-1]
+    buttons = original[1].reply_markup.inline_keyboard
+    assert [Action.unpack(row[0].callback_data).name for row in buttons] == ["profile", "lookup"]
+    await click_result(journey, original, buttons[1][0].callback_data, chat=chat)
+    prompt = sent(journey)[-1]
+    state = journey.dp.fsm.get_context(bot=journey.bot, chat_id=chat or 1, user_id=1)
+    assert await state.get_state() == InputFlow.lookup.state
+    assert original[0] not in [call.message_id for call in journey.transport.deletions]
+    extra = {}
+    if chat is not None:
+        assert isinstance(prompt[1].reply_markup, ForceReply)
+        assert prompt[1].reply_markup.selective is True
+        assert "tg://user?id=1" in prompt[1].text
+        extra["reply_to_message"] = Message(
+            message_id=prompt[0],
+            date=datetime.now(UTC),
+            chat=Chat(id=chat, type="supergroup"),
+        )
+    await journey.send("43", chat=chat, **extra)
+    checked = sent(journey)[-1]
+    assert "<code>43</code>" in checked[1].text
+    assert await state.get_state() is None
+    assert original[0] not in [call.message_id for call in journey.transport.deletions]
+    await click_result(
+        journey, checked, checked[1].reply_markup.inline_keyboard[0][0].callback_data, chat=chat
+    )
+    deleted = [call.message_id for call in journey.transport.deletions]
+    assert checked[0] in deleted and original[0] not in deleted
+    profile = sent(journey)[-1][1]
+    assert "🆔 ID: 43" in profile.text
+    assert [
+        Action.unpack(row[0].callback_data).name for row in profile.reply_markup.inline_keyboard
+    ] == ["redsafe_names"]

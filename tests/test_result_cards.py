@@ -69,11 +69,10 @@ def test_result_identity_and_status_are_factual(locale, known, status):
         from app.bot.callbacks import Action
 
         buttons = kb.check_result(user.telegram_id).inline_keyboard
-        assert len(buttons) == 3 and all(len(row) == 1 for row in buttons)
+        assert len(buttons) == 2 and all(len(row) == 1 for row in buttons)
         assert buttons[0][0].text == t("button.check_profile")
         assert buttons[1][0].text == t("button.lookup_other")
         assert Action.unpack(buttons[1][0].callback_data).name == "lookup"
-        assert buttons[2][0].text == t("button.check_home")
         assert Action.unpack(buttons[0][0].callback_data).value == ("42" if known else "unknown")
         if status == "scam":
             assert "−4" in result
@@ -154,7 +153,7 @@ async def test_manual_trusted_date_comes_from_database_and_top_has_no_manual_dat
     assert journey.transport.calls[-1].reply_markup is not None
     assert (
         journey.transport.calls[-1].reply_markup.inline_keyboard[-1][0].callback_data
-        == "sc|home|receipt"
+        == "sc|lookup|"
     )
 
 
@@ -226,11 +225,10 @@ async def test_checked_profile_keeps_numeric_target_after_username_change(
     assert [[button.text for button in row] for row in result.reply_markup.inline_keyboard] == [
         ["🪪 REDSAFE PROFILIS"],
         ["ᴛɪᴋʀɪɴᴛɪ ᴋɪᴛᴀ"],
-        ["‹ Pagrindinis meniu"],
     ]
     profile_callback = result.reply_markup.inline_keyboard[0][0].callback_data
     assert profile_callback == kb.action("profile", "42")
-    assert result.reply_markup.inline_keyboard[2][0].callback_data == kb.action("home", "receipt")
+    assert result.reply_markup.inline_keyboard[1][0].callback_data == kb.action("lookup")
     async with database() as session:
         core = Service(settings, session)
         await core.observe(42, "changed_person", "Checked person")

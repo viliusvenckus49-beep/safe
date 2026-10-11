@@ -51,9 +51,8 @@ def test_exact_design_escape_and_callbacks():
             "▰▰▱▱▱▱▱▱▱▱ 20%"
         )
         buttons = rp.controls(7).inline_keyboard
-        assert [row[0].text for row in buttons] == ["👁️‍🗨️ Naudotojo vardai", "‹ Pagrindinis meniu"]
+        assert [row[0].text for row in buttons] == ["👁️‍🗨️ Naudotojo vardai"]
         assert Action.unpack(buttons[0][0].callback_data).value == "u:7"
-        assert Action.unpack(buttons[1][0].callback_data).name == "home"
         user.username = None
         user.display_name = "<script>&"
         assert "&lt;script&gt;&amp;" in rp.profile_text(
@@ -76,7 +75,7 @@ def test_localized_profile(lang):
         assert text.count("<blockquote>") == text.count("</blockquote>") == 1
         assert "▰▰▰▰▰▰▰▰▰▰ 100%" in text
         assert "redsafe." not in text
-        assert rp.controls(1).inline_keyboard[1][0].text.startswith("‹ ")
+        assert len(rp.controls(1).inline_keyboard) == 1
 
 
 @pytest.mark.asyncio
