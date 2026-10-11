@@ -185,7 +185,6 @@ async def test_registry_search_returns_to_same_admin_page(journey, database, set
     assert callbacks(last_message(journey).reply_markup) == [
         kb.action("profile", "42"),
         kb.action("lookup"),
-        kb.action("home"),
     ]
     await journey.click(kb.action("admin_scams", "1"), actor=900)
     assert kb.action("admin_scams", "0") in callbacks(last_message(journey).reply_markup)
@@ -249,7 +248,7 @@ async def test_report_decision_returns_to_pending_reports(journey, database, set
 
 @pytest.mark.parametrize("locale", ["lt", "en", "ru"])
 @pytest.mark.parametrize("chat", [None, -100])
-async def test_check_results_keep_three_buttons_and_existing_receipt_navigation(
+async def test_check_results_keep_two_buttons_and_existing_receipt_navigation(
     journey, database, settings, locale, chat
 ):
     async with database() as session:
@@ -259,9 +258,9 @@ async def test_check_results_keep_three_buttons_and_existing_receipt_navigation(
         markup = last_message(journey).reply_markup
         names = [Action.unpack(value).name for value in callbacks(markup)]
         persistent = command.startswith("/ask")
-        assert names == ["profile", "lookup", "home"]
+        assert names == ["profile", "lookup"]
         with use_language(locale):
-            assert markup.inline_keyboard[-1][0].text == t("button.check_home")
+            assert markup.inline_keyboard[-1][0].text == t("button.lookup_other")
         before = len(journey.transport.deletions)
         await journey.click(
             kb.action("home", "receipt") if persistent else kb.action("home"), chat=chat

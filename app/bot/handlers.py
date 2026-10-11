@@ -5,7 +5,7 @@ from uuid import uuid4
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, ForceReply, InlineKeyboardMarkup, Message
 
 from app import presentation as p
 from app.bot import keyboards as kb
@@ -507,8 +507,20 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await callback.answer(t("p.lookup_profile_unavailable"), show_alert=True)
             return
         await callback.answer()
-        receipt = bool(
+        # The check card no longer has a home button to mark it as chat history.
+        check_source = bool(
             message.reply_markup
+            and any(
+                button.callback_data
+                and button.callback_data.startswith("sc|profile|")
+                and button.callback_data != kb.action("profile")
+                for row in message.reply_markup.inline_keyboard
+                for button in row
+            )
+        )
+        receipt = (check_source and name not in {"profile", "redsafe_check"}) or bool(
+            message.reply_markup
+            and name not in {"profile", "redsafe_check"}
             and any(
                 button.callback_data == kb.action("home", "receipt")
                 for row in message.reply_markup.inline_keyboard
@@ -561,21 +573,36 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 lookup_return_value=parent_value,
                 lookup_persistent=receipt and name == "lookup",
             )
-            await render(
-                message,
-                p.text("target" if name == "lookup" else "rep_target"),
-                reply_markup=kb.navigation(parent, parent_value),
-            )
+            if name == "lookup" and message.chat.type in {"group", "supergroup"}:
+                # A forced reply reaches the bot even when Telegram privacy mode is enabled.
+                prompt = await message.answer(
+                    callback.from_user.mention_html() + "\n" + p.text("target"),
+                    reply_markup=ForceReply(selective=True),
+                )
+                await state.update_data(screen_message_id=prompt.message_id)
+            else:
+                await render(
+                    message,
+                    p.text("target" if name == "lookup" else "rep_target"),
+                    reply_markup=kb.navigation(parent, parent_value),
+                )
         elif name == "profile":
             await clear_flow(state)
             data = await rp.profile_data(service, message.bot, value or str(actor))
             await render(message, rp.profile_text(data), reply_markup=rp.controls(data["user"].id))
+        elif name == "redsafe_check":
+            await clear_flow(state)
+            data = await service.profile(value)
+            await render(
+                message, p.profile(data), reply_markup=kb.check_result(data["user"].telegram_id)
+            )
         elif name == "redsafe_names":
             await clear_flow(state)
+            user = await service.resolve(value)
             await render(
                 message,
                 await rp.names_text(service, value),
-                reply_markup=kb.keyboard([[(t("redsafe.home_button"), kb.action("home"))]]),
+                reply_markup=rp.names_controls(user),
             )
         elif name == "top":
             await clear_flow(state)
