@@ -1,0 +1,34 @@
+name: SAFECheck VPS disk audit
+on:
+  push:
+    branches: [group-members-import-20261009]
+    paths: ['.github/workflows/group-members-import.yml']
+permissions:
+  contents: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Prepare pinned SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          set -eu
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+      - name: SAFECheck VPS disk audit
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: "ssh -i \"$HOME/.ssh/safecheck_deploy\" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 \"$REMOTE_USER@$HOST\" 'sudo -n python3 -' <<'PY'\nimport json,subprocess,shutil\nfrom pathlib import Path\n\ndef run(args,timeout=120):\n r=subprocess.run(args,capture_output=True,text=True,timeout=timeout)\n if r.returncode: return {'error':args[0], 'returncode':r.returncode}\n return r.stdout.strip()\n\ndef lines(args):\n value=run(args)\n return [json.loads(x) for x in value.splitlines() if x] if isinstance(value,str) else value\n\nimages=lines(['docker','image','ls','--no-trunc','--format','{{json .}}'])\ncontainers=lines(['docker','ps','-a','--no-trunc','--format','{{json .}}'])\nusage=shutil.disk_usage('/')\nresult={'disk':dict(total=usage.total,used=usage.used,free=usage.free),'docker_df':run(['docker','system','df']),'images':images,'containers':containers,'dirs':{},'rollback':{}}\nfor path in ['/var/lib/docker','/var/log','/var/cache/apt/archives','/var/backups','/home/ubuntu','/home/ubuntu/safecheck-releases','/var/lib/safecheck','/tmp']:\n if Path(path).exists():result['dirs'][path]=run(['du','-sx','--block-size=1',path])\nresult['home_breakdown']=run(['du','-x','--max-depth=1','--block-size=1','/home/ubuntu'])\nresult['journal']=run(['journalctl','--disk-usage'])\nresult['volumes']=run(['docker','volume','ls','--format','{{json .}}'])\nfor p in [Path('/var/lib/safecheck/last-deployment.json'),Path('/var/lib/safecheck-test/last-deployment.json')]:\n if p.is_file():\n  data=json.loads(p.read_text());result['rollback'][str(p)]={k:data.get(k) for k in ['previous_image','candidate_image','started_at']}\nids=run(['docker','ps','-aq'])\nif isinstance(ids,str) and ids:\n fmt='{\"id\":{{json .Id}},\"name\":{{json .Name}},\"image_id\":{{json .Image}},\"image\":{{json .Config.Image}},\"status\":{{json .State.Status}},\"health\":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},\"working_dir\":{{json (index .Config.Labels \"com.docker.compose.project.working_dir\")}},\"compose_files\":{{json (index .Config.Labels \"com.docker.compose.project.config_files\")}},\"mounts\":{{json .Mounts}}}'\n result['container_details']=lines(['docker','inspect','--format',fmt,*ids.splitlines()])\nprint('DISK_AUDIT='+json.dumps(result))\nPY\n"
+      - name: Remove runner key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
