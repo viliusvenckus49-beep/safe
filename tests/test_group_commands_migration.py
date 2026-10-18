@@ -1,6 +1,6 @@
 """Upgrade existing 0011 sanctions and jobs without rewriting their data."""
 
-import importlib
+import importlib.util
 import os
 import sqlite3
 import subprocess
@@ -80,7 +80,12 @@ def test_0012_preserves_0011_rows_and_refuses_destructive_downgrade(tmp_path):
 async def test_postgres_0012_preserves_first_stage_sanctions_and_jobs(postgres_contract):
     sessions, _ = postgres_contract
     engine = sessions.kw["bind"]
-    migration = importlib.import_module("migrations.versions.0012_group_commands")
+    spec = importlib.util.spec_from_file_location(
+        "migration_0012", ROOT / "migrations/versions/0012_group_commands.py"
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
 
     def run(connection, function):
         with Operations.context(MigrationContext.configure(connection)):
