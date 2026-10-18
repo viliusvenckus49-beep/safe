@@ -144,7 +144,7 @@ async def draft_panel(
         text = t("ads.collecting", count=len(draft.content["media"]))
         rows.append([(t("ads.done"), cb("finish", draft.campaign_id, draft.id))])
         rows.append(
-            [(t("ads.clear"), cb("clear", draft.campaign_id, f"MEDIA:{draft.base_version}"))]
+            [(t("ads.clear"), cb("clear", draft.campaign_id, f"MEDIA.{draft.base_version}"))]
         )
     else:
         text = t(
@@ -403,7 +403,7 @@ def register_ads_handlers(router: Router) -> None:
                     await draft_panel(message, ads, actor, draft.id)
                 else:
                     rows = [
-                        [(t("ads.clear"), cb("clear", cid, f"{value}:{base}"))],
+                        [(t("ads.clear"), cb("clear", cid, f"{value}.{base}"))],
                         [(t("ads.back"), cb("campaign", cid))],
                     ]
                     await service.session.commit()
@@ -411,7 +411,7 @@ def register_ads_handlers(router: Router) -> None:
                         message, t("ads." + value.lower() + "_prompt"), keyboard(rows), edit=True
                     )
             elif name == "clear":
-                field, base_text = value.split(":", 1)
+                field, base_text = value.split(".", 1)
                 if field not in {"TEXT", "MEDIA", "BUTTONS"}:
                     raise DomainError("ads_stale")
                 payload = {"text": "", "entities": []} if field == "TEXT" else []

@@ -216,7 +216,7 @@ async def test_clearing_media_is_independent_and_cancel_does_not_mutate_campaign
 ):
     cid = await new(journey, database)
     await journey.click(cb("edit", cid, "MEDIA"), actor=900)
-    await journey.click(cb("clear", cid, "MEDIA:1"), actor=900)
+    await journey.click(cb("clear", cid, "MEDIA.1"), actor=900)
     async with database() as session:
         pending = await session.scalar(
             select(AdContentDraft).where(AdContentDraft.status == "READY")
@@ -227,3 +227,31 @@ async def test_clearing_media_is_independent_and_cancel_does_not_mutate_campaign
     async with database() as session:
         assert (await session.get(AdCampaign, cid)).version == 1
         assert (await session.get(AdContentDraft, did)).status == "CANCELLED"
+
+
+@pytest.mark.parametrize("field", ["TEXT", "MEDIA", "BUTTONS"])
+async def test_each_editor_opens_a_real_input_panel_without_callback_encoding_errors(
+    journey, database, field
+):
+    cid = await new(journey, database)
+    before = len(journey.transport.calls)
+    await journey.click(cb("edit", cid, field), actor=900)
+    from aiogram.methods import EditMessageText
+
+    panels = [
+        call for call in journey.transport.calls[before:] if isinstance(call, EditMessageText)
+    ]
+    assert len(panels) == 1
+    assert panels[0].reply_markup is not None
+    assert t("ads.error") not in panels[0].text
+    if field == "MEDIA":
+        assert t("ads.collecting", count=0) in panels[0].text
+    else:
+        assert panels[0].text == t("ads." + field.lower() + "_prompt")
+    clear = [
+        button
+        for row in panels[0].reply_markup.inline_keyboard
+        for button in row
+        if button.text == t("ads.clear")
+    ][0]
+    assert ".1" in clear.callback_data
