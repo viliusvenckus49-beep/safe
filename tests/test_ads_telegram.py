@@ -255,3 +255,20 @@ async def test_each_editor_opens_a_real_input_panel_without_callback_encoding_er
         if button.text == t("ads.clear")
     ][0]
     assert ".1" in clear.callback_data
+
+
+async def test_nontext_input_in_button_editor_does_not_stage_accidental_clear(journey, database):
+    cid = await new(journey, database)
+    await journey.click(cb("edit", cid, "BUTTONS"), actor=900)
+    await journey.send(
+        actor=900,
+        photo=[{"file_id": "photo_1", "file_unique_id": "p1", "width": 100, "height": 100}],
+        caption="not a button description",
+    )
+    async with database() as session:
+        assert await session.scalar(select(AdContentDraft)) is None
+        assert (await session.get(AdCampaign, cid)).version == 1
+    await journey.send("Open - https://t.me/Example", actor=900)
+    async with database() as session:
+        pending = await session.scalar(select(AdContentDraft))
+        assert pending.content["buttons"][0][0]["label"] == "Open"

@@ -294,8 +294,10 @@ def register_ads_handlers(router: Router) -> None:
             if field == "TEXT":
                 value = text_from_message(message)
             else:
+                if message.text is None:
+                    raise DomainError("ads_buttons")
                 value = parse_buttons(
-                    message.text or "",
+                    message.text,
                     [e.model_dump(mode="json", exclude_none=True) for e in message.entities or []],
                 )
             draft = await ads.stage(
