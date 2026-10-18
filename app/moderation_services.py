@@ -1,6 +1,7 @@
 """Local, opt-in group restrictions. Public commands/UI are intentionally not installed yet."""
 
 import re
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +22,25 @@ from app.models import (
 )
 
 LIVE = ("PENDING", "ACTIVE", "REVOKING", "UNCERTAIN")
+
+
+async def has_local_restriction(
+    session: AsyncSession, telegram_id: int, chat_ids: Collection[int]
+) -> bool:
+    """Global SCAM removal grants no authority to revoke a group's local sanction."""
+    return bool(
+        await session.scalar(
+            select(
+                select(GroupSanction.id)
+                .where(
+                    GroupSanction.telegram_id == telegram_id,
+                    GroupSanction.chat_id.in_(chat_ids),
+                    GroupSanction.status.in_(LIVE),
+                )
+                .exists()
+            )
+        )
+    )
 
 
 def utc(value: datetime) -> datetime:

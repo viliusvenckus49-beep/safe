@@ -77,6 +77,7 @@ follow-up corrects these findings without changing migration 0011 or existing UI
 | Severity | Finding | Correction |
 | --- | --- | --- |
 | P1 | A local timed restriction could be applied to an active SCAM identity; an existing timed ban could be mistaken for completed permanent SCAM protection. | Local APPLY rejects active SCAM identities. Existing SCAM native/relay checks require an indefinite ban; a timed ban is strengthened through the established SCAM path. |
+| P1 | Global SCAM UNBAN could remove a local sanction without the group's administrator authority. | Preserve all live local sanctions during native per-group UNBAN; suppress a global staff UNBAN command if its scope contains a protected local restriction. |
 | P1 | Duplicate delivery of one claim token could execute twice in separate processes. | A conditional SQL update consumes CLAIMED → EXECUTING once, independent of asyncio locks. |
 | P1 | A slow preflight could push an expiry inside Telegram's permanent-ban window. | Recheck remaining duration and lease immediately before every write. |
 | P1 | Telegram ignores finite BAN expiry in basic groups. | Timed BAN/MUTE requires a supergroup, rechecked at execution. |

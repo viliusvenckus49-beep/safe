@@ -15,6 +15,7 @@ from test_mtproto_relay import prepare
 
 from app.bot.group_runtime import _attempt_ban
 from app.bot.local_moderation import LocalModerationExecutor
+from app.bot.scam_unban import process_scam_unban
 from app.errors import DomainError
 from app.group_services import GroupService
 from app.models import AuditEvent, GroupSanction, GroupSanctionJob, ManagedGroup, now
@@ -329,3 +330,47 @@ async def test_review_api_reason_is_auditable_and_redacted(database):
         reason = audit.details["reason"]
         assert "Not enough rights" in reason
         assert secret not in reason and "https://" not in reason and "\n" not in reason
+
+
+@pytest.mark.parametrize("kind", ["BAN", "MUTE"])
+async def test_review_global_scam_unban_cannot_override_local_authority(database, settings, kind):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    sanction = await submit(database, bot, kind=kind)
+    await LocalModerationExecutor(database, bot).process()
+    async with database() as session:
+        record = await Service(settings, session).add_scam(900, "51")
+        record_id = record.id
+    # SCAM protection superseded the local restriction with an indefinite ban.
+    await bot.ban_chat_member(chat_id=CHAT, user_id=51)
+    previous_calls = len(bot.calls)
+    async with database() as session:
+        record, summary = await process_scam_unban(bot, Service(settings, session), record_id, 900)
+        assert record.status == "REMOVED"
+        assert (await session.get(GroupSanction, sanction.id)).status == "ACTIVE"
+        protected = next(row for row in summary["groups"] if row["chat_id"] == CHAT)
+        assert protected["result"] == "LOCAL_SANCTION_PROTECTED" and not protected["success"]
+    assert len(bot.calls) == previous_calls
+    assert bot.members[CHAT, 51].status == "kicked"
+
+
+async def test_review_staff_global_unban_cannot_override_local_authority(database):
+    settings, record_id, relay, client = await prepare(database)
+    async with database() as session:
+        await Service(settings, session).remove_scam(900, "22", "Reviewed")
+        session.add(
+            GroupSanction(
+                chat_id=-1000,
+                telegram_id=22,
+                kind="BAN",
+                actor_id=42,
+                reason="Local rule",
+                status="ACTIVE",
+                owned=True,
+                policy_version=1,
+                request_key="review-existing-local",
+            )
+        )
+        await session.commit()
+    assert not await relay.dispatch_unban(900, record_id)
+    assert client.calls == []

@@ -579,6 +579,8 @@ class GroupHelpRelay:
         from aiogram.methods import UnbanChatMember
         from telethon.tl.functions.messages import SendMessageRequest
 
+        from app.moderation_services import has_local_restriction
+
         async with self.commands:
             async with self.sessions() as session:
                 core = Service(self.settings, session)
@@ -594,6 +596,16 @@ class GroupHelpRelay:
                     await session.rollback()
                     return False
                 user_id = record.target.telegram_id
+                if await has_local_restriction(session, user_id, self.settings.group_help_scope):
+                    core._audit(
+                        actor,
+                        "group_help_unban_protected",
+                        record.target_id,
+                        record_id=record_id,
+                        user_id=user_id,
+                    )
+                    await session.commit()
+                    return False  # A global staff command cannot preserve just one local ban.
                 if self.flood_until > now():
                     await session.rollback()
                     raise TelegramRetryAfter(

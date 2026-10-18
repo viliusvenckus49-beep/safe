@@ -13,6 +13,7 @@ from app.bot.group_runtime import _api_reason
 from app.bot.moderation_lock import user_moderation_lock
 from app.errors import DomainError
 from app.models import AuditEvent, BanAction, ManagedGroup, now
+from app.moderation_services import has_local_restriction
 from app.mtproto_relay import active_relay
 from app.services import Service
 
@@ -125,10 +126,13 @@ async def process_scam_unban(
             if not group.approved or not group.enabled:
                 await core.session.commit()
                 continue
+            local_protected = await has_local_restriction(core.session, user_id, [group.chat_id])
             await core.session.commit()
             result, reason = "TelegramRetryAfter", None
             success = False
-            if retry_after is None:
+            if local_protected:
+                result = "LOCAL_SANCTION_PROTECTED"
+            elif retry_after is None:
                 try:
                     success, result = await asyncio.wait_for(
                         attempt_unban(bot, group.chat_id, user_id), UNBAN_TIMEOUT
