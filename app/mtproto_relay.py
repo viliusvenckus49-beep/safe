@@ -540,6 +540,7 @@ class GroupHelpRelay:
 
     async def attempt_ban(self, bot: Any, service: Any, job: Any, timeout: float):
         from app.bot.group_runtime import _attempt_ban
+        from app.bot.moderation_lock import has_permanent_ban
 
         if job.chat_id not in self.settings.group_help_scope:
             return await _attempt_ban(bot, job, timeout)
@@ -548,7 +549,7 @@ class GroupHelpRelay:
                 bot.get_chat_member(chat_id=job.chat_id, user_id=job.telegram_id),
                 timeout=min(2, timeout / 3),
             )
-            if member.status == "kicked":
+            if has_permanent_ban(member):
                 return True, "ALREADY_BANNED"
         except TelegramRetryAfter:
             raise
@@ -562,7 +563,7 @@ class GroupHelpRelay:
                         bot.get_chat_member(chat_id=job.chat_id, user_id=job.telegram_id),
                         timeout=min(1, timeout / 3),
                     )
-                    if member.status == "kicked":
+                    if has_permanent_ban(member):
                         return True, "BANNED"
                 except TelegramRetryAfter:
                     raise

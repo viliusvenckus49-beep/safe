@@ -16,7 +16,7 @@ from aiogram.types import ChatPermissions
 from sqlalchemy import or_, select, update
 
 from app.bot.moderation_lock import user_moderation_lock
-from app.errors import DomainError
+from app.errors import DomainError, safe_telegram_reason
 from app.group_authorization import GroupAuthorizer
 from app.models import GroupModerationSettings, GroupSanction, GroupSanctionJob, now
 from app.moderation_services import audit, lock_group, module_enabled, serialize_group, utc
@@ -166,6 +166,15 @@ class LocalModerationExecutor:
                     job.status, job.result = "CANCELLED", "NO_CONFIRMED_RESTRICTION"
                     await session.commit()
                     continue
+                elif (
+                    job.automatic
+                    and sanction.until_date is not None
+                    and utc(sanction.until_date) > now()
+                ):
+                    # Queue availability is not authority to lift an unexpired sanction.
+                    job.available_at = sanction.until_date
+                    await session.commit()
+                    continue
                 token = uuid4().hex
                 changed = await session.execute(
                     update(GroupSanctionJob)
@@ -180,6 +189,7 @@ class LocalModerationExecutor:
                         attempts=GroupSanctionJob.attempts + 1,
                         lease_token=token,
                         lease_until=now() + timedelta(seconds=LEASE_SECONDS),
+                        result="CLAIMED",
                         updated_at=now(),
                     )
                 )
@@ -196,6 +206,7 @@ class LocalModerationExecutor:
             sanction = await session.get(GroupSanction, initial.sanction_id)
             assert sanction is not None
             await serialize_group(session, sanction.chat_id)
+            await session.refresh(sanction)
             changed = await session.execute(
                 update(GroupSanctionJob)
                 .execution_options(synchronize_session=False)
@@ -245,12 +256,36 @@ class LocalModerationExecutor:
                 or job.lease_token != token
                 or job.lease_until is None
                 or utc(job.lease_until) <= now()
+                or job.result != "CLAIMED"
             ):
                 return
             sanction = await session.get(GroupSanction, job.sanction_id)
             assert sanction is not None
             try:
                 await lock_group(session, sanction.chat_id)
+                # A claim token is also consumed exactly once. asyncio locks do not
+                # protect duplicate delivery to independent executor processes.
+                started = await session.execute(
+                    update(GroupSanctionJob)
+                    .execution_options(synchronize_session=False)
+                    .where(
+                        GroupSanctionJob.id == job_id,
+                        GroupSanctionJob.status == "PROCESSING",
+                        GroupSanctionJob.lease_token == token,
+                        GroupSanctionJob.lease_until > now(),
+                        GroupSanctionJob.result == "CLAIMED",
+                    )
+                    .values(result="EXECUTING")
+                )
+                if not started.rowcount:
+                    await session.rollback()
+                    return
+                if job.automatic and (
+                    job.operation != "RELEASE"
+                    or sanction.until_date is None
+                    or utc(sanction.until_date) > now()
+                ):
+                    raise DomainError("group_moderation_invalid_automatic_job")
                 if job.operation == "APPLY":
                     policy = await session.get(
                         GroupModerationSettings, sanction.chat_id, populate_existing=True
@@ -274,7 +309,7 @@ class LocalModerationExecutor:
                     await self.authorization.actor(sanction.chat_id, job.actor_id)
                 await self.authorization.bot_rights(sanction.chat_id)
                 member = await self.authorization.target(sanction.chat_id, sanction.telegram_id)
-                await lock_group(session, sanction.chat_id)
+                group = await lock_group(session, sanction.chat_id)
                 await session.refresh(job)
                 await session.refresh(sanction)
                 if (
@@ -294,9 +329,15 @@ class LocalModerationExecutor:
                         or policy.version != sanction.policy_version
                     ):
                         raise DomainError("group_moderation_policy_changed")
+                    if (
+                        sanction.kind == "MUTE" or sanction.until_date is not None
+                    ) and group.chat_type != "supergroup":
+                        raise DomainError("group_moderation_supergroup_required")
+                user = await Repository(session).user_by_telegram(sanction.telegram_id)
+                scam = user is not None and await Repository(session).has_scam_identity(user)
+                if job.operation == "APPLY" and scam:
+                    raise DomainError("group_moderation_scam_protected")
                 if job.operation == "RELEASE":
-                    user = await Repository(session).user_by_telegram(sanction.telegram_id)
-                    scam = user is not None and await Repository(session).has_scam_identity(user)
                     if scam or not sanction.owned:
                         await self.finish(
                             session,
@@ -318,6 +359,7 @@ class LocalModerationExecutor:
                     else:
                         if member.status == "restricted":
                             raise DomainError("group_moderation_existing_restriction")
+                        self.check_write_deadline(job, sanction)
                         sent = True
                         if sanction.kind == "BAN":
                             success = await asyncio.wait_for(
@@ -355,6 +397,7 @@ class LocalModerationExecutor:
                     ):
                         result = "RESTRICTION_CHANGED"
                     elif sanction.kind == "BAN":
+                        self.check_write_deadline(job, sanction)
                         sent = True
                         success = await asyncio.wait_for(
                             self.bot.unban_chat_member(
@@ -375,6 +418,7 @@ class LocalModerationExecutor:
                         permissions = getattr(chat, "permissions", None)
                         if not isinstance(permissions, ChatPermissions):
                             raise DomainError("group_moderation_permissions_unavailable")
+                        self.check_write_deadline(job, sanction)
                         sent = True
                         success = await asyncio.wait_for(
                             self.bot.restrict_chat_member(
@@ -400,13 +444,22 @@ class LocalModerationExecutor:
                     "PENDING",
                     "TelegramRetryAfter",
                     delay=error.retry_after,
+                    reason=safe_telegram_reason(error.message),
                 )
             except DomainError as error:
                 await session.rollback()
                 await self.finish(session, job, sanction, token, "CANCELLED", error.code)
             except (TelegramBadRequest, TelegramForbiddenError) as error:
                 await session.rollback()
-                await self.finish(session, job, sanction, token, "FAILED", type(error).__name__)
+                await self.finish(
+                    session,
+                    job,
+                    sanction,
+                    token,
+                    "FAILED",
+                    type(error).__name__,
+                    reason=safe_telegram_reason(error.message),
+                )
             except (TelegramAPIError, TimeoutError, OSError) as error:
                 await session.rollback()
                 await self.finish(
@@ -417,7 +470,26 @@ class LocalModerationExecutor:
                     "UNCERTAIN" if sent else "PENDING",
                     type(error).__name__,
                     delay=30,
+                    reason=safe_telegram_reason(error.message)
+                    if isinstance(error, TelegramAPIError)
+                    else None,
                 )
+
+    @staticmethod
+    def check_write_deadline(job: GroupSanctionJob, sanction: GroupSanction) -> None:
+        # Recheck AFTER rights/SQL/API reads. Telegram treats expiry <30s as permanent.
+        instant = now()
+        if (
+            job.lease_until is None
+            or (utc(job.lease_until) - instant).total_seconds() <= API_TIMEOUT + 1
+        ):
+            raise DomainError("group_moderation_lease_expiring")
+        if (
+            job.operation == "APPLY"
+            and sanction.until_date is not None
+            and (utc(sanction.until_date) - instant).total_seconds() < 60
+        ):
+            raise DomainError("group_moderation_deadline_changed")
 
     async def finish(
         self,
@@ -430,6 +502,7 @@ class LocalModerationExecutor:
         *,
         delay: int = 0,
         owned: bool | None = None,
+        reason: str | None = None,
     ) -> None:
         # Rollback expires ORM fields, so use the stable identity rather than implicit async IO.
         from sqlalchemy import inspect
@@ -492,6 +565,7 @@ class LocalModerationExecutor:
             state=state,
             result=result,
             success=state == "SUCCEEDED",
+            reason=reason,
         )
         await session.commit()
         structlog.get_logger().info(
@@ -503,6 +577,7 @@ class LocalModerationExecutor:
             result=result,
             state=state,
             success=state == "SUCCEEDED",
+            reason=reason,
         )
 
     async def process(self, *, limit: int = 1) -> int:

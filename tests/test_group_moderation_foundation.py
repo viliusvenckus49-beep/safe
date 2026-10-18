@@ -536,7 +536,9 @@ async def test_postgres_competing_restrictions_cannot_both_apply(postgres_contra
     await competing_requests(sessions)
 
 
-async def test_automatic_expiry_survives_disable_and_revoked_actor_rights(database):
+async def test_automatic_expiry_survives_disable_and_revoked_actor_rights(database, monkeypatch):
+    from app.bot import local_moderation
+
     bot = NativeBot()
     await setup_groups(database, bot)
     sanction = await submit(database, bot)
@@ -544,14 +546,8 @@ async def test_automatic_expiry_survives_disable_and_revoked_actor_rights(databa
     await worker.process()
     async with database() as session:
         await GroupModerationService(session, bot).configure(CHAT, 42, enabled=False)
-        await session.execute(
-            update(GroupSanctionJob)
-            .where(
-                GroupSanctionJob.sanction_id == sanction.id, GroupSanctionJob.operation == "RELEASE"
-            )
-            .values(available_at=now() - timedelta(seconds=1))
-        )
-        await session.commit()
+    expired = sanction.until_date + timedelta(seconds=1)
+    monkeypatch.setattr(local_moderation, "now", lambda: expired)
     bot.members[CHAT, 42] = bot.peer(42)
     await LocalModerationExecutor(database, bot).process()
     assert [c[0] for c in bot.calls] == ["ban", "unban"]

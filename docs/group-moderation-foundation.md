@@ -69,6 +69,30 @@ The existing user moderation lock coordinates SCAM/local writes in the current
 single polling process. Multi-process SCAM/local coordination needs further work
 before deploying multiple independent moderation executors.
 
+## Independent review follow-up
+
+Review regression cases are in `tests/test_group_moderation_review.py`. The
+follow-up corrects these findings without changing migration 0011 or existing UI:
+
+| Severity | Finding | Correction |
+| --- | --- | --- |
+| P1 | A local timed restriction could be applied to an active SCAM identity; an existing timed ban could be mistaken for completed permanent SCAM protection. | Local APPLY rejects active SCAM identities. Existing SCAM native/relay checks require an indefinite ban; a timed ban is strengthened through the established SCAM path. |
+| P1 | Duplicate delivery of one claim token could execute twice in separate processes. | A conditional SQL update consumes CLAIMED → EXECUTING once, independent of asyncio locks. |
+| P1 | A slow preflight could push an expiry inside Telegram's permanent-ban window. | Recheck remaining duration and lease immediately before every write. |
+| P1 | Telegram ignores finite BAN expiry in basic groups. | Timed BAN/MUTE requires a supergroup, rechecked at execution. |
+| P2 | Manual revoke could reset an automatic RELEASE already in progress. | Reject changes while either operation is PROCESSING; retain its token and attribution. |
+| P2 | An inconsistent automatic APPLY could skip actor validation; early RELEASE availability could lift an unexpired restriction. | Automatic authority is valid only for an expired finite RELEASE. Early work is deferred to its actual expiry. |
+| P2 | Cancellation could overwrite a concurrently confirmed ACTIVE sanction using stale ORM state. | Refresh sanction state after acquiring the shared SQL group lock. |
+| P2 | Local audit retained an API error class without Telegram's diagnostic reason. | Persist a bounded reason using the existing token/URL/control-character redaction behavior. |
+
+The review also simulates a crash after Telegram accepted a ban, before its SQL
+result was committed: restart retains UNCERTAIN and never repeats that write.
+Local duplicate execution is now SQL-fenced across processes, but the existing
+SCAM engine still uses process-local coordination. This does not authorize
+multi-process SCAM/local deployment. Uncertain outcomes and terminal release
+failures still require the next-stage reconciliation interface. All modules
+remain disabled by default; merging this foundation is separate from deployment.
+
 ## Migration and release boundary
 
 New Alembic revision `0011`, parent `0010`, creates only:

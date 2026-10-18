@@ -241,7 +241,7 @@ class GroupModerationService:
             )
             if policy is None or not module_enabled(policy, kind):
                 raise DomainError("group_moderation_disabled")
-            if kind == "MUTE" and group.chat_type != "supergroup":
+            if (kind == "MUTE" or until_date is not None) and group.chat_type != "supergroup":
                 raise DomainError("group_moderation_supergroup_required")
             if until_date is None:
                 if kind != "BAN" or not policy.allow_permanent_bans:
@@ -305,6 +305,7 @@ class GroupModerationService:
     async def revoke(
         self, chat_id: int, actor_id: int, sanction_id: int, *, key: str
     ) -> GroupSanction:
+        numeric_id(sanction_id)
         request_key(key)
         await self._check_group(chat_id)
         await self.authorization.actor(chat_id, actor_id)
@@ -329,13 +330,15 @@ class GroupModerationService:
                 return sanction
             if sanction.status in {"UNCERTAIN", "REVOKING"}:
                 raise DomainError("group_moderation_uncertain")
-            apply = await self.session.scalar(
-                select(GroupSanctionJob).where(
+            processing = await self.session.scalar(
+                select(GroupSanctionJob.id)
+                .where(
                     GroupSanctionJob.sanction_id == sanction.id,
-                    GroupSanctionJob.operation == "APPLY",
+                    GroupSanctionJob.status == "PROCESSING",
                 )
+                .limit(1)
             )
-            if apply is not None and apply.status == "PROCESSING":
+            if processing is not None:
                 raise DomainError("group_moderation_busy")
             sanction.revoke_key = key
             release = await self.session.scalar(

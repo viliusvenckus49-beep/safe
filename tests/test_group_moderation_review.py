@@ -6,14 +6,18 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
+from aiogram.exceptions import TelegramForbiddenError
+from aiogram.methods import BanChatMember
 from sqlalchemy import select, update
 from test_group_moderation_foundation import CHAT, NativeBot, setup_groups, submit
 from test_integration_contracts import postgres_contract as postgres_contract
+from test_mtproto_relay import prepare
 
 from app.bot.group_runtime import _attempt_ban
 from app.bot.local_moderation import LocalModerationExecutor
 from app.errors import DomainError
-from app.models import GroupSanction, GroupSanctionJob, ManagedGroup, now
+from app.group_services import GroupService
+from app.models import AuditEvent, GroupSanction, GroupSanctionJob, ManagedGroup, now
 from app.moderation_services import GroupModerationService
 from app.services import Service
 
@@ -42,21 +46,32 @@ async def test_review_scam_ban_strengthens_existing_temporary_ban():
     assert bot.members[CHAT, 51].until_date is None
 
 
-async def test_review_revoke_cannot_reset_claimed_automatic_release(database):
+async def test_review_staff_response_must_confirm_permanent_scam_ban(database):
+    settings, _, relay, client = await prepare(database)
+    bot = NativeBot()
+    async with database() as session:
+        service = GroupService(settings, session)
+        job = (await service.claim_bans())[0]
+        bot.members[job.chat_id, job.telegram_id] = bot.peer(
+            job.telegram_id, "kicked", until_date=now() + timedelta(hours=1)
+        )
+        success, result = await relay.attempt_ban(bot, service, job, 8)
+    assert success and result == "BANNED"
+    assert bot.members[job.chat_id, job.telegram_id].until_date is None
+    assert any(hasattr(request, "message") for request in client.calls)
+    assert len(bot.calls) == 1
+
+
+async def test_review_revoke_cannot_reset_claimed_automatic_release(database, monkeypatch):
+    from app.bot import local_moderation
+
     bot = NativeBot()
     await setup_groups(database, bot)
     sanction = await submit(database, bot)
     worker = LocalModerationExecutor(database, bot)
     await worker.process()
-    async with database() as session:
-        await session.execute(
-            update(GroupSanctionJob)
-            .where(
-                GroupSanctionJob.sanction_id == sanction.id, GroupSanctionJob.operation == "RELEASE"
-            )
-            .values(available_at=now() - timedelta(seconds=1))
-        )
-        await session.commit()
+    expired = sanction.until_date + timedelta(seconds=1)
+    monkeypatch.setattr(local_moderation, "now", lambda: expired)
     claim = await worker.claim()
     assert claim is not None
     async with database() as session:
@@ -190,3 +205,127 @@ async def test_review_crash_after_api_acceptance_is_not_replayed(database):
         )
         assert job.result == "LEASE_EXPIRED"
     assert len(bot.calls) == 1 and bot.members[CHAT, 51].status == "kicked"
+
+
+async def test_review_automatic_flag_cannot_bypass_actor_rights_for_apply(database):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    sanction = await submit(database, bot)
+    async with database() as session:
+        await session.execute(
+            update(GroupSanctionJob)
+            .where(
+                GroupSanctionJob.sanction_id == sanction.id, GroupSanctionJob.operation == "APPLY"
+            )
+            .values(automatic=True)
+        )
+        await session.commit()
+    bot.members[CHAT, 42] = bot.peer(42)
+    await LocalModerationExecutor(database, bot).process()
+    assert bot.calls == []
+
+
+async def test_review_early_expiry_job_is_deferred_to_real_deadline(database):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    sanction = await submit(database, bot)
+    worker = LocalModerationExecutor(database, bot)
+    await worker.process()
+    async with database() as session:
+        await session.execute(
+            update(GroupSanctionJob)
+            .where(
+                GroupSanctionJob.sanction_id == sanction.id, GroupSanctionJob.operation == "RELEASE"
+            )
+            .values(available_at=now() - timedelta(seconds=1))
+        )
+        await session.commit()
+    assert await worker.claim() is None
+    assert len(bot.calls) == 1
+
+
+async def test_review_cancellation_refreshes_concurrently_completed_apply(database, monkeypatch):
+    from app.bot import local_moderation
+
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    sanction = await submit(database, bot)
+    original_lock = local_moderation.serialize_group
+
+    async def concurrent_completion(session, chat):
+        async with database() as other:
+            # Another worker committed its successful Telegram response after our read.
+            row = await other.get(GroupSanction, sanction.id)
+            row.status, row.owned = "ACTIVE", True
+            await other.execute(
+                update(GroupSanctionJob)
+                .where(
+                    GroupSanctionJob.sanction_id == sanction.id,
+                    GroupSanctionJob.operation == "APPLY",
+                )
+                .values(status="SUCCEEDED")
+            )
+            await other.commit()
+        await original_lock(session, chat)
+
+    async with database() as session:
+        release = await session.scalar(
+            select(GroupSanctionJob).where(
+                GroupSanctionJob.sanction_id == sanction.id, GroupSanctionJob.operation == "RELEASE"
+            )
+        )
+        release_id = release.id
+    monkeypatch.setattr(local_moderation, "serialize_group", concurrent_completion)
+    await LocalModerationExecutor(database, bot)._cancel_unclaimed(release_id, "GROUP_UNAVAILABLE")
+    async with database() as session:
+        assert (await session.get(GroupSanction, sanction.id)).status == "ACTIVE"
+
+
+async def test_review_read_retry_gets_fresh_execution_fence(database, monkeypatch):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    sanction = await submit(database, bot)
+    original = bot.get_chat_member
+    failed = False
+
+    async def read_failure(chat_id, user_id):
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise TimeoutError
+        return await original(chat_id, user_id)
+
+    monkeypatch.setattr(bot, "get_chat_member", read_failure)
+    worker = LocalModerationExecutor(database, bot)
+    await worker.process()
+    assert bot.calls == []
+    async with database() as session:
+        await session.execute(
+            update(GroupSanctionJob)
+            .where(
+                GroupSanctionJob.sanction_id == sanction.id, GroupSanctionJob.operation == "APPLY"
+            )
+            .values(available_at=now() - timedelta(seconds=1))
+        )
+        await session.commit()
+    await LocalModerationExecutor(database, bot).process()
+    assert len(bot.calls) == 1
+
+
+async def test_review_api_reason_is_auditable_and_redacted(database):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    await submit(database, bot)
+    secret = "123456:TEST_ONLY_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    bot.error = TelegramForbiddenError(
+        method=BanChatMember(chat_id=CHAT, user_id=51),
+        message=f"Not enough rights\nhttps://example.test/{secret} {secret}",
+    )
+    await LocalModerationExecutor(database, bot).process()
+    async with database() as session:
+        audit = await session.scalar(
+            select(AuditEvent).where(AuditEvent.action == "group_moderation_attempt")
+        )
+        reason = audit.details["reason"]
+        assert "Not enough rights" in reason
+        assert secret not in reason and "https://" not in reason and "\n" not in reason
