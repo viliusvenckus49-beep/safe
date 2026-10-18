@@ -28,7 +28,7 @@ from app.bot.moderation_messages import (
     format_success,
     identity_label,
 )
-from app.i18n import use_language
+from app.i18n import t, use_language
 from app.models import AuditEvent, GroupModerationDraft, GroupSanction, ScamRecord, User, now
 from app.services import Service
 
@@ -286,6 +286,7 @@ async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
         await Service(settings, session).observe(51, "example", "Example")
     before = len(journey.transport.calls)
     await journey.send("/info 51", actor=42)
+    assert t("redsafe.title") in journey.text()
     assert not any(
         isinstance(c, EditMessageText) and c.chat_id == CHAT and c.message_id == notice_id
         for c in journey.transport.calls[before:]
@@ -365,6 +366,7 @@ async def test_private_profile_does_not_edit_or_delete_confirmed_receipt(
         await Service(settings, session).observe(51, "example", "Example")
     before = len(journey.transport.calls)
     await journey.send("/info 51", actor=42)
+    assert t("redsafe.title") in journey.text()
     assert not any(
         isinstance(c, EditMessageText) and c.chat_id == 42 and c.message_id == notice_id
         for c in journey.transport.calls[before:]
@@ -372,3 +374,21 @@ async def test_private_profile_does_not_edit_or_delete_confirmed_receipt(
     assert not any(
         c.chat_id == 42 and c.message_id == notice_id for c in journey.transport.deletions
     )
+
+
+@pytest.mark.asyncio
+async def test_cancel_and_rejected_confirmations_do_not_add_receipt_buttons(
+    local_journey, database
+):
+    journey, _ = local_journey
+    await journey.send("/moderation", actor=42)
+    await journey.click(LocalAction(action="action", chat=CHAT, value="WARN").pack(), actor=42)
+    await journey.send("51", actor=42)
+    async with database() as session:
+        draft_id = (await session.scalar(select(GroupModerationDraft))).id
+    await journey.click(LocalAction(action="cancel", value=draft_id).pack(), actor=42)
+    edit = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    assert edit.reply_markup is None and t("lm.cancelled") in edit.text
+    await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
+    edit = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    assert edit.reply_markup is None and not any(h in edit.text for h in HEADINGS.values())

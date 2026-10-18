@@ -411,17 +411,13 @@ async def show_draft(
             text += "\n\n" + t("lm.reason", reason=escape(draft.reason))
         if draft.kind == "KICK":
             text += "\n\n" + t("lm.kick_notice")
-    buttons = (
+    buttons = [
         [
-            [
-                (t("lm.confirm"), cb("confirm", value=draft.id)),
-                (t("lm.cancel"), cb("cancel", value=draft.id)),
-            ]
-        ]
-        if draft.status == "PENDING"
-        else [[(t("lm.refresh"), cb("refresh", value=draft.id))]]
-    )
-    buttons.append([(t("lm.back"), cb("group", draft.chat_id))])
+            (t("lm.confirm"), cb("confirm", value=draft.id)),
+            (t("lm.cancel"), cb("cancel", value=draft.id)),
+        ],
+        [(t("lm.back"), cb("group", draft.chat_id))],
+    ]
     # Confirmation controls belong to the private preview, never to a receipt.
     result = await display(
         message, text, keyboard(buttons) if draft.status == "PENDING" else None, edit=edit
@@ -736,7 +732,7 @@ def register_local_handlers(router: Router) -> None:
                 )
             elif action == "cancel":
                 draft = await local.cancel_draft(value, actor)
-                await display(message, t("lm.cancelled"), nav(chat), edit=True)
+                await display(message, t("lm.cancelled"), None, edit=True)
             elif action in {"confirm", "refresh"}:
                 assert draft is not None
                 if action == "confirm":
@@ -756,7 +752,7 @@ def register_local_handlers(router: Router) -> None:
             if not acknowledged:
                 await callback.answer(error_text(error), show_alert=True)
             elif isinstance(callback.message, Message):
-                await display(callback.message, error_text(error), nav(chat), edit=True)
+                await display(callback.message, error_text(error), None, edit=True)
             structlog.get_logger().info(
                 "local_moderation_ui_rejected",
                 user_id=callback.from_user.id,
