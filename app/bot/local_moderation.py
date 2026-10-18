@@ -355,6 +355,14 @@ class LocalModerationExecutor:
                     if member.status == "kicked":
                         if sanction.kind != "BAN":
                             raise DomainError("group_moderation_existing_restriction")
+                        existing_until = deadline(getattr(member, "until_date", None))
+                        wanted_until = deadline(until)
+                        if existing_until is not None and (
+                            wanted_until is None or existing_until < wanted_until
+                        ):
+                            # Preserve foreign restrictions without claiming that a
+                            # shorter ban fulfilled this request's longer duration.
+                            raise DomainError("group_moderation_existing_restriction")
                         result, owned = "ALREADY_BANNED", False
                     else:
                         if member.status == "restricted":

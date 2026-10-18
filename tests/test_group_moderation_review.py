@@ -374,3 +374,25 @@ async def test_review_staff_global_unban_cannot_override_local_authority(databas
         await session.commit()
     assert not await relay.dispatch_unban(900, record_id)
     assert client.calls == []
+
+
+@pytest.mark.parametrize("permanent", [False, True])
+async def test_review_shorter_foreign_ban_does_not_fulfill_longer_request(database, permanent):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    bot.members[CHAT, 51] = bot.peer(51, "kicked", until_date=now() + timedelta(minutes=5))
+    if permanent:
+        async with database() as session:
+            service = GroupModerationService(session, bot)
+            await service.configure(
+                CHAT, 42, enabled=True, bans_enabled=True, allow_permanent_bans=True
+            )
+            sanction = await service.submit(
+                CHAT, 42, 51, "BAN", until_date=None, reason="Local rule", key="review-longer-ban"
+            )
+    else:
+        sanction = await submit(database, bot)
+    await LocalModerationExecutor(database, bot).process()
+    assert bot.calls == []
+    async with database() as session:
+        assert (await session.get(GroupSanction, sanction.id)).status == "CANCELLED"
