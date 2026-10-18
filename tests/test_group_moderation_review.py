@@ -357,7 +357,7 @@ async def test_review_global_scam_unban_cannot_override_local_authority(database
 async def test_review_staff_global_unban_cannot_override_local_authority(database):
     settings, record_id, relay, client = await prepare(database)
     async with database() as session:
-        await Service(settings, session).remove_scam(900, "22", "Reviewed")
+        await Service(settings, session).remove_scam(900, "22", "Reviewed by administrator")
         session.add(
             GroupSanction(
                 chat_id=-1000,
