@@ -349,3 +349,91 @@ class ProfileActivity(Base):
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     active_date: Mapped[date] = mapped_column(Date)
+
+
+class GroupModerationSettings(Base):
+    """Local moderation is opt-in; global SAFECheck administrator grants do not apply."""
+
+    __tablename__ = "group_moderation_settings"
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    bans_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    mutes_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    max_duration_seconds: Mapped[int] = mapped_column(default=2592000, server_default="2592000")
+    allow_permanent_bans: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    updated_by: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("version > 0", name="ck_group_moderation_version"),
+        CheckConstraint(
+            "max_duration_seconds BETWEEN 60 AND 31536000", name="ck_group_moderation_duration"
+        ),
+    )
+
+
+class GroupSanction(Base):
+    """One live local restriction per group/user; never a SCAM or report judgment."""
+
+    __tablename__ = "group_sanctions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"))
+    telegram_id: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(8))
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    reason: Mapped[str] = mapped_column(String(1000))
+    until_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", server_default="PENDING")
+    owned: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    policy_version: Mapped[int] = mapped_column()
+    request_key: Mapped[str] = mapped_column(String(128), unique=True)
+    revoke_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("telegram_id > 0 AND actor_id > 0", name="ck_group_sanction_ids"),
+        CheckConstraint("kind IN ('BAN','MUTE')", name="ck_group_sanction_kind"),
+        CheckConstraint("kind != 'MUTE' OR until_date IS NOT NULL", name="ck_group_mute_expiry"),
+        CheckConstraint(
+            "status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN','REVOKED','EXPIRED','CANCELLED','FAILED')",
+            name="ck_group_sanction_status",
+        ),
+        Index(
+            "uq_group_live_sanction",
+            "chat_id",
+            "telegram_id",
+            unique=True,
+            sqlite_where=text("status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN')"),
+            postgresql_where=text("status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN')"),
+        ),
+    )
+
+
+class GroupSanctionJob(Base):
+    """Fenced durable work; ambiguous writes are retained for reconciliation."""
+
+    __tablename__ = "group_sanction_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sanction_id: Mapped[int] = mapped_column(ForeignKey("group_sanctions.id"))
+    operation: Mapped[str] = mapped_column(String(8))
+    actor_id: Mapped[int | None] = mapped_column(BigInteger)
+    automatic: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    status: Mapped[str] = mapped_column(String(16), default="PENDING", server_default="PENDING")
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_token: Mapped[str | None] = mapped_column(String(32))
+    result: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        UniqueConstraint("sanction_id", "operation", name="uq_group_sanction_operation"),
+        CheckConstraint("operation IN ('APPLY','RELEASE')", name="ck_group_job_operation"),
+        CheckConstraint(
+            "status IN ('PENDING','PROCESSING','SUCCEEDED','FAILED','CANCELLED','UNCERTAIN')",
+            name="ck_group_job_status",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_group_job_attempts"),
+        Index("ix_group_job_due", "status", "available_at"),
+        Index("ix_group_job_lease", "status", "lease_until"),
+    )
