@@ -238,7 +238,7 @@ class GroupModerationService:
                         )
                     )
                     if apply is not None and apply.status == "PENDING":
-                        sanction.status = "CANCELLED"
+                        sanction.status, sanction.updated_at = "CANCELLED", now()
                         await self.session.execute(
                             update(GroupSanctionJob)
                             .where(
@@ -454,7 +454,7 @@ class GroupModerationService:
             )
             if processing is not None:
                 raise DomainError("group_moderation_busy")
-            sanction.revoke_key = key
+            sanction.revoke_key, sanction.updated_at = key, now()
             if draft is not None:
                 draft.status, draft.sanction_id = "CONFIRMED", sanction.id
             release = await self.session.scalar(

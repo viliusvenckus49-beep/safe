@@ -150,6 +150,7 @@ class LocalModerationExecutor:
                         job.status, job.result = "CANCELLED", "POLICY_OR_DEADLINE_CHANGED"
                         if sanction.status == "PENDING":
                             sanction.status = "CANCELLED"
+                        sanction.updated_at = now()
                         audit(
                             session,
                             "cancelled",
@@ -167,6 +168,7 @@ class LocalModerationExecutor:
                         await session.commit()
                         continue
                     job.status, job.result = "CANCELLED", "NO_CONFIRMED_RESTRICTION"
+                    sanction.updated_at = now()
                     await session.commit()
                     continue
                 elif (
@@ -225,6 +227,7 @@ class LocalModerationExecutor:
                     sanction.status = "CANCELLED"
                 elif sanction.status == "REVOKING":
                     sanction.status = "ACTIVE"
+                sanction.updated_at = now()
                 audit(
                     session,
                     "cancelled",

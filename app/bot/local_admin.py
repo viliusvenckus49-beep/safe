@@ -6,6 +6,7 @@ import re
 from datetime import timedelta
 from html import escape
 from typing import Any
+from weakref import WeakValueDictionary
 
 import structlog
 from aiogram import F, Router
@@ -13,7 +14,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRet
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from app.bot.callbacks import LocalAction
 from app.bot.keyboards import keyboard
@@ -34,6 +35,18 @@ from app.models import (
 )
 from app.moderation_services import GroupModerationService, utc
 from app.services import Service
+
+PANEL_LOCKS: WeakValueDictionary[tuple[int, int], asyncio.Lock] = WeakValueDictionary()
+
+
+def panel_lock(chat: int, message: int) -> asyncio.Lock:
+    key = (chat, message)
+    lock = PANEL_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        PANEL_LOCKS[key] = lock
+    return lock
+
 
 KINDS = ("BAN", "UNBAN", "MUTE", "UNMUTE", "WARN", "KICK")
 DURATIONS = {"30m": 1800, "1h": 3600, "1d": 86400, "7d": 604800, "30d": 2592000}
@@ -115,7 +128,8 @@ async def display(
 ) -> Message:
     if edit:
         try:
-            result = await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
+            async with panel_lock(message.chat.id, message.message_id):
+                result = await message.edit_text(text, reply_markup=markup, parse_mode="HTML")
             return result if isinstance(result, Message) else message
         except TelegramBadRequest as error:
             if "message is not modified" in error.message.lower():
@@ -288,6 +302,24 @@ async def history_panel(
         text += f"\n\n<b>#{row.id} · {t('lm.' + row.kind)}</b>\n{utc(row.created_at).strftime('%Y-%m-%d %H:%M UTC')} · {t('lm.state.' + row.status)}\n🆔 <code>{row.actor_id}</code>"
         if row.reason:
             text += "\n" + t("lm.reason", reason=escape(row.reason[:120]))
+        release = await service.session.scalar(
+            select(GroupModerationDraft)
+            .where(
+                GroupModerationDraft.sanction_id == row.id,
+                GroupModerationDraft.status == "CONFIRMED",
+                GroupModerationDraft.kind.in_(("UNBAN", "UNMUTE")),
+            )
+            .order_by(GroupModerationDraft.created_at.desc(), GroupModerationDraft.id.desc())
+            .limit(1)
+        )
+        if release:
+            text += (
+                "\n"
+                + t("lm.last_release")
+                + f" {t('lm.' + release.kind)} · {utc(release.created_at).strftime('%Y-%m-%d %H:%M UTC')} · <code>{release.actor_id}</code>"
+            )
+            if release.reason:
+                text += "\n" + t("lm.reason", reason=escape(release.reason[:120]))
     if not rows:
         text += "\n\n" + t("lm.no_history")
     buttons = []
@@ -415,52 +447,57 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
                 .limit(limit)
             )
         )
+        await session.commit()
         for draft in drafts:
-            with use_language(draft.language):
-                text, done = await receipt_text(session, draft)
-                digest = hashlib.sha256(text.encode()).hexdigest()
-                row = await session.get(GroupSanction, draft.sanction_id)
-                checked_at = row.updated_at
-                markup = (
-                    keyboard(
-                        [
-                            [(t("lm.refresh"), cb("refresh", value=draft.id))],
-                            [(t("lm.back"), cb("group", draft.chat_id))],
-                        ]
-                    )
-                    if draft.panel_chat_id == draft.actor_id
-                    else None
-                )
-                try:
-                    if digest != draft.receipt_hash:
-                        await bot.edit_message_text(
-                            chat_id=draft.panel_chat_id,
-                            message_id=draft.panel_message_id,
-                            text=text,
-                            reply_markup=markup,
-                            parse_mode="HTML",
+            async with panel_lock(draft.panel_chat_id, draft.panel_message_id):
+                await session.refresh(draft)
+                if draft.receipt_done:
+                    continue
+                with use_language(draft.language):
+                    text, done = await receipt_text(session, draft)
+                    digest = hashlib.sha256(text.encode()).hexdigest()
+                    row = await session.get(GroupSanction, draft.sanction_id)
+                    checked_at = row.updated_at
+                    markup = (
+                        keyboard(
+                            [
+                                [(t("lm.refresh"), cb("refresh", value=draft.id))],
+                                [(t("lm.back"), cb("group", draft.chat_id))],
+                            ]
                         )
-                    draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
-                        digest,
-                        done,
-                        checked_at,
+                        if draft.panel_chat_id == draft.actor_id
+                        else None
                     )
-                except TelegramRetryAfter as error:
-                    draft.receipt_available_at = now() + timedelta(seconds=error.retry_after)
-                except TelegramBadRequest as error:
-                    if "message is not modified" in error.message.lower():
+                    try:
+                        if digest != draft.receipt_hash:
+                            await bot.edit_message_text(
+                                chat_id=draft.panel_chat_id,
+                                message_id=draft.panel_message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode="HTML",
+                            )
                         draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
                             digest,
                             done,
                             checked_at,
                         )
-                    else:
-                        draft.receipt_done = (
-                            True  # Never recreate missing receipts or spam a group.
-                        )
-                except (TelegramAPIError, TimeoutError, OSError):
-                    draft.receipt_available_at = now() + timedelta(seconds=30)
-                await session.commit()
+                    except TelegramRetryAfter as error:
+                        draft.receipt_available_at = now() + timedelta(seconds=error.retry_after)
+                    except TelegramBadRequest as error:
+                        if "message is not modified" in error.message.lower():
+                            draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
+                                digest,
+                                done,
+                                checked_at,
+                            )
+                        else:
+                            draft.receipt_done = (
+                                True  # Never recreate missing receipts or spam a group.
+                            )
+                    except (TelegramAPIError, TimeoutError, OSError):
+                        draft.receipt_available_at = now() + timedelta(seconds=30)
+                    await session.commit()
 
 
 def register_local_handlers(router: Router) -> None:
@@ -625,6 +662,17 @@ def register_local_handlers(router: Router) -> None:
                 chat = draft.chat_id
             if action != "groups":
                 local = await access(service, callback.bot, chat, actor)
+            if action not in {"confirm", "refresh"}:
+                # Navigating away retires background edits of this shared panel.
+                await service.session.execute(
+                    update(GroupModerationDraft)
+                    .where(
+                        GroupModerationDraft.panel_chat_id == message.chat.id,
+                        GroupModerationDraft.panel_message_id == message.message_id,
+                    )
+                    .values(receipt_done=True)
+                )
+                await service.session.commit()
             await callback.answer()
             acknowledged = True
             if action == "groups":

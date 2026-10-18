@@ -6,12 +6,15 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramRetryAfter
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
     BanChatMember,
+    EditMessageText,
     GetChat,
     GetChatMember,
     RestrictChatMember,
+    SendMessage,
     UnbanChatMember,
 )
 from aiogram.types import Chat, Message, User
@@ -367,3 +370,97 @@ async def test_catalogs_have_all_stage_two_keys():
     assert keys
     for lang in ("en", "ru"):
         assert {k for k in CATALOGS[lang] if k.startswith("lm.")} == keys
+
+
+async def test_queued_receipt_updates_same_message_after_restart(local_journey, database):
+    journey, native = local_journey
+    native.error = TelegramRetryAfter(
+        method=BanChatMember(chat_id=CHAT, user_id=51), message="Flood", retry_after=60
+    )
+    await journey.send("/ban 51 1h", actor=42, chat=CHAT)
+    assert t("lm.queued") in journey.text()
+    sends = len([c for c in journey.transport.calls if isinstance(c, SendMessage)])
+    async with database() as session:
+        draft = await session.scalar(select(GroupModerationDraft))
+        message_id = draft.panel_message_id
+        await session.execute(
+            update(GroupSanctionJob)
+            .where(GroupSanctionJob.operation == "APPLY")
+            .values(available_at=now() - timedelta(seconds=1))
+        )
+        await session.commit()
+    native.error = None
+    await LocalModerationExecutor(database, journey.bot).process()
+    edits = [c for c in journey.transport.calls if isinstance(c, EditMessageText)]
+    assert edits[-1].message_id == message_id and edits[-1].chat_id == CHAT
+    assert t("lm.done") in edits[-1].text
+    assert len([c for c in journey.transport.calls if isinstance(c, SendMessage)]) == sends
+    count = len(edits)
+    await LocalModerationExecutor(database, journey.bot).process(limit=0)
+    assert len([c for c in journey.transport.calls if isinstance(c, EditMessageText)]) == count
+
+
+async def test_settings_toggle_preserves_duration_and_rejects_stale_version(
+    local_journey, database
+):
+    journey, native = local_journey
+    from app.models import GroupModerationSettings
+
+    async with database() as session:
+        await session.execute(
+            update(GroupModerationSettings)
+            .where(GroupModerationSettings.chat_id == CHAT)
+            .values(max_duration_seconds=604800)
+        )
+        await session.commit()
+        version = (await session.get(GroupModerationSettings, CHAT)).version
+    data = LocalAction(action="toggle", chat=CHAT, value=f"warnings_enabled:{version}").pack()
+    await journey.click(data, actor=42)
+    await journey.click(data, actor=42)
+    async with database() as session:
+        policy = await session.get(GroupModerationSettings, CHAT)
+        assert not policy.warnings_enabled
+        assert policy.max_duration_seconds == 604800 and policy.version == version + 1
+    assert native.calls == []
+
+
+async def test_unban_before_apply_reports_cancelled_without_api(database):
+    native = NativeBot()
+    await enabled(database, native)
+    await confirmed(
+        database, native, await prepared(database, native, until=now() + timedelta(hours=1))
+    )
+    draft = await prepared(database, native, "UNBAN", key="cancel-before-apply")
+    await confirmed(database, native, draft)
+    async with database() as session:
+        draft = await session.get(GroupModerationDraft, draft.id)
+        text, done = await receipt_text(session, draft)
+        assert done and t("lm.cancelled") in text
+    assert native.calls == []
+
+
+async def test_private_navigation_retires_pending_receipt(local_journey, database):
+    journey, native = local_journey
+    await journey.send("/moderation", actor=42)
+    await journey.click(LocalAction(action="action", chat=CHAT, value="BAN").pack(), actor=42)
+    await journey.send("51 1h", actor=42)
+    async with database() as session:
+        draft = await session.scalar(select(GroupModerationDraft))
+        draft_id = draft.id
+    native.error = TelegramRetryAfter(
+        method=BanChatMember(chat_id=CHAT, user_id=51), message="Flood", retry_after=60
+    )
+    await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
+    await journey.click(LocalAction(action="group", chat=CHAT).pack(), actor=42)
+    count = len(journey.transport.calls)
+    async with database() as session:
+        assert (await session.get(GroupModerationDraft, draft_id)).receipt_done
+        await session.execute(
+            update(GroupSanctionJob)
+            .where(GroupSanctionJob.operation == "APPLY")
+            .values(available_at=now() - timedelta(seconds=1))
+        )
+        await session.commit()
+    native.error = None
+    await LocalModerationExecutor(database, journey.bot).process()
+    assert not any(isinstance(c, EditMessageText) for c in journey.transport.calls[count:])
