@@ -292,7 +292,7 @@ async def test_group_raw_ban_then_unban_and_no_reason_line(local_journey):
     journey, native = local_journey
     await journey.send("/ban 51 30m", actor=42, chat=CHAT)
     assert [c[0] for c in native.calls] == ["ban"]
-    assert t("lm.done") in journey.text() and "Priežastis:" not in journey.text()
+    assert "𝗨𝗦𝗘𝗥 • 𝗕𝗔𝗡𝗡𝗘𝗗" in journey.text() and "Priežastis:" not in journey.text()
     await journey.send("/unban 51", actor=42, chat=CHAT)
     assert [c[0] for c in native.calls] == ["ban", "unban"]
 
@@ -346,7 +346,7 @@ async def test_private_ui_confirmation_localization_history_and_no_callback_leak
     async with database() as session:
         assert await session.scalar(select(func.count()).select_from(GroupSanction)) == 0
     await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
-    assert t("lm.recorded", lang) in journey.text() and "&lt;reason&gt;" in journey.text()
+    assert "𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗" in journey.text() and "&lt;reason&gt;" in journey.text()
     await journey.click(LocalAction(action="whist", chat=CHAT, value="51:0").pack(), actor=42)
     assert t("lm.warnings", lang) in journey.text()
     assert native.calls == []
@@ -393,7 +393,7 @@ async def test_queued_receipt_updates_same_message_after_restart(local_journey, 
     await LocalModerationExecutor(database, journey.bot).process()
     edits = [c for c in journey.transport.calls if isinstance(c, EditMessageText)]
     assert edits[-1].message_id == message_id and edits[-1].chat_id == CHAT
-    assert t("lm.done") in edits[-1].text
+    assert "𝗨𝗦𝗘𝗥 • 𝗕𝗔𝗡𝗡𝗘𝗗" in edits[-1].text
     assert len([c for c in journey.transport.calls if isinstance(c, SendMessage)]) == sends
     count = len(edits)
     await LocalModerationExecutor(database, journey.bot).process(limit=0)

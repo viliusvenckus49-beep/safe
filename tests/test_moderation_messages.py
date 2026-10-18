@@ -1,0 +1,374 @@
+"""Exact receipt layout and real dispatcher/SQL integration; no production API calls."""
+
+from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
+
+import pytest
+from aiogram.methods import EditMessageText, SendMessage
+from aiogram.types import Chat, Message
+from aiogram.types import User as TelegramUser
+from sqlalchemy import func, select
+from test_group_moderation_foundation import CHAT, OTHER, NativeBot
+from test_local_moderation_stage2 import (
+    confirmed,
+    enabled,
+    prepared,
+)
+from test_local_moderation_stage2 import (
+    local_journey as local_journey,
+)
+
+from app.bot.callbacks import LocalAction
+from app.bot.local_admin import receipt_text
+from app.bot.local_moderation import LocalModerationExecutor
+from app.bot.moderation_messages import (
+    BRAND,
+    HEADINGS,
+    duration_text,
+    format_success,
+    identity_label,
+)
+from app.i18n import use_language
+from app.models import AuditEvent, GroupModerationDraft, GroupSanction, ScamRecord, User, now
+from app.services import Service
+
+
+class SafeHTML(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack = []
+        self.tags = []
+        self.values = []
+
+    def handle_starttag(self, tag, attrs):
+        assert tag in {"b", "code"} and attrs == []
+        self.stack.append(tag)
+        self.tags.append(tag)
+
+    def handle_endtag(self, tag):
+        assert self.stack.pop() == tag
+
+    def handle_data(self, data):
+        self.values.append(data)
+
+
+def render(kind, **values):
+    return format_success(kind, 123456789, user="@example", admin="@admin", **values)
+
+
+@pytest.mark.parametrize("kind", HEADINGS)
+def test_exact_english_templates(kind):
+    with use_language("en"):
+        text = render(kind, reason="Spam", duration_seconds=604800, warnings=2)
+    fields = [HEADINGS[kind], "👤 <b>User:</b> @example", "🆔 <b>ID:</b> <code>123456789</code>"]
+    if kind in {"BAN", "MUTE"}:
+        fields.append("⏳ <b>Duration:</b> 7 days")
+    if kind == "WARN":
+        fields.append("⚠️ <b>Warnings:</b> 2")
+    fields += ["📋 <b>Reason:</b> Spam", "👑 <b>Admin:</b> @admin", BRAND]
+    assert text == "\n\n".join(fields)
+    assert "STATUS" not in text and "━━" not in text and "2/3" not in text
+    parser = SafeHTML()
+    parser.feed(text)
+    assert parser.stack == []
+
+
+@pytest.mark.parametrize("kind", HEADINGS)
+@pytest.mark.parametrize("reason", ["", "   \n\t", "Rule violation"])
+def test_optional_reason_does_not_leave_empty_fields(kind, reason):
+    with use_language("en"):
+        text = render(kind, reason=reason)
+    assert ("📋 <b>Reason:</b>" in text) == bool(reason.strip())
+    assert "\n\n\n" not in text
+    assert "⚠️ <b>Warnings:</b>" not in text
+    assert ("⏳ <b>Duration:</b> Permanent" in text) == (kind in {"BAN", "MUTE"})
+
+
+@pytest.mark.parametrize(
+    "lang,labels",
+    [
+        (
+            "lt",
+            (
+                "Naudotojas",
+                "Trukmė",
+                "Priežastis",
+                "Administratorius",
+                "Įspėjimai",
+                "Neterminuotai",
+            ),
+        ),
+        ("en", ("User", "Duration", "Reason", "Admin", "Warnings", "Permanent")),
+        ("ru", ("Пользователь", "Срок", "Причина", "Администратор", "Предупреждения", "Бессрочно")),
+    ],
+)
+@pytest.mark.parametrize("kind", HEADINGS)
+def test_localized_receipts(lang, labels, kind):
+    user, duration, reason, admin, warnings, permanent = labels
+    with use_language(lang):
+        text = render(kind, reason="test", warnings=2)
+    for label in (user, reason, admin):
+        assert f"<b>{label}:</b>" in text
+    if kind in {"BAN", "MUTE"}:
+        assert f"<b>{duration}:</b> {permanent}" in text
+    if kind == "WARN":
+        assert f"<b>{warnings}:</b> 2" in text and "2/" not in text
+
+
+@pytest.mark.parametrize(
+    "lang,seconds,kind,expected",
+    [
+        ("en", 1800, "BAN", "30 minutes"),
+        ("en", 3600, "BAN", "1 hour"),
+        ("en", 86400, "BAN", "1 day"),
+        ("en", 86400, "MUTE", "24 hours"),
+        ("en", 604800, "BAN", "7 days"),
+        ("en", 2592000, "BAN", "30 days"),
+        ("en", 604799, "BAN", "7 days"),
+        ("lt", 1800, "MUTE", "30 minučių"),
+        ("lt", 3600, "BAN", "1 valanda"),
+        ("lt", 86400, "MUTE", "24 valandos"),
+        ("lt", 604800, "BAN", "7 dienos"),
+        ("lt", 2592000, "BAN", "30 dienų"),
+        ("ru", 1800, "MUTE", "30 минут"),
+        ("ru", 3600, "BAN", "1 час"),
+        ("ru", 86400, "MUTE", "24 часа"),
+        ("ru", 604800, "BAN", "7 дней"),
+        ("ru", 2592000, "BAN", "30 дней"),
+    ],
+)
+def test_duration_localization(lang, seconds, kind, expected):
+    with use_language(lang):
+        assert duration_text(seconds, kind) == expected
+
+
+def test_escaped_unicode_values_cannot_inject_html_or_layout():
+    text = format_success(
+        "WARN",
+        123,
+        user='@<evil>&"',
+        admin="Žąsis 🛡 <b>x</b>",
+        reason="\n <script>bad</script>\n\n A & B <b>fake</b>\t",
+        warnings=1,
+    )
+    parser = SafeHTML()
+    parser.feed(text)
+    assert parser.stack == []
+    visible = "".join(parser.values)
+    assert '@<evil>&"' in visible and "Žąsis 🛡 <b>x</b>" in visible
+    assert "<script>bad</script> A & B <b>fake</b>" in visible
+    assert "<script>" not in text and "&lt;script&gt;" in text
+    assert "\n\n\n" not in text
+
+
+@pytest.mark.parametrize(
+    "username,name,expected",
+    [
+        ("example", "Name", "@example"),
+        (None, "Žąsis & Co 🛡", "Žąsis & Co 🛡"),
+        (None, "Vartotojas", "123"),
+        (None, "", "123"),
+    ],
+)
+def test_identity_fallbacks(username, name, expected):
+    user = User(telegram_id=123, username=username, display_name=name)
+    assert identity_label(user, 123) == expected
+    assert identity_label(user, 456) == "456"
+    assert identity_label(None, 123) == "123"
+
+
+@pytest.mark.asyncio
+async def test_warning_counter_is_scoped_stable_and_read_only(database):
+    native = NativeBot()
+    await enabled(database, native)
+    rows = []
+    drafts = []
+    for index in range(3):
+        draft = await prepared(database, native, "WARN", key=f"warning-{index}")
+        rows.append(await confirmed(database, native, draft))
+        drafts.append(draft)
+    async with database() as session:
+        session.add_all(
+            [
+                GroupSanction(
+                    chat_id=OTHER,
+                    telegram_id=51,
+                    kind="WARN",
+                    actor_id=42,
+                    reason="",
+                    status="RECORDED",
+                    policy_version=1,
+                    request_key="other-group",
+                ),
+                GroupSanction(
+                    chat_id=CHAT,
+                    telegram_id=52,
+                    kind="WARN",
+                    actor_id=42,
+                    reason="",
+                    status="RECORDED",
+                    policy_version=1,
+                    request_key="other-user",
+                ),
+            ]
+        )
+        await session.commit()
+        before = list((await session.execute(select(GroupSanction.id, GroupSanction.status))).all())
+        audits = await session.scalar(select(func.count()).select_from(AuditEvent))
+        with use_language("en"):
+            text, done = await receipt_text(
+                session, await session.get(GroupModerationDraft, drafts[1].id)
+            )
+        assert done and "⚠️ <b>Warnings:</b> 2" in text and "2/3" not in text
+        assert (
+            list((await session.execute(select(GroupSanction.id, GroupSanction.status))).all())
+            == before
+        )
+        assert await session.scalar(select(func.count()).select_from(AuditEvent)) == audits
+        assert await session.scalar(select(func.count()).select_from(ScamRecord)) == 0
+    assert native.calls == []
+
+
+@pytest.mark.asyncio
+async def test_release_uses_releasing_admin_and_stable_duration(database, settings):
+    native = NativeBot()
+    native.admin(CHAT, 43)
+    await enabled(database, native)
+    draft = await prepared(database, native, until=now() + timedelta(days=7))
+    row = await confirmed(database, native, draft)
+    worker = LocalModerationExecutor(database, native)
+    await worker.process(sanction_id=row.id)
+    async with database() as session:
+        service = Service(settings, session)
+        await service.observe(42, "initial_admin", "Initial")
+        await service.observe(43, None, "Releasing <admin>")
+        await service.observe(51, "example", "Example")
+        with use_language("en"):
+            text, _ = await receipt_text(session, await session.get(GroupModerationDraft, draft.id))
+        assert "Duration:</b> 7 days" in text
+    release = await prepared(database, native, "UNBAN", key="release-by-other-admin", actor=43)
+    await confirmed(database, native, release, actor=43)
+    await worker.process(sanction_id=row.id)
+    async with database() as session:
+        with use_language("en"):
+            text, _ = await receipt_text(
+                session, await session.get(GroupModerationDraft, release.id)
+            )
+        assert "𝗨𝗡𝗕𝗔𝗡𝗡𝗘𝗗" in text and "Admin:</b> Releasing &lt;admin&gt;" in text
+        assert "initial_admin" not in text and "Duration:" not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", HEADINGS)
+async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
+    local_journey, database, settings, kind
+):
+    journey, native = local_journey
+    if kind in {"UNBAN", "UNMUTE"}:
+        await journey.send("/ban 51" if kind == "UNBAN" else "/mute 51", actor=42, chat=CHAT)
+    await journey.send(
+        f"/{kind.lower()} 51" + (" 7d" if kind in {"BAN", "MUTE"} else ""), actor=42, chat=CHAT
+    )
+    notices = [
+        c
+        for c in journey.transport.calls
+        if isinstance(c, SendMessage) and HEADINGS[kind] in (c.text or "")
+    ]
+    assert len(notices) == 1
+    notice = notices[0]
+    assert notice.reply_markup is None and notice.parse_mode == "HTML"
+    async with database() as session:
+        notice_id = (
+            await session.scalar(
+                select(GroupModerationDraft).where(GroupModerationDraft.kind == kind)
+            )
+        ).panel_message_id
+        await Service(settings, session).observe(51, "example", "Example")
+    before = len(journey.transport.calls)
+    await journey.send("/info 51", actor=42)
+    assert not any(
+        isinstance(c, EditMessageText) and c.chat_id == CHAT and c.message_id == notice_id
+        for c in journey.transport.calls[before:]
+    )
+    assert not any(
+        c.chat_id == CHAT and c.message_id == notice_id for c in journey.transport.deletions
+    )
+
+
+@pytest.mark.asyncio
+async def test_reply_identity_and_private_confirmation_have_no_result_buttons(
+    local_journey, database
+):
+    journey, _ = local_journey
+    reply = Message(
+        message_id=88,
+        date=datetime.now(UTC),
+        chat=Chat(id=CHAT, type="supergroup"),
+        from_user=TelegramUser(
+            id=51, is_bot=False, first_name="Reply target", username="reply_target"
+        ),
+        text="Hi",
+    )
+    await journey.send("/warn", actor=42, chat=CHAT, reply_to_message=reply)
+    assert "@reply_target" in journey.text()
+    await journey.send("/moderation", actor=42)
+    await journey.click(LocalAction(action="action", chat=CHAT, value="WARN").pack(), actor=42)
+    await journey.send("51", actor=42)
+    async with database() as session:
+        draft = await session.scalar(
+            select(GroupModerationDraft)
+            .where(GroupModerationDraft.kind == "WARN")
+            .order_by(GroupModerationDraft.created_at.desc())
+        )
+        draft_id = draft.id
+    await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
+    receipt = [
+        c
+        for c in journey.transport.calls
+        if isinstance(c, EditMessageText) and HEADINGS["WARN"] in (c.text or "")
+    ][-1]
+    assert receipt.reply_markup is None and receipt.parse_mode == "HTML"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["pending", "failed", "uncertain", "already"])
+async def test_unconfirmed_or_preexisting_results_never_use_success_heading(database, outcome):
+    native = NativeBot()
+    await enabled(database, native)
+    draft = await prepared(database, native)
+    row = await confirmed(database, native, draft)
+    if outcome == "failed":
+        native.api_false = True
+    if outcome == "uncertain":
+        native.error = TimeoutError()
+    if outcome == "already":
+        native.members[CHAT, 51] = native.peer(51, "kicked", until_date=None)
+    if outcome != "pending":
+        await LocalModerationExecutor(database, native).process(sanction_id=row.id)
+    async with database() as session:
+        text, done = await receipt_text(session, await session.get(GroupModerationDraft, draft.id))
+    assert not any(header in text for header in HEADINGS.values())
+    assert done == (outcome != "pending")
+
+
+@pytest.mark.asyncio
+async def test_private_profile_does_not_edit_or_delete_confirmed_receipt(
+    local_journey, database, settings
+):
+    journey, _ = local_journey
+    await journey.send("/moderation", actor=42)
+    await journey.click(LocalAction(action="group", chat=CHAT).pack(), actor=42)
+    await journey.send("/warn 51", actor=42)
+    async with database() as session:
+        draft = await session.scalar(select(GroupModerationDraft))
+        notice_id = draft.panel_message_id
+        await Service(settings, session).observe(51, "example", "Example")
+    before = len(journey.transport.calls)
+    await journey.send("/info 51", actor=42)
+    assert not any(
+        isinstance(c, EditMessageText) and c.chat_id == 42 and c.message_id == notice_id
+        for c in journey.transport.calls[before:]
+    )
+    assert not any(
+        c.chat_id == 42 and c.message_id == notice_id for c in journey.transport.deletions
+    )

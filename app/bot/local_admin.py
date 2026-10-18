@@ -14,11 +14,13 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRet
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import User as TelegramUser
 from sqlalchemy import or_, select, update
 
 from app.bot.callbacks import LocalAction
 from app.bot.keyboards import keyboard
 from app.bot.local_moderation import LocalModerationExecutor
+from app.bot.moderation_messages import success_message
 from app.bot.states import LocalModerationFlow
 from app.bot.validation import actor_id
 from app.errors import DomainError
@@ -340,7 +342,9 @@ async def history_panel(
     await display(message, text, keyboard(buttons), edit=edit)
 
 
-async def receipt_text(session: Any, draft: GroupModerationDraft) -> tuple[str, bool]:
+async def receipt_text(
+    session: Any, draft: GroupModerationDraft, *, observed: tuple[TelegramUser, ...] = ()
+) -> tuple[str, bool]:
     row = await session.get(GroupSanction, draft.sanction_id, populate_existing=True)
     if row is None:
         return t("lm.failed"), True
@@ -371,6 +375,8 @@ async def receipt_text(session: Any, draft: GroupModerationDraft) -> tuple[str, 
         key, done = ("already" if apply.result == "ALREADY_BANNED" else "done"), True
     elif row.status in {"FAILED", "CANCELLED"}:
         key, done = "failed", True
+    if key in {"done", "recorded"}:
+        return await success_message(session, draft, row, observed=observed), done
     text = (
         t("lm.title")
         + f"\n\n<b>{t('lm.' + draft.kind)}</b>\n🆔 <code>{draft.telegram_id}</code>\n\n"
@@ -416,7 +422,10 @@ async def show_draft(
         else [[(t("lm.refresh"), cb("refresh", value=draft.id))]]
     )
     buttons.append([(t("lm.back"), cb("group", draft.chat_id))])
-    result = await display(message, text, keyboard(buttons), edit=edit)
+    # Confirmation controls belong to the private preview, never to a receipt.
+    result = await display(
+        message, text, keyboard(buttons) if draft.status == "PENDING" else None, edit=edit
+    )
     draft.panel_chat_id, draft.panel_message_id = result.chat.id, result.message_id
     draft.language = language.get()
     draft.receipt_hash = hashlib.sha256(text.encode()).hexdigest()
@@ -458,23 +467,12 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
                     digest = hashlib.sha256(text.encode()).hexdigest()
                     row = await session.get(GroupSanction, draft.sanction_id)
                     checked_at = row.updated_at
-                    markup = (
-                        keyboard(
-                            [
-                                [(t("lm.refresh"), cb("refresh", value=draft.id))],
-                                [(t("lm.back"), cb("group", draft.chat_id))],
-                            ]
-                        )
-                        if draft.panel_chat_id == draft.actor_id
-                        else None
-                    )
                     try:
                         if digest != draft.receipt_hash:
                             await bot.edit_message_text(
                                 chat_id=draft.panel_chat_id,
                                 message_id=draft.panel_message_id,
                                 text=text,
-                                reply_markup=markup,
                                 parse_mode="HTML",
                             )
                         draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
@@ -570,7 +568,15 @@ def register_local_handlers(router: Router) -> None:
                 limit=2, sanction_id=sanction.id
             )
             await service.session.refresh(draft)
-            text, done = await receipt_text(service.session, draft)
+            people = tuple(
+                person
+                for person in (
+                    message.from_user,
+                    message.reply_to_message.from_user if message.reply_to_message else None,
+                )
+                if person is not None
+            )
+            text, done = await receipt_text(service.session, draft, observed=people)
             if draft.panel_message_id:
                 try:
                     await bound_bot(message).edit_message_text(
@@ -735,7 +741,7 @@ def register_local_handlers(router: Router) -> None:
                 assert draft is not None
                 if action == "confirm":
                     sanction = await local.confirm(value, actor)
-                    await display(message, t("lm.queued"), nav(chat), edit=True)
+                    await display(message, t("lm.queued"), None, edit=True)
                     await LocalModerationExecutor(session_factory, callback.bot).process(
                         limit=2, sanction_id=sanction.id
                     )

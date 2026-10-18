@@ -121,3 +121,32 @@ supported single polling-process topology for the existing SCAM engine; local
 SQL job fencing does not make multiple legacy SCAM pollers safe. Deleted users,
 unknown peers, revoked rights, flood limits and inaccessible groups may prevent
 native actions. These are recorded as failure/queued/uncertain, never success.
+
+## Stage 2.1 receipt presentation
+
+Confirmed BAN, WARN, MUTE, KICK, UNBAN and UNMUTE receipts use one shared HTML
+formatter in `app/bot/moderation_messages.py`. English brand/status headings and
+the CRIMSON signature retain the supplied Unicode design; field labels and
+human-readable durations follow the selected LT/EN/RU language. Dynamic names and
+reasons are escaped, and whitespace is compacted to keep user text inside its
+field. IDs retain safe `<code>` formatting.
+
+Receipts carry no inline keyboard and are not tracked as profile/navigation
+screens. Private action previews keep their existing Confirm/Cancel controls;
+settings and histories retain their controls. Use `/moderation` to return to
+administration after a receipt. Existing callback routes are unchanged.
+
+The formatter only reads existing numeric identities and recorded warnings;
+it never resolves a username or changes an action. Immediate reply-command
+results can also use the Telegram objects already attached to that update.
+Unknown names fall back to the actual numeric ID. WARN shows the committed count
+for this group/user up to that warning, without an invented limit. Temporary
+durations are derived from the stored expiry and draft creation, not the time
+of a later refresh. There is no schema change in stage 2.1.
+
+Only the existing confirmed-success branches use the new success headings.
+Queued, failed, uncertain, protected, cancelled and already-banned results keep
+their previous meanings. Deferred results update the existing receipt in place;
+older receipts are not deleted or converted in bulk. Existing messages retain
+their old appearance unless their own deferred result or explicit refresh needs
+an update. Profile views do not edit or delete moderation receipts.
