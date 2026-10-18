@@ -179,3 +179,51 @@ async def test_telegram_rejection_does_not_mark_preview_success(journey, databas
     async with database() as session:
         assert not (await session.get(AdContentDraft, did)).previewed
         assert (await session.get(AdCampaign, cid)).version == 1
+
+
+async def test_album_buttons_are_a_separate_native_message(journey, database, settings):
+    cid = await new(journey, database)
+    async with database() as session:
+        ads = AdsService(settings, session)
+        first = await ads.stage(
+            900,
+            cid,
+            1,
+            "MEDIA",
+            [{"kind": "photo", "file_id": "photo_one"}, {"kind": "photo", "file_id": "photo_two"}],
+            "album-direct",
+        )
+        await ads.mark_previewed(900, first.id)
+        await ads.save(900, first.id)
+    await journey.click(cb("edit", cid, "BUTTONS"), actor=900)
+    await journey.send("Open - https://t.me/Example", actor=900)
+    async with database() as session:
+        did = (
+            await session.scalar(select(AdContentDraft).where(AdContentDraft.field == "BUTTONS"))
+        ).id
+    before = len(journey.transport.calls)
+    await journey.click(cb("draft_preview", cid, did), actor=900)
+    calls = journey.transport.calls[before:]
+    album_index = next(i for i, c in enumerate(calls) if isinstance(c, SendMediaGroup))
+    following = next(c for c in calls[album_index + 1 :] if isinstance(c, SendMessage))
+    assert following.chat_id == 900
+    assert following.reply_markup.inline_keyboard[0][0].url == "https://t.me/Example"
+    assert t("ads.album_buttons") in following.text
+
+
+async def test_clearing_media_is_independent_and_cancel_does_not_mutate_campaign(
+    journey, database, settings
+):
+    cid = await new(journey, database)
+    await journey.click(cb("edit", cid, "MEDIA"), actor=900)
+    await journey.click(cb("clear", cid, "MEDIA:1"), actor=900)
+    async with database() as session:
+        pending = await session.scalar(
+            select(AdContentDraft).where(AdContentDraft.status == "READY")
+        )
+        did = pending.id
+        assert pending.content["media"] == []
+    await journey.click(cb("cancel", cid, did), actor=900)
+    async with database() as session:
+        assert (await session.get(AdCampaign, cid)).version == 1
+        assert (await session.get(AdContentDraft, did)).status == "CANCELLED"

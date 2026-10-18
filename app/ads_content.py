@@ -2,6 +2,7 @@
 
 import re
 from copy import deepcopy
+from ipaddress import IPv6Address
 from urllib.parse import urlsplit
 
 from aiogram.types import Message, MessageEntity
@@ -51,7 +52,12 @@ def url(value: str) -> str:
         if parsed.port is not None and not 1 <= parsed.port <= 65535:
             raise ValueError()
         host = parsed.hostname.encode("idna").decode()
-        if not re.fullmatch(r"[A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\]", host):
+        if ":" in host:
+            IPv6Address(host)
+        elif not all(
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+            for label in host.rstrip(".").split(".")
+        ):
             raise ValueError()
     except (ValueError, UnicodeError) as error:
         raise DomainError("ads_url") from error

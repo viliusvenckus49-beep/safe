@@ -18,6 +18,7 @@ from app.i18n import CATALOGS
         "http://example.com/a?x=1&b=two",
         "https://example.com/path-a",
         "https://münchen.example/path",
+        "https://[2001:db8::1]/path",
     ],
 )
 def test_valid_urls(value):
@@ -37,6 +38,9 @@ def test_valid_urls(value):
         "https://bad host",
         "https://example.com@evil.com",
         "tg://unsafe",
+        "https://example..com",
+        "https://-invalid.example",
+        "https://.",
     ],
 )
 def test_unsafe_urls_are_rejected(value):

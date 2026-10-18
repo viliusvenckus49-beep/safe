@@ -1,5 +1,6 @@
 """Private native AUTO ADS editor. Stage 3.1 never publishes to a group."""
 
+from hashlib import sha256
 from html import escape
 from typing import Any
 from urllib.parse import urlencode
@@ -41,6 +42,11 @@ from app.services import Service
 
 def cb(name: str, campaign: int = 0, value: str = "") -> str:
     return AdsAction(action=name, campaign=campaign, value=value).pack()
+
+
+def callback_request(callback: CallbackQuery, operation: str) -> str:
+    # Callback IDs are opaque API strings, not promised to be decimal/URL-safe.
+    return f"ads:{operation}:{callback.from_user.id}:" + sha256(callback.id.encode()).hexdigest()
 
 
 def navigation(campaign: int = 0) -> InlineKeyboardMarkup:
@@ -390,7 +396,9 @@ def register_ads_handlers(router: Router) -> None:
                     ads_field=value, ads_campaign=cid, ads_base=base, ads_panel=message.message_id
                 )
                 if value == "MEDIA":
-                    draft = await ads.stage(actor, cid, base, "MEDIA", None, f"media:{callback.id}")
+                    draft = await ads.stage(
+                        actor, cid, base, "MEDIA", None, callback_request(callback, "media")
+                    )
                     await state.update_data(ads_draft=draft.id)
                     await draft_panel(message, ads, actor, draft.id)
                 else:
@@ -408,7 +416,7 @@ def register_ads_handlers(router: Router) -> None:
                     raise DomainError("ads_stale")
                 payload = {"text": "", "entities": []} if field == "TEXT" else []
                 draft = await ads.stage(
-                    actor, cid, int(base_text), field, payload, f"clear:{callback.id}"
+                    actor, cid, int(base_text), field, payload, callback_request(callback, "clear")
                 )
                 await state.set_state(None)
                 await draft_panel(message, ads, actor, draft.id)
@@ -485,7 +493,12 @@ def register_ads_handlers(router: Router) -> None:
             elif name == "restore":
                 campaign, _ = await ads.current(actor, cid)
                 draft = await ads.stage(
-                    actor, cid, campaign.version, "RESTORE", int(value), f"restore:{callback.id}"
+                    actor,
+                    cid,
+                    campaign.version,
+                    "RESTORE",
+                    int(value),
+                    callback_request(callback, "restore"),
                 )
                 await draft_panel(message, ads, actor, draft.id)
             elif name == "drafts":
