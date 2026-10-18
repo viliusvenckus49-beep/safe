@@ -359,6 +359,9 @@ class GroupModerationSettings(Base):
     enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     bans_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     mutes_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    warnings_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    kicks_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    allow_permanent_mutes: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     version: Mapped[int] = mapped_column(default=1, server_default="1")
     max_duration_seconds: Mapped[int] = mapped_column(default=2592000, server_default="2592000")
     allow_permanent_bans: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
@@ -392,10 +395,9 @@ class GroupSanction(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         CheckConstraint("telegram_id > 0 AND actor_id > 0", name="ck_group_sanction_ids"),
-        CheckConstraint("kind IN ('BAN','MUTE')", name="ck_group_sanction_kind"),
-        CheckConstraint("kind != 'MUTE' OR until_date IS NOT NULL", name="ck_group_mute_expiry"),
+        CheckConstraint("kind IN ('BAN','MUTE','WARN','KICK')", name="ck_group_sanction_kind"),
         CheckConstraint(
-            "status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN','REVOKED','EXPIRED','CANCELLED','FAILED')",
+            "status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN','REVOKED','EXPIRED','CANCELLED','FAILED','RECORDED','COMPLETED')",
             name="ck_group_sanction_status",
         ),
         Index(
@@ -436,4 +438,39 @@ class GroupSanctionJob(Base):
         CheckConstraint("attempts >= 0", name="ck_group_job_attempts"),
         Index("ix_group_job_due", "status", "available_at"),
         Index("ix_group_job_lease", "status", "lease_until"),
+    )
+
+
+class GroupModerationDraft(Base):
+    """Durable actor-bound confirmation; never store untrusted usernames as targets."""
+
+    __tablename__ = "group_moderation_drafts"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"))
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    telegram_id: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(8))
+    reason: Mapped[str] = mapped_column(String(1000), default="")
+    until_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sanction_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"))
+    request_key: Mapped[str] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    panel_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    panel_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    language: Mapped[str] = mapped_column(String(2), default="lt")
+    receipt_hash: Mapped[str | None] = mapped_column(String(64))
+    receipt_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    receipt_available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    receipt_done: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    __table_args__ = (
+        CheckConstraint("actor_id > 0 AND telegram_id > 0", name="ck_group_draft_ids"),
+        CheckConstraint(
+            "status IN ('PENDING','CONFIRMED','CANCELLED')", name="ck_group_draft_status"
+        ),
+        CheckConstraint(
+            "kind IN ('BAN','MUTE','WARN','KICK','UNBAN','UNMUTE')", name="ck_group_draft_kind"
+        ),
+        Index("ix_group_draft_expiry", "status", "expires_at"),
     )
