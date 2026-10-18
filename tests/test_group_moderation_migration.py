@@ -21,6 +21,9 @@ NEW_TABLES = {
     "group_sanctions",
     "group_sanction_jobs",
     "group_moderation_drafts",
+    "ad_campaigns",
+    "ad_content_versions",
+    "ad_content_drafts",
 }
 SEED = [
     "INSERT INTO users(id,telegram_id,username,display_name,language,created_at,updated_at) "

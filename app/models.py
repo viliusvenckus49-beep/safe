@@ -474,3 +474,69 @@ class GroupModerationDraft(Base):
         ),
         Index("ix_group_draft_expiry", "status", "expires_at"),
     )
+
+
+class AdCampaign(Base):
+    """Stage 3.1 campaigns are drafts only; content never stores publishing settings."""
+
+    __tablename__ = "ad_campaigns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    internal_name: Mapped[str] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(16), default="DRAFT", server_default="DRAFT")
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    updated_by: Mapped[int] = mapped_column(BigInteger)
+    client_telegram_id: Mapped[int | None] = mapped_column(BigInteger)
+    request_key: Mapped[str] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("status IN ('DRAFT','ARCHIVED')", name="ck_ad_campaign_status"),
+        CheckConstraint(
+            "version > 0 AND created_by > 0 AND updated_by > 0", name="ck_ad_campaign_ids"
+        ),
+        CheckConstraint(
+            "client_telegram_id IS NULL OR client_telegram_id > 0", name="ck_ad_client_id"
+        ),
+    )
+
+
+class AdContentVersion(Base):
+    __tablename__ = "ad_content_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"))
+    revision: Mapped[int] = mapped_column()
+    content: Mapped[dict[str, Any]] = mapped_column(JSON)
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    request_key: Mapped[str] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "revision", name="uq_ad_content_revision"),
+        CheckConstraint("revision > 0 AND actor_id > 0", name="ck_ad_content_ids"),
+    )
+
+
+class AdContentDraft(Base):
+    __tablename__ = "ad_content_drafts"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"))
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    base_version: Mapped[int] = mapped_column()
+    field: Mapped[str] = mapped_column(String(12))
+    content: Mapped[dict[str, Any]] = mapped_column(JSON)
+    inputs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="READY")
+    previewed: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    request_key: Mapped[str] = mapped_column(String(128), unique=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    saved_revision: Mapped[int | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('COLLECTING','READY','SAVED','CANCELLED')", name="ck_ad_draft_status"
+        ),
+        CheckConstraint("field IN ('TEXT','MEDIA','BUTTONS','RESTORE')", name="ck_ad_draft_field"),
+        CheckConstraint("actor_id > 0 AND base_version > 0", name="ck_ad_draft_ids"),
+        Index("ix_ad_draft_owner", "actor_id", "status", "expires_at"),
+    )

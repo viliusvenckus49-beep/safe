@@ -9,6 +9,7 @@ from app.bot.callbacks import (
     AdminAccess,
     AdminHelp,
     AdminRepStep,
+    AdsAction,
     Language,
     Moderation,
     ReportStep,
@@ -129,6 +130,7 @@ def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
         [(t("button.users"), action("users", "0")), (t("button.stats"), action("stats"))],
         [(t("button.audit"), action("audit"))],
         [(t("button.status"), action("status"))],
+        [(t("ads.title"), AdsAction(action="root").pack())],
         [(t("admin_help.button"), AdminHelp().pack())],
     ]
     if owner:
