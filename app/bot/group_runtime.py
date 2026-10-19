@@ -1,7 +1,6 @@
 """Durable, bounded Telegram moderation and opt-in notification delivery worker."""
 
 import asyncio
-import re
 from collections.abc import Callable
 from time import monotonic
 from typing import Any
@@ -17,10 +16,12 @@ from aiogram.exceptions import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.group_presentation import recovery_notification
-from app.bot.moderation_lock import user_moderation_lock
+from app.bot.local_moderation import LocalModerationExecutor
+from app.bot.moderation_lock import has_permanent_ban, user_moderation_lock
 from app.bot.moderation_notices import notify_ban_failure
 from app.bot.scam_broadcasts import process_scam_announcements
 from app.config import Settings
+from app.errors import safe_telegram_reason
 from app.group_services import BanSummary, GroupService, enqueue_scam_bans
 from app.i18n import t, use_language
 from app.models import BanAction, ManagedGroup, RecoveryCampaign, ScamRecord
@@ -33,9 +34,7 @@ INTERACTIVE_BAN_BUDGET = 20.0
 
 def _api_reason(error: TelegramAPIError) -> str:
     """Keep Telegram's description, excluding tokens and control characters."""
-    reason = re.sub(r"\b\d{5,}:[A-Za-z0-9_-]{20,}\b", "[redacted]", error.message)
-    reason = re.sub(r"https?://\S+", "[redacted URL]", reason)
-    return re.sub(r"[\x00-\x1f\x7f]", " ", reason)[:256]
+    return safe_telegram_reason(error.message)
 
 
 async def _attempt_ban(bot: Bot, job: BanAction, timeout: float) -> tuple[bool, str]:
@@ -46,7 +45,7 @@ async def _attempt_ban(bot: Bot, job: BanAction, timeout: float) -> tuple[bool, 
                 lookup(chat_id=job.chat_id, user_id=job.telegram_id),
                 timeout=min(2.0, timeout / 2),
             )
-            if getattr(member, "status", None) == "kicked":
+            if has_permanent_ban(member):
                 return True, "ALREADY_BANNED"
         except TelegramRetryAfter:
             raise  # Respect Telegram's delay for reads as well as writes.
@@ -208,6 +207,7 @@ async def process_group_jobs(bot: Bot, settings: Settings, sessions: Any) -> int
             )
             log.info("group_recovery_result", user_id=delivery.telegram_id, result=result)
             processed += 1
+    processed += await LocalModerationExecutor(sessions, bot).process()
     processed += await process_scam_announcements(bot, settings, sessions)
     return processed
 

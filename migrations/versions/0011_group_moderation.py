@@ -1,0 +1,110 @@
+"""Opt-in local group moderation; preserve all existing judgments and activity."""
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "0011"
+down_revision = "0010"
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    op.create_table(
+        "group_moderation_settings",
+        sa.Column(
+            "chat_id", sa.BigInteger(), sa.ForeignKey("managed_groups.chat_id"), primary_key=True
+        ),
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("bans_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("mutes_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("version", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column("max_duration_seconds", sa.Integer(), nullable=False, server_default="2592000"),
+        sa.Column("allow_permanent_bans", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("updated_by", sa.BigInteger(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint("version > 0", name="ck_group_moderation_version"),
+        sa.CheckConstraint(
+            "max_duration_seconds BETWEEN 60 AND 31536000", name="ck_group_moderation_duration"
+        ),
+    )
+    # Populate only the new table. Existing group approval and data remain untouched.
+    op.execute(
+        sa.text(
+            "INSERT INTO group_moderation_settings "
+            "(chat_id, enabled, version, max_duration_seconds, allow_permanent_bans, updated_at) "
+            "SELECT chat_id, false, 1, 2592000, false, CURRENT_TIMESTAMP FROM managed_groups "
+            "WHERE approved = true"
+        )
+    )
+    op.create_table(
+        "group_sanctions",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column(
+            "chat_id", sa.BigInteger(), sa.ForeignKey("managed_groups.chat_id"), nullable=False
+        ),
+        sa.Column("telegram_id", sa.BigInteger(), nullable=False),
+        sa.Column("kind", sa.String(8), nullable=False),
+        sa.Column("actor_id", sa.BigInteger(), nullable=False),
+        sa.Column("reason", sa.String(1000), nullable=False),
+        sa.Column("until_date", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("status", sa.String(16), nullable=False, server_default="PENDING"),
+        sa.Column("owned", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("policy_version", sa.Integer(), nullable=False),
+        sa.Column("request_key", sa.String(128), nullable=False, unique=True),
+        sa.Column("revoke_key", sa.String(128), nullable=True, unique=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint("telegram_id > 0 AND actor_id > 0", name="ck_group_sanction_ids"),
+        sa.CheckConstraint("kind IN ('BAN','MUTE')", name="ck_group_sanction_kind"),
+        sa.CheckConstraint("kind != 'MUTE' OR until_date IS NOT NULL", name="ck_group_mute_expiry"),
+        sa.CheckConstraint(
+            "status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN','REVOKED','EXPIRED','CANCELLED','FAILED')",
+            name="ck_group_sanction_status",
+        ),
+    )
+    predicate = sa.text("status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN')")
+    op.create_index(
+        "uq_group_live_sanction",
+        "group_sanctions",
+        ["chat_id", "telegram_id"],
+        unique=True,
+        sqlite_where=predicate,
+        postgresql_where=predicate,
+    )
+    op.create_table(
+        "group_sanction_jobs",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("sanction_id", sa.Integer(), sa.ForeignKey("group_sanctions.id"), nullable=False),
+        sa.Column("operation", sa.String(8), nullable=False),
+        sa.Column("actor_id", sa.BigInteger(), nullable=True),
+        sa.Column("automatic", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("status", sa.String(16), nullable=False, server_default="PENDING"),
+        sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("available_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("lease_token", sa.String(32), nullable=True),
+        sa.Column("result", sa.String(64), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("sanction_id", "operation", name="uq_group_sanction_operation"),
+        sa.CheckConstraint("operation IN ('APPLY','RELEASE')", name="ck_group_job_operation"),
+        sa.CheckConstraint(
+            "status IN ('PENDING','PROCESSING','SUCCEEDED','FAILED','CANCELLED','UNCERTAIN')",
+            name="ck_group_job_status",
+        ),
+        sa.CheckConstraint("attempts >= 0", name="ck_group_job_attempts"),
+    )
+    op.create_index("ix_group_job_due", "group_sanction_jobs", ["status", "available_at"])
+    op.create_index("ix_group_job_lease", "group_sanction_jobs", ["status", "lease_until"])
+
+
+def downgrade():
+    # Production rollback uses the old image with additive tables retained.
+    # This explicit downgrade removes ONLY the three tables introduced here.
+    op.drop_index("ix_group_job_lease", table_name="group_sanction_jobs")
+    op.drop_index("ix_group_job_due", table_name="group_sanction_jobs")
+    op.drop_table("group_sanction_jobs")
+    op.drop_index("uq_group_live_sanction", table_name="group_sanctions")
+    op.drop_table("group_sanctions")
+    op.drop_table("group_moderation_settings")

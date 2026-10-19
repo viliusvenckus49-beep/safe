@@ -540,6 +540,7 @@ class GroupHelpRelay:
 
     async def attempt_ban(self, bot: Any, service: Any, job: Any, timeout: float):
         from app.bot.group_runtime import _attempt_ban
+        from app.bot.moderation_lock import has_permanent_ban
 
         if job.chat_id not in self.settings.group_help_scope:
             return await _attempt_ban(bot, job, timeout)
@@ -548,7 +549,7 @@ class GroupHelpRelay:
                 bot.get_chat_member(chat_id=job.chat_id, user_id=job.telegram_id),
                 timeout=min(2, timeout / 3),
             )
-            if member.status == "kicked":
+            if has_permanent_ban(member):
                 return True, "ALREADY_BANNED"
         except TelegramRetryAfter:
             raise
@@ -562,7 +563,7 @@ class GroupHelpRelay:
                         bot.get_chat_member(chat_id=job.chat_id, user_id=job.telegram_id),
                         timeout=min(1, timeout / 3),
                     )
-                    if member.status == "kicked":
+                    if has_permanent_ban(member):
                         return True, "BANNED"
                 except TelegramRetryAfter:
                     raise
@@ -577,6 +578,8 @@ class GroupHelpRelay:
         """Submit one numeric /unban after removal; submission is not proof of unblocking."""
         from aiogram.methods import UnbanChatMember
         from telethon.tl.functions.messages import SendMessageRequest
+
+        from app.moderation_services import has_local_restriction
 
         async with self.commands:
             async with self.sessions() as session:
@@ -593,6 +596,16 @@ class GroupHelpRelay:
                     await session.rollback()
                     return False
                 user_id = record.target.telegram_id
+                if await has_local_restriction(session, user_id, self.settings.group_help_scope):
+                    core._audit(
+                        actor,
+                        "group_help_unban_protected",
+                        record.target_id,
+                        record_id=record_id,
+                        user_id=user_id,
+                    )
+                    await session.commit()
+                    return False  # A global staff command cannot preserve just one local ban.
                 if self.flood_until > now():
                     await session.rollback()
                     raise TelegramRetryAfter(
