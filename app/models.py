@@ -788,6 +788,7 @@ class AdCustomerGrant(Base):
             postgresql_where=text("status = 'ACTIVE'"),
         ),
         Index("ix_ad_customer_campaigns", "customer_id", "status", "campaign_id"),
+        Index("ix_ad_grant_campaign", "campaign_id", "id"),
     )
 
 

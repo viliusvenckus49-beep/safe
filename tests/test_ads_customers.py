@@ -566,3 +566,41 @@ async def test_real_postgres_revoke_metadata_constraints(postgres_contract, kind
             await session.commit()
         await session.rollback()
         assert await session.scalar(select(model.status)) == "ACTIVE"
+
+
+async def test_real_postgres_latest_grant_lookup_uses_history_index(postgres_contract):
+    from sqlalchemy import text
+
+    sessions, settings = postgres_contract
+    cid, _ = await setup(sessions, settings)
+    async with sessions() as session:
+        access = CustomerAccess(settings, session)
+        await access.revoke(900, cid, await stamp(access, cid))
+        campaign = await AdsService(settings, session).create(
+            900, "Unrelated history", "unrelated-history"
+        )
+        session.add_all(
+            [
+                AdCustomerGrant(
+                    campaign_id=campaign.id,
+                    customer_id=1000 + i,
+                    assigned_by=900,
+                    status="REVOKED",
+                    revoked_at=now(),
+                    revoked_by=900,
+                )
+                for i in range(1000)
+            ]
+        )
+        await session.commit()
+        await session.execute(text("ANALYZE ad_customer_grants"))
+        plan = await session.scalar(
+            text(
+                "EXPLAIN (ANALYZE, FORMAT JSON) SELECT * FROM ad_customer_grants WHERE campaign_id = :cid ORDER BY id DESC LIMIT 1"
+            ),
+            {"cid": cid},
+        )
+        assert "ix_ad_grant_campaign" in repr(plan)
+        node = plan[0]["Plan"]
+        assert node["Actual Rows"] == 1 and node["Actual Loops"] == 1
+        assert (await access.latest(cid)).status == "REVOKED"

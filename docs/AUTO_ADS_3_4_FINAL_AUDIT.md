@@ -16,6 +16,7 @@ implementation, not a claim that CI or request doubles prove real Telegram deliv
 | C2 | HIGH | Reusing an actor's draft through the other capability (when an administrator is also a customer) could confuse which authority had approved the edit. | Admin and customer services reject drafts from the opposite scope, and list only their own scope. Both SQL dialects test attempted cross-scope saves and unchanged content. |
 | C3 | MEDIUM | Restricting all grant management to unarchived campaigns would prevent revoking retained read access after archival. | Allow administrators to inspect/revoke archived grants; new assignment/link creation still requires an unarchived campaign. Both SQL dialects verify archived reads stop after revocation. |
 | C4 | MEDIUM | SQL CHECK expressions involving nullable revocation actors could evaluate to NULL and accept incomplete revocation metadata. | Explicit non-null/positive actor and non-null time requirements for REVOKED grants/links. The additive 0016 constraints and real PostgreSQL integrity contracts protect this boundary. |
+| C6 | MEDIUM | Looking up the latest retained grant by campaign had no matching full-history index; the active-only unique index cannot satisfy this query. | Add `(campaign_id, id)` index in the new 0016 extension and metadata. A real PostgreSQL EXPLAIN regression with 1,000 retained grants verifies an indexed, bounded newest-grant lookup. |
 | C5 | LOW | A dual-role administrator returning from customer editing into GLOBAL ADS creation could retain the previous FSM capability marker. | Explicitly reset scope for ordinary and global campaign creation; every callback derives scope from its registered callback type and every service still rechecks authority. |
 
 Initial test failures also exposed an import error on the new start route and
@@ -52,7 +53,7 @@ advertisements are sent. Request doubles are never reported as live delivery.
 | Completed check | Result |
 | --- | --- |
 | Initial complete suite, PostgreSQL 17 + Redis 7.4 | 1,779 passed, four existing Alembic configuration deprecation warnings, 305.17 s |
-| Final complete suite including the last regressions | **1,791 passed**, no skips, four existing Alembic configuration deprecation warnings, **297.42 s** |
+| Final complete suite including the last regressions | **1,791 passed before the final index correction**, no skips, four existing Alembic configuration deprecation warnings, **297.42 s** |
 | Customer service/UI/migration tests, including real PostgreSQL and Redis | 94 passed, 29.91 s |
 | Ruff check / format check | Passed, 285 files formatted |
 | mypy | Passed, 93 source files |
@@ -65,8 +66,8 @@ advertisements are sent. Request doubles are never reported as live delivery.
 Final GitHub CI is a separate remote gate. Its run IDs/conclusions are recorded
 in the PR validation section after completion; use the branch-specific badge and
 PR checks for the final remote head. Local request doubles are not substituted
-for live Telegram verification. The 94 added cases extend the unchanged 1,697-test
-foundation. No unrelated user worktree edits were included.
+for live Telegram verification. The customer cases extend the unchanged 1,697-test foundation. Final index
+correction validation and remote run evidence are recorded in the PR. No unrelated user worktree edits were included.
 
 [![3.4 quality checks](https://github.com/viliusvenckus49-beep/safe/actions/workflows/ci.yml/badge.svg?branch=auto-ads-3-4-20261019)](https://github.com/viliusvenckus49-beep/safe/actions?query=branch%3Aauto-ads-3-4-20261019)
 

@@ -50,6 +50,7 @@ def upgrade():
         sqlite_where=sa.text("status = 'ACTIVE'"),
         postgresql_where=sa.text("status = 'ACTIVE'"),
     )
+    op.create_index("ix_ad_grant_campaign", "ad_customer_grants", ["campaign_id", "id"])
     op.create_table(
         "ad_customer_drafts",
         sa.Column("draft_id", sa.String(length=32), nullable=False),
@@ -126,4 +127,5 @@ def downgrade():
         postgresql_where=sa.text("status = 'ACTIVE'"),
     )
     op.drop_index("ix_ad_customer_campaigns", table_name="ad_customer_grants")
+    op.drop_index("ix_ad_grant_campaign", table_name="ad_customer_grants")
     op.drop_table("ad_customer_grants")
