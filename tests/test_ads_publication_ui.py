@@ -1,6 +1,6 @@
 """Private schedule navigation and public callbacks bound to real delivered parts."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiogram.methods import AnswerCallbackQuery, EditMessageText, GetChatMember
@@ -138,3 +138,20 @@ async def test_public_popup_needs_exact_delivered_keyboard_message(
     ).text != "Original popup"  # Album has no keyboard.
     assert (await public_click(journey, payload, 999)).text != "Original popup"
     assert (await public_click(journey, payload, 102, chat=-200)).text != "Original popup"
+
+
+async def test_publication_history_can_reach_older_retained_attempts(
+    journey, database, settings, clock
+):
+    cid, _, bot, _, _ = await configured(database, settings, clock)
+    worker = AdsPublisher(bot, settings, database)
+    for _ in range(6):
+        await worker.tick()
+        clock[0] += timedelta(minutes=30)
+    await journey.click(cb("history", cid), actor=900)
+    first = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    assert "#6 " in first.text and "#1 " not in first.text
+    next_button = first.reply_markup.inline_keyboard[0][0]
+    await journey.click(next_button.callback_data, actor=900)
+    second = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    assert "#1 " in second.text and "#6 " not in second.text

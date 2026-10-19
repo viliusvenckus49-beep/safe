@@ -335,9 +335,10 @@ def register_publication_handlers(router: Router) -> None:
                     edit=True,
                 )
             elif action == "history":
-                attempts = await pub.history(actor, cid, limit=5)
+                page = max(0, min(int(value or 0), 10000))
+                attempts = await pub.history(actor, cid, limit=6, page=page)
                 text = t("ads.history")
-                for attempt in attempts:
+                for attempt in attempts[:5]:
                     details = await pub.parts(attempt.id)
                     pinned = await service.session.get(AdContentVersion, attempt.content_version_id)
                     text += (
@@ -352,7 +353,13 @@ def register_publication_handlers(router: Router) -> None:
                     if attempt.error:
                         text += "\n" + escape(attempt.error)
                 await service.session.commit()
-                await display(message, text, back(cid), edit=True)
+                pages = []
+                if page:
+                    pages.append([(t("ads.back"), cb("history", cid, str(page - 1)))])
+                if len(attempts) > 5:
+                    pages.append([(t("ads.next"), cb("history", cid, str(page + 1)))])
+                pages.append([(t("ads.back"), cb("panel", cid))])
+                await display(message, text, keyboard(pages), edit=True)
             else:
                 raise DomainError("ap_stale")
         except (

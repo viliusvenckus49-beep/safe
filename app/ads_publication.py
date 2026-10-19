@@ -592,7 +592,9 @@ class PublicationService:
                 schedule.last_error = error
             return False
 
-    async def history(self, actor: int, cid: int, limit: int = 10) -> list[AdPublicationAttempt]:
+    async def history(
+        self, actor: int, cid: int, limit: int = 10, *, page: int = 0
+    ) -> list[AdPublicationAttempt]:
         row = await self.one(actor, cid)
         if row is None:
             return []
@@ -601,6 +603,7 @@ class PublicationService:
                 select(AdPublicationAttempt)
                 .where(AdPublicationAttempt.schedule_id == row.id)
                 .order_by(AdPublicationAttempt.id.desc())
+                .offset(max(0, min(page, 10000)) * 5)
                 .limit(limit)
             )
         )

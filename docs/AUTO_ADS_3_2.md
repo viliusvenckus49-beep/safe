@@ -131,6 +131,7 @@ and schedules a future slot; it never retries a terminal uncertain attempt.
 Audit events record policy changes, skipped slots, lease transitions, part outcomes
 and confirmed IDs, without ad text. Statistics count SENT, FAILED and UNCERTAIN
 separately, show next slot/last success and retain detailed errors/partial results.
+Native history pagination exposes older retained attempts, five per page.
 No view/click metrics are invented. Stored errors are bounded and credential/URL
 redacted. Management names/errors are HTML-escaped; no raw traceback is shown.
 
