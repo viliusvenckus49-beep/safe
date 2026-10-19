@@ -16,7 +16,12 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 
 ROOT = Path(__file__).resolve().parents[1]
-NEW_TABLES = {"group_moderation_settings", "group_sanctions", "group_sanction_jobs"}
+NEW_TABLES = {
+    "group_moderation_settings",
+    "group_sanctions",
+    "group_sanction_jobs",
+    "group_moderation_drafts",
+}
 SEED = [
     "INSERT INTO users(id,telegram_id,username,display_name,language,created_at,updated_at) "
     "VALUES(1,41,'original','Original','ru',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP),"

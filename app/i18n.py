@@ -11,6 +11,7 @@ from app.locales.administrators import CATALOGS as ADMINISTRATORS
 from app.locales.button_icons import CATALOGS as BUTTON_ICONS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
+from app.locales.local_moderation import CATALOGS as LOCAL_MODERATION
 from app.locales.presentation import CATALOGS as PRESENTATION
 from app.locales.scam_management import CATALOGS as SCAM_MANAGEMENT
 from app.locales.trusted_management import CATALOGS as TRUSTED_MANAGEMENT
@@ -44,6 +45,7 @@ CATALOGS = {
         **TRUSTED_MANAGEMENT[lang],
         **SCAM_MANAGEMENT[lang],
         **DIAGNOSTICS[lang],
+        **LOCAL_MODERATION[lang],
     }
     for lang in LANGUAGES
 }

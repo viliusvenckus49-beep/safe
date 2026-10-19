@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import SetMyCommands
-from aiogram.types import BotCommandScopeAllGroupChats, BotCommandScopeChat
+from aiogram.types import (
+    BotCommandScopeAllChatAdministrators,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeChat,
+)
 from test_telegram import journey as telegram_journey
 
 from app.bot.commands import ADMIN, GROUP, PUBLIC, commands, group_commands, user_commands
@@ -63,10 +67,15 @@ async def test_all_groups_get_default_and_three_language_menus():
     bot = SimpleNamespace(set_my_commands=AsyncMock())
     await group_commands(bot)
     calls = bot.set_my_commands.await_args_list
-    assert len(calls) == 4
+    assert len(calls) == 8
     assert calls[0].args[0] == commands("lt", group=True)
-    for call in calls:
+    for call in calls[:4]:
         assert call.kwargs["scope"] == BotCommandScopeAllGroupChats()
+    for call in calls[4:]:
+        assert call.kwargs["scope"] == BotCommandScopeAllChatAdministrators()
+        assert {"ban", "unban", "mute", "unmute", "warn", "kick", "warnings", "moderation"} <= {
+            item.command for item in call.args[0]
+        }
     assert {call.kwargs.get("language_code") for call in calls} == {None, "lt", "en", "ru"}
 
 

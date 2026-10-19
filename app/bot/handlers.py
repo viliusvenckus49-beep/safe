@@ -19,6 +19,7 @@ from app.bot.callbacks import (
 )
 from app.bot.commands import user_commands
 from app.bot.groups import register_group_handlers
+from app.bot.local_admin import register_local_handlers
 from app.bot.middleware import ServiceMiddleware
 from app.bot.rep_vote import begin as begin_vote
 from app.bot.rep_vote import register_vote_handlers
@@ -189,6 +190,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     middleware = ServiceMiddleware(settings, session_factory)
     router.message.outer_middleware(middleware)
     router.callback_query.outer_middleware(middleware)
+    register_local_handlers(router)
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext, service: Service) -> None:

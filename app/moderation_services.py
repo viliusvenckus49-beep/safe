@@ -14,6 +14,7 @@ from app.group_authorization import GroupAuthorizer, numeric_id
 from app.group_services import GroupService
 from app.models import (
     AuditEvent,
+    GroupModerationDraft,
     GroupModerationSettings,
     GroupSanction,
     GroupSanctionJob,
@@ -72,7 +73,18 @@ async def serialize_group(session: AsyncSession, chat_id: int) -> None:
 
 
 def module_enabled(policy: GroupModerationSettings, kind: str) -> bool:
-    return policy.enabled and (policy.bans_enabled if kind == "BAN" else policy.mutes_enabled)
+    return policy.enabled and bool(
+        getattr(
+            policy,
+            {
+                "BAN": "bans_enabled",
+                "MUTE": "mutes_enabled",
+                "WARN": "warnings_enabled",
+                "KICK": "kicks_enabled",
+            }.get(kind, ""),
+            False,
+        )
+    )
 
 
 async def lock_group(session: AsyncSession, chat_id: int) -> ManagedGroup:
@@ -96,6 +108,29 @@ async def lock_group(session: AsyncSession, chat_id: int) -> ManagedGroup:
     return group
 
 
+def validate_policy(
+    policy: GroupModerationSettings | None,
+    group: ManagedGroup,
+    kind: str,
+    until_date: datetime | None,
+) -> None:
+    if policy is None or not module_enabled(policy, kind):
+        raise DomainError("group_moderation_disabled")
+    if (kind in {"MUTE", "KICK"} or until_date is not None) and group.chat_type != "supergroup":
+        raise DomainError("group_moderation_supergroup_required")
+    if kind in {"WARN", "KICK"}:
+        if until_date is not None:
+            raise DomainError("group_moderation_invalid_duration")
+    elif until_date is None:
+        if not (
+            (kind == "BAN" and policy.allow_permanent_bans)
+            or (kind == "MUTE" and policy.allow_permanent_mutes)
+        ):
+            raise DomainError("group_moderation_invalid_duration")
+    elif not 60 <= (until_date - now()).total_seconds() <= policy.max_duration_seconds:
+        raise DomainError("group_moderation_invalid_duration")
+
+
 class GroupModerationService:
     def __init__(self, session: AsyncSession, bot: Any):
         self.session, self.bot = session, bot
@@ -115,13 +150,21 @@ class GroupModerationService:
         actor_id: int,
         *,
         enabled: bool,
+        expected_version: int | None = None,
         bans_enabled: bool = False,
         mutes_enabled: bool = False,
         max_duration_seconds: int = 2592000,
         allow_permanent_bans: bool = False,
+        warnings_enabled: bool = False,
+        kicks_enabled: bool = False,
+        allow_permanent_mutes: bool = False,
     ) -> GroupModerationSettings:
         if (
-            type(enabled) is not bool
+            any(
+                type(v) is not bool
+                for v in (warnings_enabled, kicks_enabled, allow_permanent_mutes)
+            )
+            or type(enabled) is not bool
             or type(bans_enabled) is not bool
             or type(mutes_enabled) is not bool
             or type(allow_permanent_bans) is not bool
@@ -138,6 +181,11 @@ class GroupModerationService:
             policy = await self.session.get(
                 GroupModerationSettings, chat_id, populate_existing=True
             )
+            if (
+                expected_version is not None
+                and (policy.version if policy else 0) != expected_version
+            ):
+                raise DomainError("group_moderation_request_conflict")
             if policy is None:
                 policy = GroupModerationSettings(chat_id=chat_id, enabled=False, version=1)
                 self.session.add(policy)
@@ -148,6 +196,9 @@ class GroupModerationService:
                 mutes_enabled,
                 max_duration_seconds,
                 allow_permanent_bans,
+                warnings_enabled,
+                kicks_enabled,
+                allow_permanent_mutes,
             )
             if values != (
                 policy.enabled,
@@ -155,6 +206,9 @@ class GroupModerationService:
                 policy.mutes_enabled,
                 policy.max_duration_seconds,
                 policy.allow_permanent_bans,
+                policy.warnings_enabled,
+                policy.kicks_enabled,
+                policy.allow_permanent_mutes,
             ):
                 (
                     policy.enabled,
@@ -162,6 +216,9 @@ class GroupModerationService:
                     policy.mutes_enabled,
                     policy.max_duration_seconds,
                     policy.allow_permanent_bans,
+                    policy.warnings_enabled,
+                    policy.kicks_enabled,
+                    policy.allow_permanent_mutes,
                 ) = values
                 policy.version += 1
                 policy.updated_by, policy.updated_at = actor_id, now()
@@ -181,7 +238,7 @@ class GroupModerationService:
                         )
                     )
                     if apply is not None and apply.status == "PENDING":
-                        sanction.status = "CANCELLED"
+                        sanction.status, sanction.updated_at = "CANCELLED", now()
                         await self.session.execute(
                             update(GroupSanctionJob)
                             .where(
@@ -201,6 +258,9 @@ class GroupModerationService:
                     version=policy.version,
                     max_duration_seconds=max_duration_seconds,
                     allow_permanent_bans=allow_permanent_bans,
+                    warnings_enabled=warnings_enabled,
+                    kicks_enabled=kicks_enabled,
+                    allow_permanent_mutes=allow_permanent_mutes,
                 )
             await self.session.commit()
             return policy
@@ -218,13 +278,14 @@ class GroupModerationService:
         until_date: datetime | None,
         reason: str,
         key: str,
+        draft_id: str | None = None,
     ) -> GroupSanction:
         numeric_id(target_id)
         request_key(key)
         if (
-            kind not in {"BAN", "MUTE"}
+            kind not in {"BAN", "MUTE", "WARN", "KICK"}
             or not isinstance(reason, str)
-            or not 1 <= len(reason.strip()) <= 1000
+            or len(reason.strip()) > 1000
         ):
             raise DomainError("group_moderation_invalid_sanction")
         if until_date is not None and (
@@ -239,6 +300,13 @@ class GroupModerationService:
         await self.authorization.target(chat_id, target_id)
         try:
             group = await lock_group(self.session, chat_id)
+            draft = await self.check_draft(draft_id, chat_id, actor_id, target_id, kind)
+            if draft is not None and (
+                key != "local:" + draft.id
+                or reason != draft.reason
+                or until_date != (utc(draft.until_date) if draft.until_date else None)
+            ):
+                raise DomainError("group_moderation_request_conflict")
             existing = await self.session.scalar(
                 select(GroupSanction).where(GroupSanction.request_key == key)
             )
@@ -254,20 +322,15 @@ class GroupModerationService:
                 )
                 if actual != expected:
                     raise DomainError("group_moderation_request_conflict")
+                if draft is not None and draft.sanction_id != existing.id:
+                    raise DomainError("group_moderation_request_conflict")
                 await self.session.commit()
                 return existing
             policy = await self.session.get(
                 GroupModerationSettings, chat_id, populate_existing=True
             )
-            if policy is None or not module_enabled(policy, kind):
-                raise DomainError("group_moderation_disabled")
-            if (kind == "MUTE" or until_date is not None) and group.chat_type != "supergroup":
-                raise DomainError("group_moderation_supergroup_required")
-            if until_date is None:
-                if kind != "BAN" or not policy.allow_permanent_bans:
-                    raise DomainError("group_moderation_invalid_duration")
-            elif not 60 <= (until_date - now()).total_seconds() <= policy.max_duration_seconds:
-                raise DomainError("group_moderation_invalid_duration")
+            validate_policy(policy, group, kind, until_date)
+            assert policy is not None
             active = await self.session.scalar(
                 select(GroupSanction.id).where(
                     GroupSanction.chat_id == chat_id,
@@ -275,7 +338,7 @@ class GroupModerationService:
                     GroupSanction.status.in_(LIVE),
                 )
             )
-            if active is not None:
+            if active is not None and kind != "WARN":
                 raise DomainError("group_moderation_conflict")
             sanction = GroupSanction(
                 chat_id=chat_id,
@@ -286,21 +349,24 @@ class GroupModerationService:
                 until_date=until_date,
                 policy_version=policy.version,
                 request_key=key,
-                status="PENDING",
+                status="RECORDED" if kind == "WARN" else "PENDING",
                 owned=False,
             )
             self.session.add(sanction)
             await self.session.flush()
-            self.session.add(
-                GroupSanctionJob(sanction_id=sanction.id, operation="APPLY", actor_id=actor_id)
-            )
-            if until_date:
+            if draft is not None:
+                draft.status, draft.sanction_id = "CONFIRMED", sanction.id
+            if kind != "WARN":
+                self.session.add(
+                    GroupSanctionJob(sanction_id=sanction.id, operation="APPLY", actor_id=actor_id)
+                )
+            if until_date or kind == "KICK":
                 self.session.add(
                     GroupSanctionJob(
                         sanction_id=sanction.id,
                         operation="RELEASE",
                         automatic=True,
-                        available_at=until_date,
+                        available_at=until_date or now(),
                     )
                 )
             audit(
@@ -323,7 +389,13 @@ class GroupModerationService:
             raise
 
     async def revoke(
-        self, chat_id: int, actor_id: int, sanction_id: int, *, key: str
+        self,
+        chat_id: int,
+        actor_id: int,
+        sanction_id: int,
+        *,
+        key: str,
+        draft_id: str | None = None,
     ) -> GroupSanction:
         numeric_id(sanction_id)
         request_key(key)
@@ -335,6 +407,20 @@ class GroupModerationService:
             sanction = await self.session.get(GroupSanction, sanction_id, populate_existing=True)
             if sanction is None or sanction.chat_id != chat_id:
                 raise DomainError("group_moderation_not_found")
+            draft = await self.check_draft(
+                draft_id,
+                chat_id,
+                actor_id,
+                sanction.telegram_id,
+                "UNBAN" if sanction.kind in {"BAN", "KICK"} else "UNMUTE",
+            )
+            if draft is not None and key != "local:" + draft.id:
+                raise DomainError("group_moderation_request_conflict")
+            if draft is not None and draft.status == "CONFIRMED":
+                if draft.sanction_id != sanction.id:
+                    raise DomainError("group_moderation_request_conflict")
+                await self.session.commit()
+                return sanction
             if sanction.revoke_key is not None:
                 release = await self.session.scalar(
                     select(GroupSanctionJob).where(
@@ -342,12 +428,20 @@ class GroupModerationService:
                         GroupSanctionJob.operation == "RELEASE",
                     )
                 )
-                if sanction.revoke_key != key or (
-                    release is not None and release.actor_id != actor_id
-                ):
-                    raise DomainError("group_moderation_request_conflict")
-                await self.session.commit()
-                return sanction
+                retry = (
+                    draft is not None
+                    and draft.status == "PENDING"
+                    and sanction.status == "ACTIVE"
+                    and release is not None
+                    and release.status in {"FAILED", "CANCELLED"}
+                )
+                if not retry:
+                    if sanction.revoke_key != key or (
+                        release is not None and release.actor_id != actor_id
+                    ):
+                        raise DomainError("group_moderation_request_conflict")
+                    await self.session.commit()
+                    return sanction
             if sanction.status in {"UNCERTAIN", "REVOKING"}:
                 raise DomainError("group_moderation_uncertain")
             processing = await self.session.scalar(
@@ -360,7 +454,9 @@ class GroupModerationService:
             )
             if processing is not None:
                 raise DomainError("group_moderation_busy")
-            sanction.revoke_key = key
+            sanction.revoke_key, sanction.updated_at = key, now()
+            if draft is not None:
+                draft.status, draft.sanction_id = "CONFIRMED", sanction.id
             release = await self.session.scalar(
                 select(GroupSanctionJob).where(
                     GroupSanctionJob.sanction_id == sanction.id,
@@ -414,3 +510,163 @@ class GroupModerationService:
         except Exception:
             await self.session.rollback()
             raise
+
+    async def check_draft(
+        self, draft_id: str | None, chat_id: int, actor_id: int, target_id: int, kind: str
+    ) -> GroupModerationDraft | None:
+        if draft_id is None:
+            return None
+        draft = await self.session.get(GroupModerationDraft, draft_id, populate_existing=True)
+        if (
+            draft is None
+            or (draft.chat_id, draft.actor_id, draft.telegram_id, draft.kind)
+            != (chat_id, actor_id, target_id, kind)
+            or draft.status == "CANCELLED"
+            or (draft.status == "PENDING" and utc(draft.expires_at) <= now())
+        ):
+            raise DomainError("group_moderation_invalid_draft")
+        return draft
+
+    async def prepare(
+        self,
+        chat_id: int,
+        actor_id: int,
+        target_id: int,
+        kind: str,
+        *,
+        until_date: datetime | None,
+        reason: str,
+        request: str,
+    ) -> GroupModerationDraft:
+        from datetime import timedelta
+        from uuid import uuid4
+
+        numeric_id(target_id)
+        request_key(request)
+        if (
+            kind not in {"BAN", "MUTE", "WARN", "KICK", "UNBAN", "UNMUTE"}
+            or not isinstance(reason, str)
+            or len(reason) > 1000
+        ):
+            raise DomainError("group_moderation_invalid_sanction")
+        if until_date is not None and (
+            not isinstance(until_date, datetime) or until_date.tzinfo is None
+        ):
+            raise DomainError("group_moderation_invalid_duration")
+        reason = reason.strip()
+        await self._check_group(chat_id)
+        await self.authorization.actor(chat_id, actor_id)
+        await self.authorization.bot_rights(chat_id)
+        await self.authorization.target(chat_id, target_id)
+        try:
+            group = await lock_group(self.session, chat_id)
+            if kind not in {"UNBAN", "UNMUTE"}:
+                policy = await self.session.get(
+                    GroupModerationSettings, chat_id, populate_existing=True
+                )
+                validate_policy(policy, group, kind, until_date)
+            existing = await self.session.scalar(
+                select(GroupModerationDraft).where(GroupModerationDraft.request_key == request)
+            )
+            until_date = utc(until_date).replace(microsecond=0) if until_date else None
+            if existing is not None:
+                if (
+                    existing.chat_id,
+                    existing.actor_id,
+                    existing.telegram_id,
+                    existing.kind,
+                    existing.reason,
+                    utc(existing.until_date) if existing.until_date else None,
+                ) != (chat_id, actor_id, target_id, kind, reason, until_date):
+                    raise DomainError("group_moderation_request_conflict")
+                await self.session.commit()
+                return existing
+            draft = GroupModerationDraft(
+                id=uuid4().hex,
+                chat_id=chat_id,
+                actor_id=actor_id,
+                telegram_id=target_id,
+                kind=kind,
+                until_date=until_date,
+                reason=reason,
+                request_key=request,
+                expires_at=now() + timedelta(minutes=10),
+                status="PENDING",
+            )
+            self.session.add(draft)
+            await self.session.commit()
+            return draft
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def cancel_draft(self, draft_id: str, actor_id: int) -> GroupModerationDraft:
+        draft = await self.session.get(GroupModerationDraft, draft_id)
+        if draft is None or draft.actor_id != actor_id:
+            raise DomainError("group_moderation_invalid_draft")
+        chat_id = draft.chat_id
+        await self._check_group(chat_id)
+        await self.authorization.actor(chat_id, actor_id)
+        try:
+            await lock_group(self.session, chat_id)
+            await self.session.refresh(draft)
+            if draft.status == "PENDING":
+                draft.status = "CANCELLED"
+                audit(self.session, "draft_cancelled", actor_id, chat_id, draft_id=draft.id)
+            elif draft.status == "CONFIRMED":
+                raise DomainError("group_moderation_busy")
+            await self.session.commit()
+            return draft
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def confirm(self, draft_id: str, actor_id: int) -> GroupSanction:
+        from app.repositories import Repository
+
+        draft = await self.session.get(GroupModerationDraft, draft_id, populate_existing=True)
+        if draft is None or draft.actor_id != actor_id or draft.status == "CANCELLED":
+            raise DomainError("group_moderation_invalid_draft")
+        if draft.status == "PENDING" and utc(draft.expires_at) <= now():
+            raise DomainError("group_moderation_invalid_draft")
+        chat, target, kind, reason, until = (
+            draft.chat_id,
+            draft.telegram_id,
+            draft.kind,
+            draft.reason,
+            draft.until_date,
+        )
+        await self.session.commit()
+        if kind not in {"UNBAN", "UNMUTE"}:
+            return await self.submit(
+                chat,
+                actor_id,
+                target,
+                kind,
+                until_date=utc(until) if until else None,
+                reason=reason,
+                key="local:" + draft_id,
+                draft_id=draft_id,
+            )
+        user = await Repository(self.session).user_by_telegram(target)
+        if user is not None and await Repository(self.session).has_scam_identity(user):
+            raise DomainError("group_moderation_scam_protected")
+        sanction = await self.session.scalar(
+            select(GroupSanction)
+            .where(
+                GroupSanction.chat_id == chat,
+                GroupSanction.telegram_id == target,
+                GroupSanction.kind.in_(("BAN", "KICK") if kind == "UNBAN" else ("MUTE",)),
+                GroupSanction.status.in_(LIVE),
+            )
+            .order_by(GroupSanction.id.desc())
+            .limit(1)
+        )
+        # Repeated confirmation must still resolve the original completed revocation.
+        if draft.status == "CONFIRMED" and draft.sanction_id:
+            sanction = await self.session.get(GroupSanction, draft.sanction_id)
+        if sanction is None:
+            raise DomainError("group_moderation_not_found")
+        return await self.revoke(
+            chat, actor_id, sanction.id, key="local:" + draft_id, draft_id=draft_id
+        )

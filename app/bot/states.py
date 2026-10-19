@@ -48,3 +48,7 @@ class RepVoteFlow(StatesGroup):
 class ScamAdminFlow(StatesGroup):
     input = State()
     preview = State()
+
+
+class LocalModerationFlow(StatesGroup):
+    target = State()

@@ -47,3 +47,9 @@ class TrustedAdmin(CallbackData, prefix="ta"):
 class ScamAdmin(CallbackData, prefix="sa"):
     action: str
     value: str = ""
+
+
+class LocalAction(CallbackData, prefix="lm2", sep="|"):
+    action: str
+    chat: int = 0
+    value: str = ""

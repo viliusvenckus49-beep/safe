@@ -13,7 +13,7 @@ from aiogram.exceptions import (
     TelegramRetryAfter,
 )
 from aiogram.types import ChatPermissions
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, true, update
 
 from app.bot.moderation_lock import user_moderation_lock
 from app.errors import DomainError, safe_telegram_reason
@@ -93,7 +93,7 @@ class LocalModerationExecutor:
                 await session.commit()
         return recovered
 
-    async def claim(self) -> tuple[int, str] | None:
+    async def claim(self, sanction_id: int | None = None) -> tuple[int, str] | None:
         async with self.sessions() as session:
             candidates = list(
                 await session.scalars(
@@ -101,6 +101,9 @@ class LocalModerationExecutor:
                     .join(GroupSanction, GroupSanction.id == GroupSanctionJob.sanction_id)
                     .where(
                         GroupSanctionJob.status == "PENDING",
+                        GroupSanctionJob.sanction_id == sanction_id
+                        if sanction_id is not None
+                        else true(),
                         GroupSanctionJob.available_at <= now(),
                         GroupSanctionJob.attempts < MAX_ATTEMPTS,
                         or_(
@@ -147,6 +150,7 @@ class LocalModerationExecutor:
                         job.status, job.result = "CANCELLED", "POLICY_OR_DEADLINE_CHANGED"
                         if sanction.status == "PENDING":
                             sanction.status = "CANCELLED"
+                        sanction.updated_at = now()
                         audit(
                             session,
                             "cancelled",
@@ -164,6 +168,7 @@ class LocalModerationExecutor:
                         await session.commit()
                         continue
                     job.status, job.result = "CANCELLED", "NO_CONFIRMED_RESTRICTION"
+                    sanction.updated_at = now()
                     await session.commit()
                     continue
                 elif (
@@ -222,6 +227,7 @@ class LocalModerationExecutor:
                     sanction.status = "CANCELLED"
                 elif sanction.status == "REVOKING":
                     sanction.status = "ACTIVE"
+                sanction.updated_at = now()
                 audit(
                     session,
                     "cancelled",
@@ -282,8 +288,11 @@ class LocalModerationExecutor:
                     return
                 if job.automatic and (
                     job.operation != "RELEASE"
-                    or sanction.until_date is None
-                    or utc(sanction.until_date) > now()
+                    or (
+                        sanction.kind != "KICK"
+                        and (sanction.until_date is None or utc(sanction.until_date) > now())
+                    )
+                    or (sanction.kind == "KICK" and not sanction.owned)
                 ):
                     raise DomainError("group_moderation_invalid_automatic_job")
                 if job.operation == "APPLY":
@@ -330,7 +339,7 @@ class LocalModerationExecutor:
                     ):
                         raise DomainError("group_moderation_policy_changed")
                     if (
-                        sanction.kind == "MUTE" or sanction.until_date is not None
+                        sanction.kind in {"MUTE", "KICK"} or sanction.until_date is not None
                     ) and group.chat_type != "supergroup":
                         raise DomainError("group_moderation_supergroup_required")
                 user = await Repository(session).user_by_telegram(sanction.telegram_id)
@@ -369,7 +378,7 @@ class LocalModerationExecutor:
                             raise DomainError("group_moderation_existing_restriction")
                         self.check_write_deadline(job, sanction)
                         sent = True
-                        if sanction.kind == "BAN":
+                        if sanction.kind in {"BAN", "KICK"}:
                             success = await asyncio.wait_for(
                                 self.bot.ban_chat_member(
                                     chat_id=sanction.chat_id,
@@ -394,7 +403,7 @@ class LocalModerationExecutor:
                             return
                         owned = True
                 else:
-                    expected = "kicked" if sanction.kind == "BAN" else "restricted"
+                    expected = "kicked" if sanction.kind in {"BAN", "KICK"} else "restricted"
                     if member.status != expected:
                         result = "ALREADY_CLEAR"
                     elif deadline(getattr(member, "until_date", None)) != deadline(until):
@@ -404,7 +413,7 @@ class LocalModerationExecutor:
                         for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
                     ):
                         result = "RESTRICTION_CHANGED"
-                    elif sanction.kind == "BAN":
+                    elif sanction.kind in {"BAN", "KICK"}:
                         self.check_write_deadline(job, sanction)
                         sent = True
                         success = await asyncio.wait_for(
@@ -547,7 +556,15 @@ class LocalModerationExecutor:
             return
         if state == "SUCCEEDED":
             sanction.status = (
-                "ACTIVE" if job.operation == "APPLY" else "EXPIRED" if job.automatic else "REVOKED"
+                "CANCELLED"
+                if sanction.kind == "KICK" and result == "SCAM_PROTECTED"
+                else "ACTIVE"
+                if job.operation == "APPLY"
+                else "COMPLETED"
+                if sanction.kind == "KICK"
+                else "EXPIRED"
+                if job.automatic
+                else "REVOKED"
             )
             if owned is not None:
                 sanction.owned = owned
@@ -588,12 +605,15 @@ class LocalModerationExecutor:
             reason=reason,
         )
 
-    async def process(self, *, limit: int = 1) -> int:
+    async def process(self, *, limit: int = 1, sanction_id: int | None = None) -> int:
         processed = await self.recover()
         for _ in range(min(max(limit, 0), 5)):
-            claim = await self.claim()
+            claim = await self.claim(sanction_id)
             if claim is None:
                 break
             await self.execute(*claim)
             processed += 1
+        from app.bot.local_admin import publish_receipts
+
+        await publish_receipts(self.sessions, self.bot)
         return processed
