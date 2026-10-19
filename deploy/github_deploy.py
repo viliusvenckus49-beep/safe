@@ -19,17 +19,25 @@ def migration_snapshot(root):
 
 
 def compatible_migrations(candidate, existing):
-    """Allow only the reviewed additive activity ledger; never rewrite existing migrations."""
+    """Allow byte-pinned reviewed releases; never rewrite or remove old migrations."""
     if any(candidate.get(name) != content for name, content in existing.items()):
         return False
     reviewed = {
-        "0010_redsafe_profile.py": "47431ef8207005336c163c73c611ecadf70dafdeb03597f7aedc76df5e2ae214"
+        "0010_redsafe_profile.py": "47431ef8207005336c163c73c611ecadf70dafdeb03597f7aedc76df5e2ae214",
+        "0011_group_moderation.py": "9e8e28f9842dee7990043ddc42ce95ee6dc3ab1a3fff3dab0949be7f70249b8d",
+        "0012_group_commands.py": "9f4c0fd8f71f1b693d6fb656d26d076784cc721a4a9f4db4bfd31dc4d9ce9ccd",
+        "0013_ad_content.py": "3f8950cbe91ab655aafd7759b6e9629d83990144a0b3036b79915fd573589136",
+        "0014_ad_publication.py": "08c05f8fbcca3e3fb576e5498d24768e758493744f4432443f52cee90ab1082f",
+        "0015_global_ads_assignments_operations_and_.py": "1e1d787a2e15ed775d0798982063e50010573d91915c22af44c0d005d613d3d0",
+        "0016_ad_customer_capabilities_and_hashed_.py": "07aa974edd1f6f74b6b284d2c77f3dba0e65cd3281f4b8fe59ebed7ab1fafd0c",
     }
+    # The release targets 0016: reject incomplete chains, including missing new files.
+    if not reviewed.keys() <= candidate.keys():
+        return False
+    if any(hashlib.sha256(candidate[name]).hexdigest() != sha for name, sha in reviewed.items()):
+        return False
     added = candidate.keys() - existing.keys()
-    return all(
-        name in reviewed and hashlib.sha256(candidate[name]).hexdigest() == reviewed[name]
-        for name in added
-    )
+    return added <= reviewed.keys()
 
 
 def switch_release(candidate, original, image, old_image):
@@ -71,7 +79,7 @@ def main():
     )
     if not old_root.is_absolute() or not (old_root / "docker-compose.production.yml").is_file():
         raise module.OperationError("Existing production deployment could not be located")
-    # Only this reviewed additive schema release is allowed through the verified-backup deploy.
+    # This check grants no deployment approval; all backup and readiness gates remain.
     if not compatible_migrations(migration_snapshot(root), migration_snapshot(old_root)):
         raise module.OperationError("Unreviewed or changed schema: deployment refused")
     original_args = module.parser().parse_args(["--root", str(old_root), "deploy"])

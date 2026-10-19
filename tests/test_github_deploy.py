@@ -52,14 +52,37 @@ def test_failure_restores_previous_image_and_stays_failed():
     assert original.events == [("persist", "old")]
 
 
-def test_only_reviewed_additive_profile_schema_is_allowed():
+@pytest.mark.parametrize("revision", range(9, 17))
+def test_only_reviewed_release_migrations_are_allowed(revision):
     root = Path(__file__).parents[1]
     current = module.migration_snapshot(root)
-    previous = {name: value for name, value in current.items() if not name.startswith("0010_")}
+    previous = {name: value for name, value in current.items() if int(name[:4]) <= revision}
     assert module.compatible_migrations(current, previous)
     assert module.compatible_migrations(current, current)
     assert not module.compatible_migrations({**current, "evil.py": b"drop tables"}, previous)
     assert not module.compatible_migrations({**current, "0001_initial.py": b"changed"}, previous)
-    assert not module.compatible_migrations(
-        {**current, "0010_redsafe_profile.py": b"changed"}, previous
-    )
+
+
+@pytest.mark.parametrize("revision", range(10, 17))
+@pytest.mark.parametrize("change", ["modified", "removed", "renamed"])
+def test_reviewed_migrations_cannot_be_modified_removed_or_renamed(revision, change):
+    current = module.migration_snapshot(Path(__file__).parents[1])
+    name = next(name for name in current if name.startswith(f"{revision:04d}_"))
+    candidate = dict(current)
+    if change == "modified":
+        candidate[name] += b"\n# unreviewed change\n"
+    else:
+        original = candidate.pop(name)
+        if change == "renamed":
+            candidate[f"{revision:04d}_renamed.py"] = original
+    # Once deployed, every byte and filename must remain intact.
+    assert not module.compatible_migrations(candidate, current)
+    previous = {key: value for key, value in current.items() if int(key[:4]) < revision}
+    assert not module.compatible_migrations(candidate, previous)
+
+
+def test_unreviewed_next_migration_is_rejected_from_actual_production_base():
+    current = module.migration_snapshot(Path(__file__).parents[1])
+    previous = {name: value for name, value in current.items() if int(name[:4]) <= 10}
+    candidate = {**current, "0017_unreviewed.py": b"# not part of the reviewed release"}
+    assert not module.compatible_migrations(candidate, previous)
