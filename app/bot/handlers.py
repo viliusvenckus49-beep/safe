@@ -20,6 +20,7 @@ from app.bot.callbacks import (
     ReportStep,
 )
 from app.bot.commands import user_commands
+from app.bot.global_ads import register_global_ads_handlers
 from app.bot.groups import register_group_handlers
 from app.bot.local_admin import register_local_handlers
 from app.bot.middleware import ServiceMiddleware
@@ -195,6 +196,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     register_local_handlers(router)
     register_ads_handlers(router)
     register_publication_handlers(router)
+    register_global_ads_handlers(router)
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext, service: Service) -> None:

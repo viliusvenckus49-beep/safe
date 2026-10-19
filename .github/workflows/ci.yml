@@ -45,11 +45,13 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
+      - run: python -m compileall -q app migrations tests
       - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic upgrade head
+      - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic check
       - run: docker build -t safecheck:ci .
       - name: Start packaged ADS worker without network or runtime secrets
         run: |
-          docker run --rm -i --network none --read-only --entrypoint python safecheck:ci - <<'PY'
+          docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=16m --entrypoint python safecheck:ci - <<'PY'
           import asyncio
           from datetime import UTC, datetime
           from types import SimpleNamespace
@@ -61,7 +63,9 @@ jobs:
 
           async def smoke():
               assert local_datetime('2026-11-20 12:00') == datetime(2026,11,20,10,tzinfo=UTC)
-              engine, sessions = create_database('sqlite+aiosqlite:///:memory:')
+              # Independent connections for the planner/coordinator/dispatch loops.
+              # StaticPool in-memory SQLite shares one connection across sessions.
+              engine, sessions = create_database('sqlite+aiosqlite:////tmp/ads-smoke.db')
               async with engine.begin() as connection:
                   await connection.run_sync(Base.metadata.create_all)
               completed = asyncio.Event()

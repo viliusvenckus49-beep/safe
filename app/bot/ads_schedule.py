@@ -1,6 +1,7 @@
 """Private, live-authorized one-group schedule UI and public delivered-ad callbacks."""
 
 from datetime import date, datetime
+from functools import partial
 from html import escape
 from typing import Any
 
@@ -8,25 +9,33 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.ads_publication import PublicationService, publication_rights
 from app.ads_schedule import INTERVALS, VILNIUS, local_datetime
 from app.bot.ads import callback_request, private
 from app.bot.ads import cb as content_cb
-from app.bot.callbacks import AdPublication, PublishedAd
+from app.bot.callbacks import AdGroupPublication, AdPublication, PublishedAd
 from app.bot.keyboards import keyboard
 from app.bot.local_admin import display
 from app.bot.states import AdScheduleFlow
 from app.errors import DomainError
 from app.group_services import GroupService
 from app.i18n import t
-from app.models import AdContentVersion, AdPublicationAttempt, AdPublicationPart, ManagedGroup
+from app.models import (
+    AdContentVersion,
+    AdPublicationAttempt,
+    AdPublicationPart,
+    AdSchedule,
+    ManagedGroup,
+)
 from app.moderation_services import utc
 from app.services import Service
 
 
-def cb(action: str, cid: int, value: str = "") -> str:
+def cb(action: str, cid: int, value: str = "", *, sid: int = 0) -> str:
+    if sid:
+        return AdGroupPublication(action=action, campaign=cid, schedule=sid, value=value).pack()
     return AdPublication(action=action, campaign=cid, value=value).pack()
 
 
@@ -34,8 +43,8 @@ def local(value: datetime | None) -> str:
     return utc(value).astimezone(VILNIUS).strftime("%Y-%m-%d %H:%M %z") if value else t("ap.unset")
 
 
-def back(cid: int):
-    return keyboard([[(t("ads.back"), cb("panel", cid))]])
+def back(cid: int, *, sid: int = 0):
+    return keyboard([[(t("ads.back"), cb("panel", cid, sid=sid))]])
 
 
 def failure(error: Exception) -> str:
@@ -59,6 +68,7 @@ def failure(error: Exception) -> str:
 
 
 async def panel(message: Message, pub: PublicationService, actor: int, cid: int) -> None:
+    make_cb = partial(cb, sid=pub.schedule_id or 0)
     row = await pub.ensure(actor, cid)
     campaign = await pub.ads.get(actor, cid)
     group = await pub.session.get(ManagedGroup, row.chat_id) if row.chat_id else None
@@ -76,23 +86,55 @@ async def panel(message: Message, pub: PublicationService, actor: int, cid: int)
             else t("ap.unset"),
             start=local(row.start_at),
             end=local(row.end_at) if row.end_at else t("ap.unlimited"),
-            next=local(row.next_run_at),
+            next=local(pub.next_due(row, campaign)),
         )
     )
     if row.last_error:
         text += "\n" + t("ap.last_error") + ": " + escape(row.last_error)
     rows = [
-        [(t("ap.intervals"), cb("intervals", cid)), (t("ap.calendar"), cb("calendar", cid))],
-        [(t("ap.group"), cb("groups", cid)), (t("ap.stats"), cb("stats", cid))],
-        [(t("ap.start"), cb("start", cid)), (t("ap.pause"), cb("pause", cid, str(row.version)))],
-        [(t("ap.stop"), cb("stop", cid, str(row.version)))],
+        [
+            (t("ap.intervals"), make_cb("intervals", cid)),
+            (t("ap.calendar"), make_cb("calendar", cid)),
+        ],
+        [(t("ap.group"), make_cb("groups", cid)), (t("ap.stats"), make_cb("stats", cid))],
+        [
+            (t("ap.start"), make_cb("start", cid)),
+            (t("ap.pause"), make_cb("pause", cid, str(row.version))),
+        ],
+        [(t("ap.stop"), make_cb("stop", cid, str(row.version)))],
         [
             (t("ads.preview"), content_cb("preview", cid, "FULL")),
-            (t("ads.history"), cb("history", cid)),
+            (t("ads.history"), make_cb("history", cid)),
         ],
         [(t("ap.content"), content_cb("campaign", cid))],
         [(t("ads.back"), content_cb("list"))],
     ]
+    if pub.schedule_id:
+        labels = {
+            "interval_seconds": t("ap.intervals"),
+            "start_at": t("ap.start_date"),
+            "end_at": t("ap.end_at"),
+        }
+        text += (
+            "\n\n"
+            + t("g.overrides")
+            + ": "
+            + (
+                ", ".join(labels[key] for key in row.override_fields if key in labels)
+                or t("g.inherited")
+            )
+        )
+        from app.bot.global_ads import cb as global_cb
+
+        rows[1][0] = (t("g.groups"), global_cb("schedules", cid))
+        rows[-1] = [(t("ads.back"), global_cb("campaign", cid))]
+        rows.insert(
+            -1,
+            [
+                (t("g.remove"), global_cb("remove", cid, f"{row.id}.{row.version}")),
+                (t("g.inherit"), global_cb("inherit", cid, f"{row.id}.{row.version}")),
+            ],
+        )
     await pub.session.commit()
     await display(message, text, keyboard(rows), edit=True)
 
@@ -143,7 +185,26 @@ def register_publication_handlers(router: Router) -> None:
                 value = date.fromisoformat(value.strip())
             elif data["ap_field"] == "end_at":
                 value = None if value.strip() == "-" else local_datetime(value)
-            pub = PublicationService(service.settings, service.session)
+            pub = PublicationService(service.settings, service.session, data.get("ap_sid") or None)
+            if pub.schedule_id:
+                from app.bot.global_ads import confirm_change
+
+                await state.set_state(None)
+                target = message.model_copy(update={"message_id": data["ap_panel"]}).as_(
+                    message.bot
+                )
+                await confirm_change(
+                    target,
+                    service,
+                    actor,
+                    data["ap_cid"],
+                    pub.schedule_id,
+                    data["ap_version"],
+                    data["ap_field"],
+                    value,
+                    f"schedule:{actor}:{message.message_id}",
+                )
+                return
             await pub.change(
                 actor,
                 data["ap_cid"],
@@ -167,10 +228,13 @@ def register_publication_handlers(router: Router) -> None:
             await service.session.rollback()
             await message.answer(failure(error), parse_mode="HTML")
 
+    @router.callback_query(AdGroupPublication.filter())
     @router.callback_query(AdPublication.filter())
     async def management(
-        callback: CallbackQuery, callback_data: AdPublication, state: FSMContext, service: Service
+        callback: CallbackQuery, callback_data: Any, state: FSMContext, service: Service
     ) -> None:
+        sid = getattr(callback_data, "schedule", 0)
+        make_cb, make_back = partial(cb, sid=sid), partial(back, sid=sid)
         acknowledged = False
         try:
             if not isinstance(callback.message, Message):
@@ -178,25 +242,51 @@ def register_publication_handlers(router: Router) -> None:
             actor, message = callback.from_user.id, callback.message
             await private(service, message, actor)
             cid, action, value = callback_data.campaign, callback_data.action, callback_data.value
-            pub = PublicationService(service.settings, service.session)
+            pub = PublicationService(service.settings, service.session, sid or None)
             await pub.ads.get(actor, cid)
             await service.session.commit()
             await callback.answer()
             acknowledged = True
             await state.set_state(None)
+            if not sid:
+                count = await service.session.scalar(
+                    select(func.count())
+                    .select_from(AdSchedule)
+                    .where(AdSchedule.campaign_id == cid)
+                )
+                if (count or 0) > 1:
+                    from app.bot.global_ads import schedule_list
+
+                    await schedule_list(message, service, actor, cid)
+                    return
             row = await pub.ensure(actor, cid)
             if action == "panel":
                 await panel(message, pub, actor, cid)
             elif action == "intervals":
                 choices = [
-                    (t("ap.i" + str(i)), cb("interval", cid, f"{row.version}.{i}"))
+                    (t("ap.i" + str(i)), make_cb("interval", cid, f"{row.version}.{i}"))
                     for i in INTERVALS
                 ]
                 rows = [choices[i : i + 2] for i in range(0, len(choices), 2)]
-                rows.append([(t("ads.back"), cb("panel", cid))])
+                rows.append([(t("ads.back"), make_cb("panel", cid))])
                 await display(message, t("ap.intervals"), keyboard(rows), edit=True)
             elif action == "interval":
                 version, seconds = map(int, value.split("."))
+                if sid:
+                    from app.bot.global_ads import confirm_change
+
+                    await confirm_change(
+                        message,
+                        service,
+                        actor,
+                        cid,
+                        sid,
+                        version,
+                        "interval_seconds",
+                        seconds,
+                        callback_request(callback, "global-interval"),
+                    )
+                    return
                 await pub.change(
                     actor,
                     cid,
@@ -209,10 +299,10 @@ def register_publication_handlers(router: Router) -> None:
                 await panel(message, pub, actor, cid)
             elif action == "calendar":
                 rows = [
-                    [(t("ap." + f), cb("edit", cid, f"{row.version}.{f}"))]
+                    [(t("ap." + f), make_cb("edit", cid, f"{row.version}.{f}"))]
                     for f in ("start_date", "start_time", "end_at")
                 ]
-                rows.append([(t("ads.back"), cb("panel", cid))])
+                rows.append([(t("ads.back"), make_cb("panel", cid))])
                 await display(
                     message, t("ap.calendar") + "\n\n" + t("ap.zone"), keyboard(rows), edit=True
                 )
@@ -226,10 +316,19 @@ def register_publication_handlers(router: Router) -> None:
                     raise DomainError("ap_stale")
                 await state.set_state(AdScheduleFlow.input)
                 await state.update_data(
-                    ap_cid=cid, ap_version=row.version, ap_field=field, ap_panel=message.message_id
+                    ap_cid=cid,
+                    ap_sid=sid,
+                    ap_version=row.version,
+                    ap_field=field,
+                    ap_panel=message.message_id,
                 )
-                await display(message, t("ap.prompt_" + field), back(cid), edit=True)
+                await display(message, t("ap.prompt_" + field), make_back(cid), edit=True)
             elif action == "groups":
+                if sid:
+                    from app.bot.global_ads import schedule_list
+
+                    await schedule_list(message, service, actor, cid)
+                    return
                 page = max(0, min(int(value or 0), 10000))
                 groups = list(
                     await service.session.scalars(
@@ -253,13 +352,18 @@ def register_publication_handlers(router: Router) -> None:
                     except (DomainError, TelegramAPIError, OSError, TimeoutError):
                         continue
                     rows.append(
-                        [(group.title[:50], cb("group", cid, f"{row.version}.{group.chat_id}"))]
+                        [
+                            (
+                                group.title[:50],
+                                make_cb("group", cid, f"{row.version}.{group.chat_id}"),
+                            )
+                        ]
                     )
                 if page:
-                    rows.append([(t("ads.back"), cb("groups", cid, str(page - 1)))])
+                    rows.append([(t("ads.back"), make_cb("groups", cid, str(page - 1)))])
                 if len(groups) > 8:
-                    rows.append([(t("ads.next"), cb("groups", cid, str(page + 1)))])
-                rows.append([(t("ads.back"), cb("panel", cid))])
+                    rows.append([(t("ads.next"), make_cb("groups", cid, str(page + 1)))])
+                rows.append([(t("ads.back"), make_cb("panel", cid))])
                 await display(
                     message, t("ap.group") + "\n\n" + t("ap.group_note"), keyboard(rows), edit=True
                 )
@@ -298,10 +402,12 @@ def register_publication_handlers(router: Router) -> None:
                             [
                                 (
                                     t("ap.confirm_button"),
-                                    cb("confirm", cid, f"{row.version}.{content_version.revision}"),
+                                    make_cb(
+                                        "confirm", cid, f"{row.version}.{content_version.revision}"
+                                    ),
                                 )
                             ],
-                            [(t("ads.cancel"), cb("panel", cid))],
+                            [(t("ads.cancel"), make_cb("panel", cid))],
                         ]
                     ),
                     edit=True,
@@ -311,6 +417,21 @@ def register_publication_handlers(router: Router) -> None:
                 await pub.activate(actor, cid, expected, revision, message.bot)
                 await panel(message, pub, actor, cid)
             elif action in {"pause", "stop"}:
+                if sid:
+                    from app.ads_global import GlobalAdsService
+                    from app.bot.global_ads import operation_panel
+
+                    op = await GlobalAdsService(service.settings, service.session).prepare(
+                        actor,
+                        cid,
+                        action.upper(),
+                        callback_request(callback, "global-" + action),
+                        message.bot,
+                        sid=sid,
+                        expected_version=int(value),
+                    )
+                    await operation_panel(message, service, actor, op.id)
+                    return
                 await pub.control(
                     actor,
                     cid,
@@ -318,7 +439,7 @@ def register_publication_handlers(router: Router) -> None:
                     "PAUSED" if action == "pause" else "STOPPED",
                     message.bot,
                 )
-                await display(message, t("ap.control_note"), back(cid), edit=True)
+                await display(message, t("ap.control_note"), make_back(cid), edit=True)
             elif action == "stats":
                 stats = await pub.statistics(actor, cid)
                 await service.session.commit()
@@ -329,10 +450,11 @@ def register_publication_handlers(router: Router) -> None:
                         sent=stats["sent"],
                         failed=stats["failed"],
                         uncertain=stats.get("uncertain", 0),
+                        partial=stats.get("partial", 0),
                         last=local(stats["last"]),
-                        next=local(row.next_run_at),
+                        next=local(stats.get("next")),
                     ),
-                    back(cid),
+                    make_back(cid),
                     edit=True,
                 )
             elif action == "history":
@@ -356,10 +478,10 @@ def register_publication_handlers(router: Router) -> None:
                 await service.session.commit()
                 pages = []
                 if page:
-                    pages.append([(t("ads.back"), cb("history", cid, str(page - 1)))])
+                    pages.append([(t("ads.back"), make_cb("history", cid, str(page - 1)))])
                 if len(attempts) > 5:
-                    pages.append([(t("ads.next"), cb("history", cid, str(page + 1)))])
-                pages.append([(t("ads.back"), cb("panel", cid))])
+                    pages.append([(t("ads.next"), make_cb("history", cid, str(page + 1)))])
+                pages.append([(t("ads.back"), make_cb("panel", cid))])
                 await display(message, text, keyboard(pages), edit=True)
             else:
                 raise DomainError("ap_stale")
@@ -374,7 +496,7 @@ def register_publication_handlers(router: Router) -> None:
             await service.session.rollback()
             if acknowledged and isinstance(callback.message, Message):
                 await display(
-                    callback.message, failure(error), back(callback_data.campaign), edit=True
+                    callback.message, failure(error), make_back(callback_data.campaign), edit=True
                 )
             else:
                 await callback.answer(failure(error), show_alert=True)

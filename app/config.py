@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     fsm_ttl_seconds: int = 1800
     rep_cooldown_seconds: int = 60
     report_cooldown_seconds: int = 300
+    ads_worker_concurrency: int = Field(default=8, ge=1, le=32)
+    ads_global_messages_per_second: float = Field(default=20, ge=0, le=30)
+    ads_group_messages_per_minute: float = Field(default=20, ge=0, le=20)
 
     @field_validator("bot_token")
     @classmethod
@@ -70,6 +73,8 @@ class Settings(BaseSettings):
             not self.database_url.startswith("postgresql+asyncpg://")
             or not self.redis_url
             or not self.admins
+            or not self.ads_global_messages_per_second
+            or not self.ads_group_messages_per_minute
         ):
             raise ValueError("Production requires PostgreSQL, REDIS_URL and ADMIN_IDS")
         if self.group_owner_id is not None and self.group_owner_id not in self.admins:

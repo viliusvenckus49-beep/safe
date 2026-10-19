@@ -96,6 +96,8 @@ async def send_part(bot: Any, attempt: Any, part: Any, version: Any) -> list[int
 class AdsPublisher:
     def __init__(self, bot: Any, settings: Any, sessions: Any):
         self.bot, self.settings, self.sessions = bot, settings, sessions
+        self.background = False
+        self.inflight: set[asyncio.Task] = set()
 
     async def execute(self, claim: tuple[int, str, int]) -> None:
         aid, token, fence = claim
@@ -150,12 +152,15 @@ class AdsPublisher:
                 more = await PublicationService(self.settings, session).result(
                     aid, token, fence, part.id, status, ids, reason, delay
                 )
+                recorded = await session.get(AdPublicationAttempt, aid, populate_existing=True)
+                stored_status = recorded.status
             log.info(
                 "ads_publication_result",
                 attempt_id=aid,
                 chat_id=chat,
                 part_id=part.id,
-                status=t("ap." + status),
+                status=stored_status,
+                telegram_status=status,
                 error=reason,
             )
             if not more:
@@ -236,6 +241,9 @@ class AdsPublisher:
             )
 
     async def tick(self) -> None:
+        if self.background:
+            await self.pool_tick()
+            return
         async with self.sessions() as session:
             await PublicationService(self.settings, session).enqueue()
         for _ in range(20):
@@ -266,12 +274,107 @@ class AdsPublisher:
         for sid in schedules:
             await self.notify_policy(sid)
 
+    async def pool_tick(self) -> None:
+        finished = {task for task in self.inflight if task.done()}
+        for task in finished:
+            self.inflight.remove(task)
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                log.error(
+                    "ads_execution_failed",
+                    operation=task.get_name(),
+                    exception_type=type(error).__name__,
+                )
+        while len(self.inflight) < self.settings.ads_worker_concurrency:
+            async with self.sessions() as session:
+                claim = await PublicationService(self.settings, session).claim()
+            if claim is None:
+                break
+            self.inflight.add(
+                asyncio.create_task(self.execute(claim), name=f"ads-publication-{claim[0]}")
+            )
+        if self.inflight:
+            await asyncio.wait(self.inflight, timeout=0.1, return_when=asyncio.FIRST_COMPLETED)
+
+    async def planning(self) -> None:
+        while True:
+            try:
+                async with self.sessions() as session:
+                    await PublicationService(self.settings, session).enqueue(limit=128)
+            except Exception as error:
+                log.error("ads_planning_failed", exception_type=type(error).__name__)
+            await asyncio.sleep(0.5)
+
+    async def coordination(self) -> None:
+        from app.ads_global import GlobalAdsService
+        from app.models import AdGlobalOperation
+
+        while True:
+            try:
+                async with self.sessions() as session:
+                    operations = list(
+                        await session.scalars(
+                            select(AdGlobalOperation.id)
+                            .where(AdGlobalOperation.status == "RUNNING")
+                            .order_by(AdGlobalOperation.created_at)
+                            .limit(4)
+                        )
+                    )
+                for oid in operations:
+                    async with self.sessions() as session:
+                        await GlobalAdsService(self.settings, session).run(oid, self.bot)
+                async with self.sessions() as session:
+                    await GlobalAdsService(self.settings, session).reconcile(
+                        self.bot, groups_per_policy=8
+                    )
+                async with self.sessions() as session:
+                    attempts = list(
+                        await session.scalars(
+                            select(AdPublicationAttempt.id)
+                            .where(
+                                AdPublicationAttempt.status.in_(("FAILED", "UNCERTAIN")),
+                                AdPublicationAttempt.notified.is_(False),
+                            )
+                            .limit(10)
+                        )
+                    )
+                    policies = list(
+                        await session.scalars(
+                            select(AdSchedule.id)
+                            .where(AdSchedule.alert_pending.is_(True))
+                            .limit(10)
+                        )
+                    )
+                for aid in attempts:
+                    await self.notify(aid)
+                for sid in policies:
+                    await self.notify_policy(sid)
+            except Exception as error:
+                log.error("ads_coordination_failed", exception_type=type(error).__name__)
+            await asyncio.sleep(1)
+
 
 async def ads_worker(bot: Any, settings: Any, sessions: Any) -> None:
     publisher = AdsPublisher(bot, settings, sessions)
-    while True:
-        try:
-            await publisher.tick()
-        except Exception as error:
-            log.error("ads_worker_failed", exception_type=type(error).__name__)
-        await asyncio.sleep(5)
+    # Complete the first planning cycle before dispatching; a separate loop keeps
+    # scheduling responsive while a Telegram call in one pool slot is slow.
+    async with sessions() as session:
+        await PublicationService(settings, session).enqueue(limit=128)
+    publisher.background = True
+    planning = asyncio.create_task(publisher.planning())
+    coordination = asyncio.create_task(publisher.coordination())
+    try:
+        while True:
+            try:
+                await publisher.tick()
+            except Exception as error:
+                log.error("ads_worker_failed", exception_type=type(error).__name__)
+            await asyncio.sleep(0.1)
+    finally:
+        tasks = [planning, coordination, *publisher.inflight]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

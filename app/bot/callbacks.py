@@ -77,3 +77,16 @@ class PublishedAd(CallbackData, prefix="apb"):
     attempt: int
     row: int
     column: int
+
+
+class AdGroupPublication(CallbackData, prefix="agp"):
+    action: str
+    campaign: int
+    schedule: int
+    value: str = ""
+
+
+class GlobalAd(CallbackData, prefix="g33"):
+    action: str
+    campaign: int = 0
+    value: str = ""
