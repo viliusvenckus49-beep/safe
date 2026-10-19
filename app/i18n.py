@@ -9,6 +9,7 @@ import structlog
 
 from app.locales.administrators import CATALOGS as ADMINISTRATORS
 from app.locales.ads import CATALOGS as ADS
+from app.locales.ads_publication import CATALOGS as ADS_PUBLICATION
 from app.locales.button_icons import CATALOGS as BUTTON_ICONS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
@@ -48,6 +49,7 @@ CATALOGS = {
         **DIAGNOSTICS[lang],
         **LOCAL_MODERATION[lang],
         **ADS[lang],
+        **ADS_PUBLICATION[lang],
     }
     for lang in LANGUAGES
 }

@@ -47,3 +47,9 @@ jobs:
       - run: mypy
       - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic upgrade head
       - run: docker build -t safecheck:ci .
+      - name: Verify packaged ADS engine and timezone without network or secrets
+        run: >-
+          docker run --rm --network none --read-only --entrypoint python safecheck:ci
+          -c "from datetime import UTC, datetime; from app.ads_schedule import local_datetime;
+          from app.bot.ads_publisher import AdsPublisher;
+          assert local_datetime('2026-11-20 12:00') == datetime(2026,11,20,10,tzinfo=UTC)"

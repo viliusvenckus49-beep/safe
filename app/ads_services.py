@@ -43,6 +43,17 @@ class AdsService:
             await self.session.rollback()
             raise
 
+    @asynccontextmanager
+    async def write_system(self):
+        """Serialize short ADS worker transitions with ACL changes; never hold for API I/O."""
+        try:
+            await self.repo.lock_identity_metadata()
+            yield
+            await self.session.commit()
+        except BaseException:
+            await self.session.rollback()
+            raise
+
     def audit(self, actor: int, action: str, campaign: int, **details: Any) -> None:
         self.session.add(
             AuditEvent(
