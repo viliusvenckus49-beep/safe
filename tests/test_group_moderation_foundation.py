@@ -1,7 +1,7 @@
 """Local moderation contracts use real sessions and a stateful Telegram API double."""
 
 import asyncio
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -445,13 +445,120 @@ async def test_individual_modules_default_off_and_group_scoped(database):
         await submit(database, bot, chat=OTHER, target=52, key="request-0003")
 
 
-@pytest.mark.parametrize("seconds", [-1, 20, 2592001])
-async def test_expiry_limits_cannot_accidentally_create_permanent_bans(database, seconds):
+@pytest.fixture
+def moderation_clock(monkeypatch):
+    # Whole-second deadlines match Telegram's wire precision. Do not measure DB /
+    # authorization latency when testing the service's inclusive duration limits.
+    clock = SimpleNamespace(current=datetime(2026, 10, 19, 12, tzinfo=UTC))
+    monkeypatch.setattr("app.moderation_services.now", lambda: clock.current)
+    return clock
+
+
+async def check_expiry_boundary(sessions, clock, *, seconds, allowed, kind="BAN", advance=None):
     bot = NativeBot()
-    await setup_groups(database, bot)
-    with pytest.raises(DomainError, match="invalid_duration"):
-        await submit(database, bot, until=now() + timedelta(seconds=seconds))
+    await setup_groups(sessions, bot)
+    until = clock.current + timedelta(seconds=seconds)
+    if advance is not None:
+        original = bot.get_chat_member
+        checked_at = clock.current + advance
+
+        async def delayed_member(chat_id, user_id):
+            clock.current = checked_at
+            return await original(chat_id, user_id)
+
+        bot.get_chat_member = delayed_member
+    if allowed:
+        result = await submit(sessions, bot, kind=kind, until=until)
+        assert result.status == "PENDING"
+    else:
+        with pytest.raises(DomainError, match="invalid_duration"):
+            await submit(sessions, bot, kind=kind, until=until)
+    async with sessions() as session:
+        sanctions = list(await session.scalars(select(GroupSanction)))
+        jobs = list(await session.scalars(select(GroupSanctionJob)))
+        requested = await session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(AuditEvent.action == "group_moderation_requested")
+        )
+        assert len(sanctions) == int(allowed)
+        assert len(jobs) == (2 if allowed else 0)
+        assert requested == int(allowed)
+        if allowed:
+            deadline = until.replace(microsecond=0)
+            assert sanctions[0].kind == kind
+            assert sanctions[0].status == "PENDING"
+            assert sanctions[0].until_date.replace(tzinfo=UTC) == deadline
+            assert sorted(job.operation for job in jobs) == ["APPLY", "RELEASE"]
+            release = next(job for job in jobs if job.operation == "RELEASE")
+            assert release.available_at.replace(tzinfo=UTC) == deadline
     assert bot.calls == []
+
+
+@pytest.mark.parametrize("seconds", [-1, 20, 2592001])
+async def test_expiry_limits_cannot_accidentally_create_permanent_bans(
+    database, moderation_clock, seconds
+):
+    await check_expiry_boundary(database, moderation_clock, seconds=seconds, allowed=False)
+
+
+@pytest.mark.parametrize("kind", ["BAN", "MUTE"])
+@pytest.mark.parametrize(
+    "seconds,allowed",
+    [
+        (0, False),
+        (59, False),
+        (60, True),
+        (61, True),
+        (2591999, True),
+        (2592000, True),
+        (2592001, False),
+    ],
+)
+async def test_expiry_inclusive_boundaries(database, moderation_clock, kind, seconds, allowed):
+    await check_expiry_boundary(
+        database, moderation_clock, seconds=seconds, allowed=allowed, kind=kind
+    )
+
+
+@pytest.mark.parametrize("kind", ["BAN", "MUTE"])
+@pytest.mark.parametrize(
+    "seconds,allowed", [(59, False), (60, True), (2592000, True), (2592001, False)]
+)
+async def test_postgres_expiry_boundaries(
+    postgres_contract, moderation_clock, kind, seconds, allowed
+):
+    sessions, _ = postgres_contract
+    await check_expiry_boundary(
+        sessions, moderation_clock, seconds=seconds, allowed=allowed, kind=kind
+    )
+
+
+@pytest.mark.parametrize("kind", ["BAN", "MUTE"])
+@pytest.mark.parametrize(
+    "microsecond,seconds,elapsed_ms,allowed",
+    [
+        (900000, 2592001, 0, False),
+        (900000, 2592001, 200, True),
+        (900000, 60, 0, False),
+        (900000, 61, 0, True),
+        (0, 61, 2000, False),
+    ],
+)
+async def test_expiry_uses_remaining_wire_duration_after_authorization(
+    database, moderation_clock, kind, microsecond, seconds, elapsed_ms, allowed
+):
+    # Advance logical time, not wall time: the old CI failure is the second case.
+    # A duration that falls below 60 s while checking permissions must be rejected.
+    moderation_clock.current = moderation_clock.current.replace(microsecond=microsecond)
+    await check_expiry_boundary(
+        database,
+        moderation_clock,
+        seconds=seconds,
+        allowed=allowed,
+        kind=kind,
+        advance=timedelta(milliseconds=elapsed_ms),
+    )
 
 
 async def test_permanent_bans_require_explicit_group_permission(database):
