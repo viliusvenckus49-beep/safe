@@ -79,10 +79,22 @@ session/credential state separately from the PostgreSQL dump, through approved
 secret backup procedures. Do not copy a live SQLite session to claim a consistent
 session backup. Do not run simultaneous login helpers/relays against one session.
 
-Pending read-only evidence: classify PID1 as the known login helper, compare helper
-code hash and inspect mount destinations/permissions without printing cmdline,
-secret values, session content or full inspect JSON. If it is another process,
-identify its DB/file writers before a maintenance approval. Do not stop it now.
+Additional operator evidence: PID1 has a `/app/mtproto_login.py` argument;
+`DatabaseURLConfigured=False`; helper SHA-256 reported as
+`180d23b86d507bdc73cb37659da0b9a7cd4d18356882f7d3168e181ee7ff73f8`.
+This differs from main's helper SHA-256
+`71907a947081587358c6e4e4e4d2df10593868613d90b326775320f824e8fae5`.
+Consequently the running helper is NOT byte-verified against the reviewed source.
+An unset DATABASE_URL alone does not prove the absence of other DB configuration.
+Do not call this a confirmed second poller, backup process, or SQL writer either.
+
+Observed mounts: helper `/state` RW; bot `/run/mtproto` RW; bot secret/config mounts
+read-only. The returned mount destinations do not reveal whether host sources are
+the same. Before final maintenance, compare sources locally and report only the
+shared/not-shared boolean, classify the helper's actual code in a private review,
+and decide the approved stop/session-backup scope. This uncertainty does not
+prevent a consistent ONLINE PostgreSQL dump under Gate 2A, because that action
+neither freezes writers nor copies SQLite sessions. Do not stop the helper now.
 
 ## Approval split
 
@@ -221,7 +233,7 @@ New moderation flags must remain disabled; do not insert/activate ADS schedules.
   mounted; it is not a newly built final image or a production-data restore.
 - Earlier full main CI: 1852 passed, including broader PG/Redis and backup/restore
   integration. Not rerun solely to repeat completed work. New PR CI is separate.
-- Full production archive restore, offsite, MTProto runtime classification and
+- Full production archive restore, offsite, exact MTProto helper verification and
   actual Telegram staging remain pending. No new Alembic revision or app change.
 
 Status: SAFE PREPARATION COMPLETE; production database protection NOT YET VERIFIED.
