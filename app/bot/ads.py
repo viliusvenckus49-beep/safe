@@ -329,7 +329,9 @@ def register_ads_handlers(router: Router) -> None:
                 draft = await ads.draft(actor, source[1:])
                 content = draft.content
             elif source.startswith("v"):
-                version = await service.session.get(AdContentVersion, int(source[1:]))
+                version_id = int(source[1:])
+                ads.database_id(version_id)
+                version = await service.session.get(AdContentVersion, version_id)
                 if version is None:
                     raise DomainError("ads_missing")
                 await ads.get(actor, version.campaign_id)
@@ -360,6 +362,9 @@ def register_ads_handlers(router: Router) -> None:
             name, cid, value = callback_data.action, callback_data.campaign, callback_data.value
             await callback.answer()
             acknowledged = True
+            # Any management navigation closes the previous input context. Only
+            # an explicit edit/recovered media collection may open it again.
+            await state.set_state(None)
             if name == "root":
                 await state.set_state(None)
                 await root(message, ads, actor)

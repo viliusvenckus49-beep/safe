@@ -32,6 +32,8 @@ def test_valid_urls(value):
         "data:text/html,bad",
         "file:///etc/passwd",
         "https://user:pass@example.com",
+        "https://@example.com",
+        "https://:@example.com",
         "https://example.com\n",
         "https:///path",
         "https://example.com:99999",
@@ -94,6 +96,16 @@ def test_utf16_custom_emoji_at_each_button_lead_is_preserved():
     assert markup.inline_keyboard[0][1].icon_custom_emoji_id == "531234567891"
     assert parse_buttons(first)[0][0]["label"] == "😀 Name"
     assert parse_buttons(first)[0][0]["icon_custom_emoji_id"] is None
+
+
+def test_custom_icon_does_not_consume_the_button_text_limit():
+    text = "🍒 " + "A" * 64 + " - https://t.me/Example"
+    entities = [{"type": "custom_emoji", "offset": 0, "length": 2, "custom_emoji_id": "12345"}]
+    button = parse_buttons(text, entities)[0][0]
+    assert button["label"] == "A" * 64
+    assert button["icon_custom_emoji_id"] == "12345"
+    with pytest.raises(DomainError):
+        parse_buttons(text)  # A normal emoji remains part of the text limit.
 
 
 @pytest.mark.parametrize("offset,length", [(1, 1), (0, 1), (-1, 2), (100, 2)])

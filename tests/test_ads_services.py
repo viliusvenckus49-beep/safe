@@ -10,7 +10,8 @@ from test_integration_contracts import postgres_contract as postgres_contract
 from app.admin_services import AdminService
 from app.ads_services import AdsService
 from app.errors import DomainError
-from app.models import AdCampaign, AdContentDraft, AdContentVersion, AuditEvent, now
+from app.models import AdCampaign, AdContentDraft, AdContentVersion, Administrator, AuditEvent, now
+from app.repositories import Repository
 
 pytestmark = pytest.mark.asyncio
 
@@ -203,3 +204,68 @@ async def test_expired_cancelled_and_unpreviewed_drafts_never_save(database, set
         await session.commit()
         with pytest.raises(DomainError, match="stale"):
             await AdsService(settings, session).save(900, pending.id)
+
+
+async def test_postgres_oversized_callback_keys_never_reach_database(postgres_contract):
+    sessions, settings = postgres_contract
+    campaign = await create(sessions, settings)
+    async with sessions() as session:
+        ads = AdsService(settings, session)
+        with pytest.raises(DomainError):
+            await ads.get(900, 2**40)
+        await session.rollback()
+        with pytest.raises(DomainError):
+            await ads.stage(900, campaign.id, 1, "RESTORE", 2**40, "oversized-restore")
+
+
+async def test_postgres_parallel_repeated_save_creates_one_revision(postgres_contract):
+    sessions, settings = postgres_contract
+    campaign = await create(sessions, settings)
+    pending = await draft(sessions, settings, campaign.id)
+    async with sessions() as session:
+        await AdsService(settings, session).mark_previewed(900, pending.id)
+
+    async def perform():
+        async with sessions() as session:
+            return await AdsService(settings, session).save(900, pending.id)
+
+    results = await asyncio.wait_for(asyncio.gather(*(perform() for _ in range(6))), 20)
+    assert len({row.id for row in results}) == 1
+    async with sessions() as session:
+        assert (await session.get(AdCampaign, campaign.id)).version == 2
+        assert await session.scalar(select(func.count()).select_from(AdContentVersion)) == 2
+
+
+async def test_postgres_revocation_wins_over_waiting_previously_authorized_save(postgres_contract):
+    sessions, settings = postgres_contract
+    campaign = await create(sessions, settings)
+    pending = await draft(sessions, settings, campaign.id)
+    async with sessions() as session:
+        await AdsService(settings, session).mark_previewed(900, pending.id)
+    async with sessions() as writer, sessions() as revoker:
+        ads = AdsService(settings, writer)
+        await ads.authorize(900)  # This session already observed the old grant.
+        await Repository(revoker).lock_identity_metadata()
+        revoker.add(Administrator(telegram_id=900, active=False, assigned_by=999))
+        await revoker.flush()
+        reached_lock = asyncio.Event()
+        original = ads.repo.lock_identity_metadata
+
+        async def wait_for_lock():
+            reached_lock.set()
+            await original()
+
+        ads.repo.lock_identity_metadata = wait_for_lock
+        task = asyncio.create_task(ads.save(900, pending.id))
+        try:
+            await asyncio.wait_for(reached_lock.wait(), 5)
+            await revoker.commit()
+            with pytest.raises(DomainError, match="forbidden"):
+                await asyncio.wait_for(task, 10)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+    async with sessions() as session:
+        assert (await session.get(AdCampaign, campaign.id)).version == 1
+        assert await session.scalar(select(func.count()).select_from(AdContentVersion)) == 1

@@ -9,6 +9,7 @@ from test_telegram import journey as journey
 
 from app.ads_services import AdsService
 from app.bot.ads import cb
+from app.bot.callbacks import AdsPreview
 from app.i18n import t
 from app.models import AdCampaign, AdContentDraft
 from app.services import Service
@@ -272,3 +273,38 @@ async def test_nontext_input_in_button_editor_does_not_stage_accidental_clear(jo
     async with database() as session:
         pending = await session.scalar(select(AdContentDraft))
         assert pending.content["buttons"][0][0]["label"] == "Open"
+
+
+@pytest.mark.parametrize("destination", ["history", "drafts", "delete", "restore", "draft"])
+async def test_leaving_an_editor_never_keeps_hidden_text_input(
+    journey, database, settings, destination
+):
+    cid = await new(journey, database)
+    async with database() as session:
+        ads = AdsService(settings, session)
+        version = (await ads.current(900, cid))[1]
+        pending = await ads.stage(900, cid, 1, "TEXT", {"text": "Draft", "entities": []}, "ready")
+        value = (
+            str(version.id)
+            if destination == "restore"
+            else pending.id
+            if destination == "draft"
+            else "1"
+            if destination == "delete"
+            else ""
+        )
+    await journey.click(cb("edit", cid, "TEXT"), actor=900)
+    assert await journey.state(900) is not None
+    await journey.click(cb(destination, cid, value), actor=900)
+    assert await journey.state(900) is None
+    await journey.send("This is not an ad edit", actor=900)
+    async with database() as session:
+        rows = list(await session.scalars(select(AdContentDraft)))
+        assert not any(row.content["text"] == "This is not an ad edit" for row in rows)
+
+
+async def test_forged_oversized_preview_version_is_rejected_cleanly(journey):
+    await journey.click(AdsPreview(source="v" + str(2**80), row=0, column=0).pack(), actor=900)
+    answers = [c for c in journey.transport.calls if isinstance(c, AnswerCallbackQuery)]
+    assert len(answers) == 1 and answers[0].show_alert is True
+    assert answers[0].text == t("ads.stale")

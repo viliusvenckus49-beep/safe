@@ -55,9 +55,16 @@ class AdsService:
         if not isinstance(value, str) or not re.fullmatch(r"[a-zA-Z0-9:._-]{1,128}", value):
             raise DomainError("ads_stale")
 
+    @staticmethod
+    def database_id(value: int) -> None:
+        # Campaign/revision PKs are PostgreSQL INTEGER, not Telegram BIGINT IDs.
+        numeric_id(value)
+        if value > 2**31 - 1:
+            raise DomainError("ads_stale")
+
     async def get(self, actor: int, campaign_id: int, *, archived: bool = False) -> AdCampaign:
         await self.authorize(actor)
-        numeric_id(campaign_id)
+        self.database_id(campaign_id)
         row = await self.session.get(AdCampaign, campaign_id, populate_existing=True)
         if row is None or (not archived and row.status != "DRAFT"):
             raise DomainError("ads_missing")
@@ -164,7 +171,7 @@ class AdsService:
             elif field == "BUTTONS":
                 content["buttons"] = value
             else:
-                numeric_id(value)
+                self.database_id(value)
                 original = await self.session.get(AdContentVersion, value)
                 if original is None or original.campaign_id != campaign_id:
                     raise DomainError("ads_missing")

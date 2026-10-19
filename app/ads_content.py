@@ -45,8 +45,8 @@ def url(value: str) -> str:
         if (
             parsed.scheme not in {"https", "http"}
             or not parsed.hostname
-            or parsed.username
-            or parsed.password
+            or parsed.username is not None
+            or parsed.password is not None
         ):
             raise ValueError()
         if parsed.port is not None and not 1 <= parsed.port <= 65535:
@@ -145,7 +145,7 @@ def parse_buttons(text: str, entities: list[dict] | None = None) -> list[list[di
                 if line.strip():
                     raise DomainError("ads_buttons")
                 continue
-            if not delimiter or not label.strip() or units(label.strip()) > 64:
+            if not delimiter or not label.strip():
                 raise DomainError("ads_buttons")
             label_start = start + units(label) - units(label.lstrip())
             label_end = start + units(label)
@@ -164,7 +164,7 @@ def parse_buttons(text: str, entities: list[dict] | None = None) -> list[list[di
                     ].decode("utf-16-le")
                     used.add(i)
             action, label = action.strip(), label.strip()
-            if not label:
+            if not label or units(label) > 64:
                 raise DomainError("ads_buttons")
             if action == "rules":
                 # Bot API has no group-rules endpoint; never create a dead/pretend rules button.
