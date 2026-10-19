@@ -1,4 +1,4 @@
-"""100 / 1000 synthetic PostgreSQL groups; zero real Telegram API requests.
+"""10 / 100 / 1000 synthetic PostgreSQL groups; zero real Telegram API requests.
 
 Measures SQL + worker/request-double capacity with rate budgets disabled. This is
 not Telegram throughput; normal defaults enforce 20 msg/s globally and 20/min/chat.
@@ -20,7 +20,7 @@ from app.bot.ads_publisher import AdsPublisher
 from app.models import AdPublicationAttempt, AdSchedule, ManagedGroup
 
 
-@pytest.mark.parametrize("count", [100, 1000])
+@pytest.mark.parametrize("count", [10, 100, 1000])
 async def test_synthetic_multi_group_capacity(postgres_contract, clock, count):
     sessions, settings = postgres_contract
     cid, _, bot, _, _ = await configured(sessions, settings, clock)

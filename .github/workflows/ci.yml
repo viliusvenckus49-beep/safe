@@ -45,7 +45,9 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
+      - run: python -m compileall -q app migrations tests
       - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic upgrade head
+      - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic check
       - run: docker build -t safecheck:ci .
       - name: Start packaged ADS worker without network or runtime secrets
         run: |

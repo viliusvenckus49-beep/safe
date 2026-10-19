@@ -1,7 +1,7 @@
 """Durable, actor-bound GLOBAL ADS assignment and independent schedule operations."""
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import case, func, or_, select
@@ -118,25 +118,102 @@ class GlobalAdsService:
             row = await self.session.get(AdAssignmentPolicy, cid, populate_existing=True)
             if row.version != expected:
                 raise DomainError("ap_stale")
-            if field == "interval_seconds":
-                if type(value) is not int or value not in INTERVALS:
-                    raise DomainError("ap_interval")
-            elif field in {"start_at", "end_at"}:
-                if value is not None and (not hasattr(value, "tzinfo") or value.tzinfo is None):
-                    raise DomainError("ap_time")
-                if field == "start_at" and value is None:
-                    raise DomainError("ap_time")
-            else:
-                raise DomainError("ap_stale")
-            setattr(row, field, value)
-            if row.start_at and row.end_at and utc(row.end_at) <= utc(row.start_at):
-                raise DomainError("ap_dates")
-            # Defaults are snapshots for new assignments only. Existing rows do not change.
-            row.version += 1
-            row.authorized_by, row.updated_at = actor, now()
-            row.auto_activate = False  # Reconfirm future activation against the new defaults.
+            self.set_default(row, actor, field, value)
             self.ads.audit(actor, "global_defaults", cid, field=field, version=row.version)
         return row
+
+    @staticmethod
+    def validate_default(row, field, value):
+        if field == "interval_seconds":
+            if type(value) is not int or value not in INTERVALS:
+                raise DomainError("ap_interval")
+        elif field in {"start_at", "end_at"}:
+            if value is not None and (not isinstance(value, datetime) or value.tzinfo is None):
+                raise DomainError("ap_time")
+            if field == "start_at" and value is None:
+                raise DomainError("ap_time")
+        else:
+            raise DomainError("ap_stale")
+        start = value if field == "start_at" else row.start_at
+        end = value if field == "end_at" else row.end_at
+        if start and end and utc(end) <= utc(start):
+            raise DomainError("ap_dates")
+
+    def set_default(self, row, actor, field, value):
+        self.validate_default(row, field, value)
+        setattr(row, field, value)
+        row.version += 1
+        row.authorized_by, row.updated_at = actor, now()
+        row.auto_activate = False
+
+    async def prepare_defaults(self, actor, cid, expected, field, value, request):
+        """Persist a confirmation without changing defaults or future activation consent."""
+        self.ads.request(request)
+        await self.policy(actor, cid)
+        payload = {
+            "defaults": True,
+            "field": field,
+            "value": value.isoformat() if isinstance(value, datetime) else value,
+        }
+        async with ads_transaction(self.session, cid, policy=True):
+            policy = await self.policy(actor, cid)
+            previous = await self.session.scalar(
+                select(AdGlobalOperation).where(AdGlobalOperation.request_key == request)
+            )
+            if previous:
+                if (previous.actor_id, previous.campaign_id, previous.action, previous.payload) != (
+                    actor,
+                    cid,
+                    "CHANGE",
+                    payload,
+                ):
+                    raise DomainError("ap_stale")
+                return previous
+            if policy.version != expected:
+                raise DomainError("ap_stale")
+            self.validate_default(policy, field, value)
+            op = AdGlobalOperation(
+                id=uuid4().hex[:16],
+                campaign_id=cid,
+                actor_id=actor,
+                action="CHANGE",
+                status="READY",
+                policy_version=expected,
+                payload=payload,
+                request_key=request,
+                expires_at=now() + timedelta(minutes=15),
+            )
+            self.session.add(op)
+            self.ads.audit(
+                actor,
+                "global_prepared",
+                cid,
+                operation_id=op.id,
+                operation_action="CHANGE",
+                defaults=True,
+                targets=0,
+            )
+        return op
+
+    async def pending(self, actor, page=0):
+        await self.ads.authorize(actor)
+        return list(
+            await self.session.scalars(
+                select(AdGlobalOperation)
+                .join(AdCampaign)
+                .where(
+                    AdGlobalOperation.actor_id == actor,
+                    AdCampaign.status == "DRAFT",
+                    AdGlobalOperation.status.in_(("SELECTING", "READY", "RUNNING")),
+                    or_(
+                        AdGlobalOperation.status == "RUNNING", AdGlobalOperation.expires_at > now()
+                    ),
+                )
+                .order_by(AdGlobalOperation.created_at.desc())
+                .offset(max(0, min(page, 10000)) * 8)
+                .limit(9)
+            )
+        )
 
     async def operation(self, actor, oid):
         await self.ads.authorize(actor)
@@ -429,6 +506,13 @@ class GlobalAdsService:
             if op.action == "ASSIGN":
                 policy.mode = op.payload["mode"]
                 policy.auto_activate = False
+            elif op.action == "CHANGE" and op.payload.get("defaults"):
+                field, value = op.payload["field"], op.payload["value"]
+                if field in {"start_at", "end_at"} and value is not None:
+                    value = datetime.fromisoformat(value)
+                self.set_default(policy, actor, field, value)
+                op.policy_version = policy.version
+                self.ads.audit(actor, "global_defaults", cid, field=field, version=policy.version)
             elif op.action == "FUTURE_OFF" or (
                 op.action in {"PAUSE", "STOP"} and not op.payload.get("single")
             ):
@@ -448,7 +532,11 @@ class GlobalAdsService:
                 policy.version += 1
                 policy.authorized_by, policy.updated_at = actor, now()
                 op.policy_version = policy.version
-            op.status = "DONE" if op.action.startswith("FUTURE_") else "RUNNING"
+            op.status = (
+                "DONE"
+                if (op.action.startswith("FUTURE_") or op.payload.get("defaults"))
+                else "RUNNING"
+            )
             self.ads.audit(
                 actor, "global_confirmed", cid, operation_id=op.id, operation_action=op.action
             )
@@ -810,19 +898,36 @@ class GlobalAdsService:
         if cid is not None:
             await self.ads.get(actor, cid, archived=True)
         schedule_filter = [AdSchedule.campaign_id == cid] if cid is not None else []
+        live = (
+            (AdCampaign.status == "DRAFT")
+            & (AdSchedule.status == "ACTIVE")
+            & or_(AdSchedule.end_at.is_(None), AdSchedule.end_at > now())
+        )
+        next_live = live & or_(
+            AdSchedule.end_at.is_(None), AdSchedule.next_run_at < AdSchedule.end_at
+        )
         rows = (
             await self.session.execute(
                 select(
                     func.count(func.distinct(AdSchedule.chat_id)),
                     func.count(),
+                    func.count(func.distinct(case((live, AdSchedule.chat_id)))),
                     func.count(
-                        func.distinct(case((AdSchedule.status == "ACTIVE", AdSchedule.chat_id)))
+                        func.distinct(
+                            case(
+                                (
+                                    (AdSchedule.status == "PAUSED")
+                                    & (AdCampaign.status == "DRAFT"),
+                                    AdSchedule.chat_id,
+                                )
+                            )
+                        )
                     ),
-                    func.count(
-                        func.distinct(case((AdSchedule.status == "PAUSED", AdSchedule.chat_id)))
-                    ),
-                    func.min(AdSchedule.next_run_at),
-                ).where(
+                    func.min(case((next_live, AdSchedule.next_run_at))),
+                )
+                .select_from(AdSchedule)
+                .join(AdCampaign, AdCampaign.id == AdSchedule.campaign_id)
+                .where(
                     AdSchedule.excluded.is_(False),
                     AdSchedule.chat_id.is_not(None),
                     *schedule_filter,
@@ -841,6 +946,12 @@ class GlobalAdsService:
                 .group_by(AdPublicationAttempt.status)
             )
         ).all()
+        partial = await self.session.scalar(
+            select(func.count())
+            .select_from(AdPublicationAttempt)
+            .join(AdSchedule, AdPublicationAttempt.schedule_id == AdSchedule.id)
+            .where(*schedule_filter, PublicationService.partial_outcome())
+        )
         campaign_count = await self.session.scalar(
             select(func.count())
             .select_from(AdCampaign)
@@ -858,5 +969,6 @@ class GlobalAdsService:
             "sent": sum(n for s, n, _ in outcomes if s == "SENT"),
             "failed": sum(n for s, n, _ in outcomes if s == "FAILED"),
             "uncertain": sum(n for s, n, _ in outcomes if s == "UNCERTAIN"),
+            "partial": partial,
             "last": max((utc(d) for s, _, d in outcomes if s == "SENT" and d), default=None),
         }

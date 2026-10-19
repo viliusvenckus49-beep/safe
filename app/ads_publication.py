@@ -432,11 +432,12 @@ class PublicationService:
             self.ads.audit(actor, "schedule_" + status.lower(), cid, schedule_id=row.id)
         return row
 
-    def event(self, row: AdPublicationAttempt, status: str, **details: Any) -> None:
+    async def event(self, row: AdPublicationAttempt, status: str, **details: Any) -> None:
+        schedule = await self.session.get(AdSchedule, row.schedule_id)
         self.ads.audit(
             0,
             "publication_" + status.lower(),
-            0,
+            schedule.campaign_id,
             attempt_id=row.id,
             schedule_id=row.schedule_id,
             chat_id=row.chat_id,
@@ -467,7 +468,7 @@ class PublicationService:
                     else "CANCELLED"
                 )
                 part.error = reason
-        self.event(row, status, error=reason)
+        await self.event(row, status, error=reason)
 
     async def pause_failed_generation(self, row: AdPublicationAttempt, error: str | None) -> None:
         schedule = await self.session.get(AdSchedule, row.schedule_id)
@@ -621,7 +622,7 @@ class PublicationService:
                             attempt_id=attempt.id, position=position, kind=kind, message_ids=[]
                         )
                     )
-                self.event(attempt, "PENDING")
+                await self.event(attempt, "PENDING")
                 count += 1
         return count
 
@@ -657,7 +658,7 @@ class PublicationService:
                     await self.pause_failed_generation(row, row.error)
                 else:
                     row.status, row.token, row.lease_until = "PENDING", None, None
-                    self.event(row, "PENDING", recovery=True)
+                    await self.event(row, "PENDING", recovery=True)
         if await self.cooldown():
             await self.session.commit()
             return None
@@ -712,7 +713,7 @@ class PublicationService:
                 row.status, row.token = "CLAIMED", uuid4().hex
                 row.fence += 1
                 row.lease_until = instant + timedelta(seconds=LEASE_SECONDS)
-                self.event(row, "CLAIMED")
+                await self.event(row, "CLAIMED")
                 return row.id, row.token, row.fence
         return None
 
@@ -733,7 +734,7 @@ class PublicationService:
             if retry is not None and part.tries < MAX_TRIES:
                 row.status, part.status, row.error = "DEFERRED", "DEFERRED", error
                 row.retry_at, row.lease_until = now() + timedelta(seconds=max(1, retry)), None
-                self.event(row, "DEFERRED", preflight=True, error=error)
+                await self.event(row, "DEFERRED", preflight=True, error=error)
             else:
                 part.status = "FAILED"
                 await self.terminal(row, "FAILED", error)
@@ -766,7 +767,7 @@ class PublicationService:
             gate = await self.cooldown()
             if gate:
                 row.status, row.retry_at, row.lease_until = "DEFERRED", gate, None
-                self.event(row, "DEFERRED", global_cooldown=True)
+                await self.event(row, "DEFERRED", global_cooldown=True)
                 return None
             part = next((p for p in parts if p.status != "SENT"), None)
             if part is None:
@@ -780,13 +781,13 @@ class PublicationService:
             rate_wait = await self.reserve_rate(row, part, content)
             if rate_wait:
                 row.status, row.retry_at, row.lease_until = "DEFERRED", rate_wait, None
-                self.event(row, "DEFERRED", rate_budget=True)
+                await self.event(row, "DEFERRED", rate_budget=True)
                 return None
             row.status, part.status = "SENDING", "SENDING"
             part.tries += 1
             row.lease_until = now() + timedelta(seconds=LEASE_SECONDS)
             content = await self.session.get(AdContentVersion, row.content_version_id)
-            self.event(row, "SENDING", part_id=part.id, kind=part.kind, tries=part.tries)
+            await self.event(row, "SENDING", part_id=part.id, kind=part.kind, tries=part.tries)
             return row, part, content
 
     async def result(
@@ -819,10 +820,10 @@ class PublicationService:
                 if not ids or any(type(i) is not int or i <= 0 for i in ids):
                     raise DomainError("ap_result")
                 part.status, part.message_ids, part.error = "SENT", ids, None
-                self.event(row, "part_sent", part_id=part.id, message_ids=ids)
+                await self.event(row, "part_sent", part_id=part.id, message_ids=ids)
                 if all(p.status == "SENT" for p in await self.parts(aid)):
                     row.status, row.completed_at, row.lease_until = "SENT", now(), None
-                    self.event(row, "SENT")
+                    await self.event(row, "SENT")
                 else:
                     row.status = "CLAIMED"
                 return row.status == "CLAIMED"
@@ -830,7 +831,9 @@ class PublicationService:
                 if any(type(i) is not int or i <= 0 for i in ids):
                     raise DomainError("ap_result")
                 part.message_ids = list(dict.fromkeys(ids))
-                self.event(row, "partial_response", part_id=part.id, message_ids=part.message_ids)
+                await self.event(
+                    row, "partial_response", part_id=part.id, message_ids=part.message_ids
+                )
             part.status, part.error = status, error
             if status == "DEFERRED":
                 await self.defer_all(retry)
@@ -838,7 +841,9 @@ class PublicationService:
                 row.status, row.error = "DEFERRED", error
                 row.retry_at = now() + timedelta(seconds=max(1, retry))
                 row.lease_until = None
-                self.event(row, "DEFERRED", part_id=part.id, retry_after=max(1, retry), error=error)
+                await self.event(
+                    row, "DEFERRED", part_id=part.id, retry_after=max(1, retry), error=error
+                )
             else:
                 if status == "DEFERRED":
                     part.status = "FAILED"
@@ -865,7 +870,14 @@ class PublicationService:
     async def statistics(self, actor: int, cid: int) -> dict:
         row = await self.one(actor, cid)
         if row is None:
-            return {"sent": 0, "failed": 0, "last": None}
+            return {
+                "sent": 0,
+                "failed": 0,
+                "uncertain": 0,
+                "partial": 0,
+                "last": None,
+                "next": None,
+            }
         sent = await self.session.scalar(
             select(func.count())
             .select_from(AdPublicationAttempt)
@@ -893,4 +905,45 @@ class PublicationService:
                 AdPublicationAttempt.schedule_id == row.id, AdPublicationAttempt.status == "SENT"
             )
         )
-        return {"sent": sent, "failed": failed, "uncertain": uncertain, "last": last}
+        partial = await self.session.scalar(
+            select(func.count())
+            .select_from(AdPublicationAttempt)
+            .where(AdPublicationAttempt.schedule_id == row.id, self.partial_outcome())
+        )
+        campaign = await self.session.get(AdCampaign, cid)
+        return {
+            "sent": sent,
+            "failed": failed,
+            "uncertain": uncertain,
+            "partial": partial,
+            "last": last,
+            "next": self.next_due(row, campaign),
+        }
+
+    @staticmethod
+    def next_due(row, campaign):
+        if (
+            not campaign
+            or campaign.status != "DRAFT"
+            or row.status != "ACTIVE"
+            or row.excluded
+            or not row.next_run_at
+            or (
+                row.end_at and (utc(row.end_at) <= now() or utc(row.next_run_at) >= utc(row.end_at))
+            )
+        ):
+            return None
+        return row.next_run_at
+
+    @staticmethod
+    def partial_outcome():
+        # A subset of non-SENT attempts, not an additional disjoint outcome.
+        # EXISTS counts one attempt even if several media/keyboard parts have IDs.
+        return (AdPublicationAttempt.status != "SENT") & (
+            select(AdPublicationPart.id)
+            .where(
+                AdPublicationPart.attempt_id == AdPublicationAttempt.id,
+                func.json_array_length(AdPublicationPart.message_ids) > 0,
+            )
+            .exists()
+        )

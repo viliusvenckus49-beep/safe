@@ -152,12 +152,15 @@ class AdsPublisher:
                 more = await PublicationService(self.settings, session).result(
                     aid, token, fence, part.id, status, ids, reason, delay
                 )
+                recorded = await session.get(AdPublicationAttempt, aid, populate_existing=True)
+                stored_status = recorded.status
             log.info(
                 "ads_publication_result",
                 attempt_id=aid,
                 chat_id=chat,
                 part_id=part.id,
-                status=t("ap." + status),
+                status=stored_status,
+                telegram_status=status,
                 error=reason,
             )
             if not more:

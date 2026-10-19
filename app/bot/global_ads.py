@@ -154,7 +154,9 @@ async def operation_panel(message, service, actor, oid, page=0):
     if op.action == "ASSIGN":
         text += "\n\n" + t("g.assignment_note", mode=t("g.mode_" + op.payload["mode"]))
     if op.action in {"DEFAULTS", "INHERIT", "CHANGE"}:
-        text += "\n\n" + t("g.defaults_confirm")
+        text += "\n\n" + t(
+            "g.default_change_confirm" if op.payload.get("defaults") else "g.defaults_confirm"
+        )
     if op.action == "FUTURE_ON":
         policy = await global_ads.policy(actor, op.campaign_id)
         text += "\n\n" + t(
@@ -171,14 +173,18 @@ async def operation_panel(message, service, actor, oid, page=0):
         label = {
             "interval_seconds": t("ap.intervals"),
             "start_date": t("ap.start_date"),
+            "start_at": t("ap.start_date"),
             "start_time": t("ap.start_time"),
             "end_at": t("ap.end_at"),
         }.get(field, t("ap.calendar"))
-        rendered = (
-            t("ap.i" + str(value))
-            if field == "interval_seconds"
-            else (t("ap.unlimited") if value is None else str(value))
-        )
+        if field == "interval_seconds":
+            rendered = t("ap.i" + str(value))
+        elif value is None:
+            rendered = t("ap.unlimited")
+        elif field in {"start_at", "end_at"}:
+            rendered = local(datetime.fromisoformat(value))
+        else:
+            rendered = str(value)
         text += "\n\n" + label + ": " + escape(rendered)
     for item in items[:8]:
         if item.error:
@@ -264,12 +270,17 @@ def register_global_ads_handlers(router: Router):
             value = (
                 None if (message.text or "").strip() == "-" else local_datetime(message.text or "")
             )
-            await GlobalAdsService(service.settings, service.session).defaults(
-                actor, data["g_cid"], data["g_version"], data["g_field"], value
+            op = await GlobalAdsService(service.settings, service.session).prepare_defaults(
+                actor,
+                data["g_cid"],
+                data["g_version"],
+                data["g_field"],
+                value,
+                f"defaults:{actor}:{message.message_id}",
             )
             await state.set_state(None)
             target = message.model_copy(update={"message_id": data["g_panel"]}).as_(message.bot)
-            await defaults_panel(target, service, actor, data["g_cid"])
+            await operation_panel(target, service, actor, op.id)
         except (
             DomainError,
             ValueError,
@@ -320,21 +331,8 @@ def register_global_ads_handlers(router: Router):
                 )
                 await show(message, service, t("ads.name_prompt"), [[(t("ads.back"), cb("root"))]])
             elif d.action == "operations":
-                from app.models import AdGlobalOperation
-
                 page = max(0, min(10000, int(d.value or 0)))
-                operations = list(
-                    await service.session.scalars(
-                        select(AdGlobalOperation)
-                        .where(
-                            AdGlobalOperation.actor_id == actor,
-                            AdGlobalOperation.status.in_(("SELECTING", "READY", "RUNNING")),
-                        )
-                        .order_by(AdGlobalOperation.created_at.desc())
-                        .offset(page * 8)
-                        .limit(9)
-                    )
-                )
+                operations = await global_ads.pending(actor, page)
                 rows = [
                     [
                         (
@@ -507,8 +505,15 @@ def register_global_ads_handlers(router: Router):
                 await show(message, service, t("g.defaults_note"), rows)
             elif d.action == "dv":
                 version, interval = map(int, d.value.split("."))
-                await global_ads.defaults(actor, d.campaign, version, "interval_seconds", interval)
-                await defaults_panel(message, service, actor, d.campaign)
+                op = await global_ads.prepare_defaults(
+                    actor,
+                    d.campaign,
+                    version,
+                    "interval_seconds",
+                    interval,
+                    callback_request(callback, "global-defaults"),
+                )
+                await operation_panel(message, service, actor, op.id)
             elif d.action == "de":
                 version_text, field = d.value.split(".")
                 if field not in {"start_at", "end_at"}:

@@ -69,6 +69,11 @@ Per-item changes and successful item completion commit atomically. Expired
 Partial denial/failure remains visible per group and does not roll back others.
 The pending-operations UI reopens saved selections without relying on FSM state.
 
+The final review adds durable confirmation for default edits too: interval/date
+input prepares a versioned actor-bound operation, and policy changes occur only
+after confirmation. See [the final audit](AUTO_ADS_3_3_FINAL_AUDIT.md) for corrected
+partial-delivery statistics, effective next-slot display and audit/log reporting.
+
 ## Transactions, fairness, and delivery
 
 Lock order is shared ACL boundary, optional campaign assignment policy,

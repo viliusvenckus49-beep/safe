@@ -2,6 +2,7 @@
 
 COPY = {
     "lt": {
+        "default_change_confirm": "Numatytieji nustatymai pasikeis tik patvirtinus. Esami grupių grafikai nekis. Automatinį būsimų grupių paleidimą reikės patvirtinti iš naujo.",
         "operations": "📋 Laukiantys veiksmai",
         "op_SELECTING": "Pasirinkimas",
         "op_READY": "Patvirtinimas",
@@ -48,7 +49,7 @@ COPY = {
         "future_on": "▶ Leisti paleisti būsimas grupes",
         "future_off": "⏸ Neaktyvuoti būsimų grupių",
         "future_warning": "Aiškiai leidi automatiškai aktyvuoti naujų tinkamų valdomų grupių grafikus pagal šiuos numatytuosius nustatymus. Kiekvieną kartą bus tikrinamos tavo ir boto teisės. Pašalintos grupės nebus grąžinamos.",
-        "statistics": "📊 <b>GLOBAL ADS STATISTIKA</b>\n\nKampanijų: {campaigns}\nPriskirtų grupių: {groups}\nGrupių grafikų: {assignments}\nAktyvių: {active}\nPristabdytų: {paused}\n\nSėkmingų publikavimų: {sent}\nNepavykusių: {failed}\nNeaiški baigtis: {uncertain}\n\nPaskutinis: {last}\nArtimiausias: {next}",
+        "statistics": "📊 <b>GLOBAL ADS STATISTIKA</b>\n\nKampanijų: {campaigns}\nPriskirtų grupių: {groups}\nGrupių grafikų: {assignments}\nAktyvių: {active}\nPristabdytų: {paused}\n\nSėkmingų publikavimų: {sent}\nNepavykusių: {failed}\nNeaiški baigtis: {uncertain}\nDaliniai (įskaičiuoti į būsenas): {partial}\n\nPaskutinis: {last}\nArtimiausias: {next}",
         "action_ASSIGN": "GRUPIŲ PRISKYRIMAS",
         "action_START": "PALEISTI / ATNAUJINTI",
         "action_PAUSE": "PRISTABDYTI",
@@ -61,6 +62,7 @@ COPY = {
         "action_FUTURE_OFF": "IŠJUNGTI BŪSIMŲ GRUPIŲ PALEIDIMĄ",
     },
     "en": {
+        "default_change_confirm": "Defaults change only after confirmation. Existing group schedules remain unchanged. Automatic future-group activation will require renewed consent.",
         "operations": "📋 Pending operations",
         "op_SELECTING": "Selection",
         "op_READY": "Confirmation",
@@ -107,7 +109,7 @@ COPY = {
         "future_on": "▶ Allow future-group activation",
         "future_off": "⏸ Disable future-group activation",
         "future_warning": "You explicitly authorize automatic activation in newly eligible managed groups using these defaults. Your and the bot's rights are checked each time. Removed groups are never restored automatically.",
-        "statistics": "📊 <b>GLOBAL ADS STATISTICS</b>\n\nCampaigns: {campaigns}\nAssigned groups: {groups}\nGroup schedules: {assignments}\nActive: {active}\nPaused: {paused}\n\nSuccessful publications: {sent}\nFailed: {failed}\nUncertain: {uncertain}\n\nLast: {last}\nNext: {next}",
+        "statistics": "📊 <b>GLOBAL ADS STATISTICS</b>\n\nCampaigns: {campaigns}\nAssigned groups: {groups}\nGroup schedules: {assignments}\nActive: {active}\nPaused: {paused}\n\nSuccessful publications: {sent}\nFailed: {failed}\nUncertain: {uncertain}\nPartial (included in outcomes): {partial}\n\nLast: {last}\nNext: {next}",
         "action_ASSIGN": "GROUP ASSIGNMENT",
         "action_START": "START / RESUME",
         "action_PAUSE": "PAUSE",
@@ -120,6 +122,7 @@ COPY = {
         "action_FUTURE_OFF": "DISABLE FUTURE GROUP ACTIVATION",
     },
     "ru": {
+        "default_change_confirm": "Общие настройки изменятся после подтверждения. Расписания существующих групп не изменятся. Автоматический запуск будущих групп потребует нового согласия.",
         "operations": "📋 Незавершённые действия",
         "op_SELECTING": "Выбор",
         "op_READY": "Подтверждение",
@@ -166,7 +169,7 @@ COPY = {
         "future_on": "▶ Разрешить автозапуск новых групп",
         "future_off": "⏸ Отключить автозапуск новых групп",
         "future_warning": "Вы явно разрешаете автоматически запускать рекламу в новых подходящих управляемых группах с этими настройками. Ваши права и права бота проверяются каждый раз. Удалённые группы автоматически не возвращаются.",
-        "statistics": "📊 <b>СТАТИСТИКА GLOBAL ADS</b>\n\nКампаний: {campaigns}\nНазначено групп: {groups}\nРасписаний: {assignments}\nАктивных: {active}\nПриостановлено: {paused}\n\nУспешных публикаций: {sent}\nОшибок: {failed}\nНеопределённый исход: {uncertain}\n\nПоследняя: {last}\nСледующая: {next}",
+        "statistics": "📊 <b>СТАТИСТИКА GLOBAL ADS</b>\n\nКампаний: {campaigns}\nНазначено групп: {groups}\nРасписаний: {assignments}\nАктивных: {active}\nПриостановлено: {paused}\n\nУспешных публикаций: {sent}\nОшибок: {failed}\nНеопределённый исход: {uncertain}\nЧастичные (входят в итоги): {partial}\n\nПоследняя: {last}\nСледующая: {next}",
         "action_ASSIGN": "НАЗНАЧЕНИЕ ГРУПП",
         "action_START": "ЗАПУСК / ВОЗОБНОВЛЕНИЕ",
         "action_PAUSE": "ПАУЗА",

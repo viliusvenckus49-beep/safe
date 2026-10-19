@@ -86,7 +86,7 @@ async def panel(message: Message, pub: PublicationService, actor: int, cid: int)
             else t("ap.unset"),
             start=local(row.start_at),
             end=local(row.end_at) if row.end_at else t("ap.unlimited"),
-            next=local(row.next_run_at),
+            next=local(pub.next_due(row, campaign)),
         )
     )
     if row.last_error:
@@ -450,8 +450,9 @@ def register_publication_handlers(router: Router) -> None:
                         sent=stats["sent"],
                         failed=stats["failed"],
                         uncertain=stats.get("uncertain", 0),
+                        partial=stats.get("partial", 0),
                         last=local(stats["last"]),
-                        next=local(row.next_run_at),
+                        next=local(stats.get("next")),
                     ),
                     make_back(cid),
                     edit=True,
