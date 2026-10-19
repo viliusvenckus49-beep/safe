@@ -21,7 +21,7 @@ the original worktree was preserved. No 3.4 features were implemented.
 ## Findings, root causes, corrections
 
 No CRITICAL or HIGH defect was confirmed in the reviewed paths. This does not
-establish absence of all defects. Seven justified findings were corrected:
+establish absence of all defects. Eight justified findings were corrected:
 
 | ID | Severity | Cause and impact | Correction and evidence |
 | --- | --- | --- | --- |
@@ -32,6 +32,7 @@ establish absence of all defects. Seven justified findings were corrected:
 | F5 | LOW | Publication audit events used `campaign_id=0` rather than the actual campaign, weakening traceability across campaigns. | Resolve the schedule's real campaign under the existing transaction and write the correct ID. A regression verifies every newly created publication event. Historical audit rows are preserved. |
 | F6 | LOW | The pending-operation menu included expired unconfirmed selections and archived campaigns, offering actions that could no longer succeed. | Filter only the menu, keeping all SQL history. Still show RUNNING operations past their original confirmation deadline because they require recovery. A regression verifies expired selection data remains stored but its button is absent. |
 | F7 | MEDIUM | Statistics/panels trusted stored ACTIVE/next-run fields before the planner's next cleanup cycle. An archived/expired campaign, or a next slot beyond expiry, could still be advertised as an upcoming publication, although send eligibility already prevented it. | Filter effective active counts and upcoming instants against campaign status and expiry, including the exclusive end boundary. Apply the same next-due rule to individual schedule panels/statistics. Three regressions failed before the correction. No schedule/history row or execution policy is rewritten. |
+| F8 | LOW | Final-head branch CI exposed a timing assumption in the pre-existing slow-group test: other groups could finish while the designated slow task was still legitimately CLAIMED, before its API call. A fixed ten-tick loop incorrectly required SENDING at that moment. | Synchronize on an explicit signal inside the slow API await and await the persisted completion of the other groups with a bounded deadline. This still fails if a slow request blocks all progress. No publication-engine transition was changed. |
 
 Ten new regressions failed against the original reviewed source. After the main
 corrections they passed. Two additional date-confirmation regressions failed
@@ -174,6 +175,11 @@ Final GitHub checks for the audit patch are linked in PR #37's audit section and
 The PR audit section records the exact patch commit and final branch/PR run IDs
 and conclusions; use those linked runs for final CI evidence.
 
+An intermediate final-head PR check passed all 1,697 tests and Docker smoke,
+while its parallel branch check failed on F8 (1,696 passed). The failure was
+investigated and corrected, not hidden with an unchanged rerun. The replacement
+head's checks are the required final gate linked from the PR audit section.
+
 | Final local check | Result |
 | --- | --- |
 | Full pytest, disposable PostgreSQL 17 / Redis 7.4, no skips | **1,697 passed**, 4 existing Alembic configuration deprecation warnings, 280.60 s |
@@ -188,6 +194,11 @@ and conclusions; use those linked runs for final CI evidence.
 | Docker build | Passed |
 | Packaged worker startup/shutdown, no network, read-only image, disposable tmpfs SQLite | Passed |
 | Synthetic 10 / 100 / 1,000-group capacity run | **3 passed**, 46.98 s |
+
+The local full-suite run precedes the synchronization-only F8 test correction;
+production source is unchanged by that correction. The corrected slow-group
+test additionally passed five consecutive isolated runs. Final-head CI reruns
+the entire combined suite, including that correction.
 
 The final packaged smoke initially could not create its container because the
 managed review environment ran out of disk space. Specific review images and

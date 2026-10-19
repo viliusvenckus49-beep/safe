@@ -321,9 +321,11 @@ async def test_slow_group_does_not_block_other_pool_slots(database, settings, cl
     await assign(database, settings, cid, bot)
     await action(database, settings, cid, bot, "START")
     release = asyncio.Event()
+    entered = asyncio.Event()
 
     async def slow(kind, args):
         if args["chat_id"] == -100:
+            entered.set()
             await release.wait()
 
     bot.on_send = slow
@@ -331,12 +333,18 @@ async def test_slow_group_does_not_block_other_pool_slots(database, settings, cl
         await PublicationService(settings, session).enqueue()
     worker = AdsPublisher(bot, settings, database)
     worker.background = True
-    try:
-        for _ in range(10):
+
+    async def progress_while_blocked():
+        while True:
             await worker.pool_tick()
             attempts, _, _ = await snapshot(database, settings)
-            if len([a for a in attempts if a.status == "SENT"]) == 2:
-                break
+            if entered.is_set() and len([a for a in attempts if a.status == "SENT"]) == 2:
+                return attempts
+
+    try:
+        # Other groups may complete before this task reaches its API await.
+        # Synchronize on actual entry, rather than assuming a fixed number of ticks.
+        attempts = await asyncio.wait_for(progress_while_blocked(), 10)
         assert len([a for a in attempts if a.status == "SENT"]) == 2
         assert next(a for a in attempts if a.chat_id == -100).status == "SENDING"
     finally:
