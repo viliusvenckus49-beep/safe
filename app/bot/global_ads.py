@@ -53,7 +53,13 @@ async def show(message, service, text, rows):
 
 async def campaign_panel(message, service, actor, cid):
     campaign = await GlobalAdsService(service.settings, service.session).ads.get(actor, cid)
+    from app.bot.callbacks import CustomerAdmin
+
     rows = [
+        [
+            (t("ac.manage"), CustomerAdmin(action="panel", campaign=cid).pack()),
+            (t("ac.links"), CustomerAdmin(action="links", campaign=cid).pack()),
+        ],
         [
             (t("ads.text"), content_cb("edit", cid, "TEXT")),
             (t("ads.media"), content_cb("edit", cid, "MEDIA")),
@@ -327,7 +333,10 @@ def register_global_ads_handlers(router: Router):
             elif d.action == "new":
                 await state.set_state(AdsFlow.input)
                 await state.update_data(
-                    ads_field="NAME", ads_panel=message.message_id, global_new=True
+                    ads_field="NAME",
+                    ads_panel=message.message_id,
+                    global_new=True,
+                    ads_customer=False,
                 )
                 await show(message, service, t("ads.name_prompt"), [[(t("ads.back"), cb("root"))]])
             elif d.action == "operations":

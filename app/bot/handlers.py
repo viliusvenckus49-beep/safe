@@ -5,13 +5,21 @@ from uuid import uuid4
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, ForceReply, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    ForceReply,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from app import presentation as p
+from app.ads_customers import CustomerAdsService
 from app.bot import keyboards as kb
 from app.bot import redsafe_profile as rp
 from app.bot.administrators import register_administrator_handlers
 from app.bot.ads import register_ads_handlers
+from app.bot.ads_customers import open_link, register_customer_handlers
 from app.bot.ads_schedule import register_publication_handlers
 from app.bot.callbacks import (
     Action,
@@ -139,11 +147,18 @@ async def begin_report(message: Message, state: FSMContext, *, edit: bool = Fals
 
 
 async def home_keyboard(service: Service, actor: int, *, private: bool) -> InlineKeyboardMarkup:
-    return kb.home(
+    markup = kb.home(
         admin=private and await service.is_admin(actor),
         owner=private and service.access.is_owner(actor),
         private=private,
     )
+    if private and await CustomerAdsService(service.settings, service.session).campaigns(actor):
+        from app.bot.ads import customer_cb
+
+        markup.inline_keyboard.insert(
+            -1, [InlineKeyboardButton(text=t("ac.mine"), callback_data=customer_cb("list"))]
+        )
+    return markup
 
 
 async def show_runtime_status(
@@ -194,12 +209,17 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     router.message.outer_middleware(middleware)
     router.callback_query.outer_middleware(middleware)
     register_local_handlers(router)
+    register_customer_handlers(router)
     register_ads_handlers(router)
     register_publication_handlers(router)
     register_global_ads_handlers(router)
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext, service: Service) -> None:
+        parts = (message.text or "").split(maxsplit=1)
+        if len(parts) == 2 and parts[1].startswith("ad_"):
+            await open_link(message, state, service, parts[1])
+            return
         await clear_flow(state)
         if await service.language(actor_id(message)) is None:
             await flow_screen(

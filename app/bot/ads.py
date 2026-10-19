@@ -27,8 +27,17 @@ from app.ads_content import (
     text_from_message,
     validate_content,
 )
+from app.ads_customers import CustomerAdsService
 from app.ads_services import AdsService
-from app.bot.callbacks import AdPublication, AdsAction, AdsPreview, GlobalAd, PublishedAd
+from app.bot.callbacks import (
+    AdPublication,
+    AdsAction,
+    AdsPreview,
+    CustomerAd,
+    CustomerAdmin,
+    GlobalAd,
+    PublishedAd,
+)
 from app.bot.keyboards import action, keyboard
 from app.bot.local_admin import display
 from app.bot.states import AdsFlow
@@ -49,12 +58,21 @@ def callback_request(callback: CallbackQuery, operation: str) -> str:
     return f"ads:{operation}:{callback.from_user.id}:" + sha256(callback.id.encode()).hexdigest()
 
 
-def navigation(campaign: int = 0) -> InlineKeyboardMarkup:
-    return keyboard([[(t("ads.back"), cb("campaign", campaign) if campaign else cb("root"))]])
+def customer_cb(name: str, campaign: int = 0, value: str = "") -> str:
+    return CustomerAd(action=name, campaign=campaign, value=value).pack()
+
+
+def navigation(campaign: int = 0, *, customer: bool = False) -> InlineKeyboardMarkup:
+    make_cb = customer_cb if customer else cb
+    return keyboard(
+        [[(t("ads.back"), make_cb("campaign", campaign) if campaign else make_cb("root"))]]
+    )
 
 
 def failure(error: Exception) -> str:
     if isinstance(error, DomainError):
+        if error.code.startswith("ac_"):
+            return t("ac." + error.code[3:])
         key = {
             "forbidden": "permission",
             "group_moderation_invalid_id": "stale",
@@ -84,15 +102,22 @@ def failure(error: Exception) -> str:
     return t("ads.telegram") if isinstance(error, TelegramAPIError) else t("ads.error")
 
 
-async def private(service: Service, message: Message, actor: int) -> AdsService:
+async def private(
+    service: Service, message: Message, actor: int, *, customer: bool = False
+) -> AdsService:
     if message.chat.type != "private" or message.chat.id != actor or message.bot is None:
         raise DomainError("forbidden")
-    ads = AdsService(service.settings, service.session)
+    ads = (CustomerAdsService if customer else AdsService)(service.settings, service.session)
     await ads.authorize(actor)
     return ads
 
 
 async def root(message: Message, ads: AdsService, actor: int, *, edit: bool = True) -> None:
+    if isinstance(ads, CustomerAdsService):
+        from app.bot.ads_customers import customer_list
+
+        await customer_list(message, ads, actor, edit=edit)
+        return
     await ads.authorize(actor)
     drafts = await ads.unfinished(actor)
     rows = [
@@ -109,6 +134,11 @@ async def root(message: Message, ads: AdsService, actor: int, *, edit: bool = Tr
 async def campaign_panel(
     message: Message, ads: AdsService, actor: int, campaign_id: int, *, edit: bool = True
 ) -> None:
+    if isinstance(ads, CustomerAdsService):
+        from app.bot.ads_customers import customer_panel
+
+        await customer_panel(message, ads, actor, campaign_id, edit=edit)
+        return
     campaign, _ = await ads.current(actor, campaign_id)
     rows = [
         [
@@ -118,6 +148,8 @@ async def campaign_panel(
         for field in ("TEXT", "MEDIA", "BUTTONS")
     ]
     rows += [
+        [(t("ac.manage"), CustomerAdmin(action="panel", campaign=campaign.id).pack())],
+        [(t("ac.links"), CustomerAdmin(action="links", campaign=campaign.id).pack())],
         [(t("ap.manage"), AdPublication(action="panel", campaign=campaign.id).pack())],
         [("🌐 Global ADS", GlobalAd(action="campaign", campaign=campaign.id).pack())],
         [(t("ads.full"), cb("preview", campaign.id, "FULL"))],
@@ -143,23 +175,24 @@ async def campaign_panel(
 async def draft_panel(
     message: Message, ads: AdsService, actor: int, draft_id: str, *, edit: bool = True
 ) -> None:
+    make_cb = customer_cb if isinstance(ads, CustomerAdsService) else cb
     draft = await ads.draft(actor, draft_id)
     rows = []
     if draft.status == "COLLECTING":
         text = t("ads.collecting", count=len(draft.content["media"]))
-        rows.append([(t("ads.done"), cb("finish", draft.campaign_id, draft.id))])
+        rows.append([(t("ads.done"), make_cb("finish", draft.campaign_id, draft.id))])
         rows.append(
-            [(t("ads.clear"), cb("clear", draft.campaign_id, f"MEDIA.{draft.base_version}"))]
+            [(t("ads.clear"), make_cb("clear", draft.campaign_id, f"MEDIA.{draft.base_version}"))]
         )
     else:
         text = t(
             "ads.ready",
             field=t("ads." + draft.field.lower()) if draft.field != "RESTORE" else t("ads.restore"),
         )
-        rows.append([(t("ads.full"), cb("draft_preview", draft.campaign_id, draft.id))])
+        rows.append([(t("ads.full"), make_cb("draft_preview", draft.campaign_id, draft.id))])
         if draft.previewed:
-            rows.append([(t("ads.save"), cb("save", draft.campaign_id, draft.id))])
-    rows.append([(t("ads.cancel"), cb("cancel", draft.campaign_id, draft.id))])
+            rows.append([(t("ads.save"), make_cb("save", draft.campaign_id, draft.id))])
+    rows.append([(t("ads.cancel"), make_cb("cancel", draft.campaign_id, draft.id))])
     await ads.session.commit()
     await display(message, t("ads.title") + "\n\n" + text, keyboard(rows), edit=edit)
 
@@ -206,6 +239,8 @@ async def send_preview(
     if message.chat.type != "private" or message.chat.id != actor or message.bot is None:
         raise DomainError("forbidden")
     content = validate_content(content)
+    if isinstance(ads, CustomerAdsService):
+        source = "c" + source
     bot = message.bot
 
     async def ready() -> None:
@@ -284,8 +319,10 @@ def register_ads_handlers(router: Router) -> None:
     async def input_ads(message: Message, state: FSMContext, service: Service) -> None:
         try:
             actor = actor_id(message)
-            ads = await private(service, message, actor)
             data = await state.get_data()
+            ads = await private(service, message, actor, customer=data.get("ads_customer") is True)
+            if isinstance(ads, CustomerAdsService):
+                ads.expected_grant = int(data["ads_grant"])
             field = data["ads_field"]
             panel = message.model_copy(update={"message_id": data["ads_panel"]}).as_(message.bot)
             request = f"ads:{message.chat.id}:{message.message_id}"
@@ -350,7 +387,10 @@ def register_ads_handlers(router: Router) -> None:
             if not isinstance(callback.message, Message):
                 raise DomainError("forbidden")
             actor, source = callback.from_user.id, callback_data.source
-            ads = await private(service, callback.message, actor)
+            customer = source.startswith("c")
+            ads = await private(service, callback.message, actor, customer=customer)
+            if customer:
+                source = source[1:]
             if source.startswith("d"):
                 draft = await ads.draft(actor, source[1:])
                 content = draft.content
@@ -375,35 +415,68 @@ def register_ads_handlers(router: Router) -> None:
             await service.session.rollback()
             await callback.answer(failure(error), show_alert=True)
 
+    @router.callback_query(CustomerAd.filter())
     @router.callback_query(AdsAction.filter())
     async def ads_callback(
-        callback: CallbackQuery, callback_data: AdsAction, state: FSMContext, service: Service
+        callback: CallbackQuery,
+        callback_data: AdsAction | CustomerAd,
+        state: FSMContext,
+        service: Service,
     ) -> None:
         acknowledged = False
         try:
             if not isinstance(callback.message, Message):
                 raise DomainError("forbidden")
             message, actor = callback.message, callback.from_user.id
-            ads = await private(service, message, actor)
+            customer = isinstance(callback_data, CustomerAd)
+            ads = await private(service, message, actor, customer=customer)
+            make_cb = customer_cb if customer else cb
             name, cid, value = callback_data.action, callback_data.campaign, callback_data.value
+            if customer and name not in {
+                "root",
+                "list",
+                "campaign",
+                "edit",
+                "clear",
+                "draft",
+                "finish",
+                "draft_preview",
+                "save",
+                "cancel",
+                "preview",
+                "history",
+                "stats",
+                "drafts",
+            }:
+                raise DomainError("ac_denied")
+            await state.update_data(ads_customer=customer)
             await callback.answer()
             acknowledged = True
             # Any management navigation closes the previous input context. Only
             # an explicit edit/recovered media collection may open it again.
             await state.set_state(None)
-            if name == "root":
+            if name == "stats" and customer:
+                from app.bot.ads_customers import customer_stats
+
+                await customer_stats(message, ads, actor, cid)
+            elif name == "root":
                 await state.set_state(None)
                 await root(message, ads, actor)
             elif name == "list":
                 await state.set_state(None)
                 page = max(0, min(10000, int(value or 0)))
+                if customer:
+                    from app.bot.ads_customers import customer_list
+
+                    await customer_list(message, ads, actor, page=page)
+                    return
                 campaigns = await ads.campaigns(actor, page)
-                rows = [[(c.internal_name[:50], cb("campaign", c.id))] for c in campaigns[:8]]
+                rows = [[(c.internal_name[:50], make_cb("campaign", c.id))] for c in campaigns[:8]]
                 if page:
-                    rows.append([(t("ads.back"), cb("list", value=str(page - 1)))])
+                    rows.append([(t("ads.back"), make_cb("list", value=str(page - 1)))])
                 if len(campaigns) > 8:
-                    rows.append([(t("ads.next"), cb("list", value=str(page + 1)))])
-                rows.append([(t("ads.back"), cb("root"))])
+                    rows.append([(t("ads.next"), make_cb("list", value=str(page + 1)))])
+                rows.append([(t("ads.back"), make_cb("root"))])
                 await service.session.commit()
                 await display(
                     message,
@@ -417,15 +490,23 @@ def register_ads_handlers(router: Router) -> None:
             elif name == "new":
                 await state.set_state(AdsFlow.input)
                 await state.update_data(
-                    ads_field="NAME", ads_panel=message.message_id, global_new=False
+                    ads_field="NAME",
+                    ads_panel=message.message_id,
+                    global_new=False,
+                    ads_customer=False,
                 )
                 await service.session.commit()
-                await display(message, t("ads.name_prompt"), navigation(), edit=True)
+                await display(
+                    message, t("ads.name_prompt"), navigation(customer=customer), edit=True
+                )
             elif name == "edit":
                 if value not in {"TEXT", "MEDIA", "BUTTONS"}:
                     raise DomainError("ads_stale")
                 campaign, _ = await ads.current(actor, cid)
                 base = campaign.version
+                if isinstance(ads, CustomerAdsService):
+                    grant = await ads.grants.check(actor, cid, edit=True)
+                    await state.update_data(ads_grant=grant.id)
                 await state.set_state(AdsFlow.input)
                 await state.update_data(
                     ads_field=value, ads_campaign=cid, ads_base=base, ads_panel=message.message_id
@@ -438,8 +519,8 @@ def register_ads_handlers(router: Router) -> None:
                     await draft_panel(message, ads, actor, draft.id)
                 else:
                     rows = [
-                        [(t("ads.clear"), cb("clear", cid, f"{value}.{base}"))],
-                        [(t("ads.back"), cb("campaign", cid))],
+                        [(t("ads.clear"), make_cb("clear", cid, f"{value}.{base}"))],
+                        [(t("ads.back"), make_cb("campaign", cid))],
                     ]
                     await service.session.commit()
                     await display(
@@ -457,6 +538,8 @@ def register_ads_handlers(router: Router) -> None:
                 await draft_panel(message, ads, actor, draft.id)
             elif name in {"draft", "finish", "draft_preview", "save", "cancel"}:
                 draft = await ads.draft(actor, value, editable=name not in {"save", "cancel"})
+                if cid != draft.campaign_id:
+                    raise DomainError("ads_stale")
                 cid = draft.campaign_id
                 if name == "finish":
                     draft = await ads.finish_media(actor, draft.id)
@@ -467,14 +550,16 @@ def register_ads_handlers(router: Router) -> None:
                     await display(
                         message,
                         t("ads.saved", version=version.revision),
-                        navigation(cid),
+                        navigation(cid, customer=customer),
                         edit=True,
                     )
                     return
                 elif name == "cancel":
                     await ads.cancel(actor, draft.id)
                     await state.set_state(None)
-                    await display(message, t("ads.cancelled"), navigation(cid), edit=True)
+                    await display(
+                        message, t("ads.cancelled"), navigation(cid, customer=customer), edit=True
+                    )
                     return
                 elif name == "draft_preview":
                     if draft.status != "READY":
@@ -483,6 +568,8 @@ def register_ads_handlers(router: Router) -> None:
                     await ads.mark_previewed(actor, draft.id)
                 elif draft.status == "COLLECTING":
                     await state.set_state(AdsFlow.input)
+                    if isinstance(ads, CustomerAdsService):
+                        await state.update_data(ads_grant=(await ads.grants.check(actor, cid)).id)
                     await state.update_data(
                         ads_field="MEDIA",
                         ads_campaign=cid,
@@ -510,19 +597,21 @@ def register_ads_handlers(router: Router) -> None:
                         date=utc(version.created_at).strftime("%Y-%m-%d %H:%M UTC"),
                         actor=version.actor_id,
                     )
+                    if customer:
+                        continue
                     rows.append(
                         [
                             (
                                 t("ads.restore") + f" {version.revision}",
-                                cb("restore", cid, str(version.id)),
+                                make_cb("restore", cid, str(version.id)),
                             )
                         ]
                     )
                 if page:
-                    rows.append([(t("ads.back"), cb("history", cid, str(page - 1)))])
+                    rows.append([(t("ads.back"), make_cb("history", cid, str(page - 1)))])
                 if len(versions) > 5:
-                    rows.append([(t("ads.next"), cb("history", cid, str(page + 1)))])
-                rows.append([(t("ads.back"), cb("campaign", cid))])
+                    rows.append([(t("ads.next"), make_cb("history", cid, str(page + 1)))])
+                rows.append([(t("ads.back"), make_cb("campaign", cid))])
                 await service.session.commit()
                 await display(message, text, keyboard(rows), edit=True)
             elif name == "restore":
@@ -542,12 +631,12 @@ def register_ads_handlers(router: Router) -> None:
                     [
                         (
                             f"#{d.campaign_id} · {t('ads.media') if d.field == 'MEDIA' else t('ads.drafts')}",
-                            cb("draft", d.campaign_id, d.id),
+                            make_cb("draft", d.campaign_id, d.id),
                         )
                     ]
                     for d in drafts
                 ]
-                rows.append([(t("ads.back"), cb("root"))])
+                rows.append([(t("ads.back"), make_cb("root"))])
                 await service.session.commit()
                 await display(message, t("ads.drafts"), keyboard(rows), edit=True)
             elif name == "delete":
@@ -560,8 +649,8 @@ def register_ads_handlers(router: Router) -> None:
                     t("ads.delete_confirm"),
                     keyboard(
                         [
-                            [(t("ads.delete"), cb("archive", cid, value))],
-                            [(t("ads.cancel"), cb("campaign", cid))],
+                            [(t("ads.delete"), make_cb("archive", cid, value))],
+                            [(t("ads.cancel"), make_cb("campaign", cid))],
                         ]
                     ),
                     edit=True,
@@ -569,7 +658,7 @@ def register_ads_handlers(router: Router) -> None:
             elif name == "archive":
                 await ads.archive(actor, cid, int(value))
                 await state.set_state(None)
-                await display(message, t("ads.deleted"), navigation(), edit=True)
+                await display(message, t("ads.deleted"), navigation(customer=customer), edit=True)
             else:
                 raise DomainError("ads_stale")
         except (
@@ -584,7 +673,9 @@ def register_ads_handlers(router: Router) -> None:
             if not acknowledged:
                 await callback.answer(failure(error), show_alert=True)
             elif isinstance(callback.message, Message):
-                await display(callback.message, failure(error), navigation(), edit=True)
+                await display(
+                    callback.message, failure(error), navigation(customer=customer), edit=True
+                )
             structlog.get_logger().info(
                 "ads_action_rejected",
                 actor_id=callback.from_user.id,

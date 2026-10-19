@@ -90,3 +90,15 @@ class GlobalAd(CallbackData, prefix="g33"):
     action: str
     campaign: int = 0
     value: str = ""
+
+
+class CustomerAd(CallbackData, prefix="ac4"):
+    action: str
+    campaign: int = 0
+    value: str = ""
+
+
+class CustomerAdmin(CallbackData, prefix="aca4"):
+    action: str
+    campaign: int
+    value: str = ""
