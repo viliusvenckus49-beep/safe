@@ -76,6 +76,13 @@ async def test_postgres_actual_migration_preserves_legacy_schema_and_rows(postgr
             function()
 
     async with engine.begin() as connection:
+        global_spec = importlib.util.spec_from_file_location(
+            "global_migration",
+            ROOT / "migrations/versions/0015_global_ads_assignments_operations_and_.py",
+        )
+        global_module = importlib.util.module_from_spec(global_spec)
+        global_spec.loader.exec_module(global_module)
+        await connection.run_sync(lambda c: run(c, global_module.downgrade))
         publication = importlib.util.spec_from_file_location(
             "publication_migration", ROOT / "migrations/versions/0014_ad_publication.py"
         )

@@ -3,21 +3,27 @@
 import asyncio
 import hashlib
 import json
-from datetime import date, datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import func, or_, select
 
+from app.ads_locks import ads_transaction
 from app.ads_schedule import INTERVALS, LIVE, local_instant, parts_for, publishable, slot
 from app.ads_services import AdsService
 from app.errors import DomainError
 from app.group_authorization import numeric_id
 from app.group_services import GroupService
 from app.models import (
+    AdAssignmentPolicy,
     AdCampaign,
+    AdChatPublicationGate,
     AdContentDraft,
     AdContentVersion,
+    AdGlobalOperation,
+    AdGlobalOperationItem,
     AdPublicationAttempt,
     AdPublicationGate,
     AdPublicationPart,
@@ -46,17 +52,138 @@ async def publication_rights(
 
 
 class PublicationService:
-    def __init__(self, settings: Any, session: Any):
+    def __init__(
+        self,
+        settings: Any,
+        session: Any,
+        schedule_id: int | None = None,
+        *,
+        operation: tuple[str, int, str] | None = None,
+    ):
+        self.schedule_id = schedule_id
+        self.operation = operation
         self.ads = AdsService(settings, session)
         self.session = session
 
+    @asynccontextmanager
+    async def transition(self, *, aid=None, sid=None, cid=None, skip_locked=False, policy=False):
+        if aid is not None:
+            identity = await self.session.execute(
+                select(AdSchedule.campaign_id, AdSchedule.id)
+                .join(AdPublicationAttempt, AdPublicationAttempt.schedule_id == AdSchedule.id)
+                .where(AdPublicationAttempt.id == aid)
+            )
+            found = identity.first()
+            if found is None:
+                raise DomainError("ap_stale")
+            cid, sid = found
+        async with ads_transaction(
+            self.session, cid, sid, policy=policy, skip_locked=skip_locked
+        ) as acquired:
+            yield acquired
+
+    @asynccontextmanager
+    async def write(self, actor: int, cid: int):
+        row = await self.one(actor, cid)
+        sid = row.id if row else None
+        async with self.transition(cid=cid, sid=sid, policy=self.operation is not None):
+            await self.ads.get(actor, cid, archived=True)
+            item = None
+            if self.operation:
+                opid, chat, token = self.operation
+                op = await self.session.get(AdGlobalOperation, opid, populate_existing=True)
+                item = await self.session.get(
+                    AdGlobalOperationItem, (opid, chat), populate_existing=True
+                )
+                policy = await self.session.get(AdAssignmentPolicy, cid, populate_existing=True)
+                if (
+                    not op
+                    or op.actor_id != actor
+                    or op.campaign_id != cid
+                    or op.status != "RUNNING"
+                    or not policy
+                    or op.policy_version != policy.version
+                    or not item
+                    or item.status != "CLAIMED"
+                    or item.token != token
+                    or utc(item.lease_until) <= now()
+                ):
+                    raise DomainError("ap_stale")
+            yield
+            if item is not None:
+                item.status, item.error, item.lease_until = "SUCCEEDED", None, None
+
     async def defer_all(self, seconds: int) -> None:
         until = now() + timedelta(seconds=max(1, seconds))
-        gate = await self.session.get(AdPublicationGate, 1, populate_existing=True)
-        if gate is None:
-            self.session.add(AdPublicationGate(id=1, until_at=until))
-        elif utc(gate.until_at) < until:
+        gate = await self.rate_gate()
+        if utc(gate.until_at) < until:
             gate.until_at = until
+
+    async def rate_gate(self):
+        if self.session.get_bind().dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            statement: Any = (
+                pg_insert(AdPublicationGate).values(id=1, until_at=now()).on_conflict_do_nothing()
+            )
+        else:
+            from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+            statement = (
+                sqlite_insert(AdPublicationGate)
+                .values(id=1, until_at=now())
+                .on_conflict_do_nothing()
+            )
+        await self.session.execute(statement)
+        return await self.session.scalar(
+            select(AdPublicationGate)
+            .where(AdPublicationGate.id == 1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    async def reserve_rate(self, row, part, content):
+        gate = await self.rate_gate()
+        instant = now()
+        due = utc(gate.until_at)
+        global_rate = self.ads.access.settings.ads_global_messages_per_second
+        chat_rate = self.ads.access.settings.ads_group_messages_per_minute
+        chat_gate = None
+        if global_rate and gate.next_send_at:
+            due = max(due, utc(gate.next_send_at))
+        if chat_rate:
+            if self.session.get_bind().dialect.name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                chat_statement: Any = (
+                    pg_insert(AdChatPublicationGate)
+                    .values(chat_id=row.chat_id, next_send_at=instant)
+                    .on_conflict_do_nothing()
+                )
+            else:
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+                chat_statement = (
+                    sqlite_insert(AdChatPublicationGate)
+                    .values(chat_id=row.chat_id, next_send_at=instant)
+                    .on_conflict_do_nothing()
+                )
+            await self.session.execute(chat_statement)
+            chat_gate = await self.session.scalar(
+                select(AdChatPublicationGate)
+                .where(AdChatPublicationGate.chat_id == row.chat_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            due = max(due, utc(chat_gate.next_send_at))
+        if due > instant:
+            return due
+        count = len(content.content["media"]) if part.kind == "ALBUM" else 1
+        if global_rate:
+            gate.next_send_at = instant + timedelta(seconds=count / global_rate)
+        if chat_gate is not None:
+            chat_gate.next_send_at = instant + timedelta(seconds=count * 60 / chat_rate)
+        return None
 
     async def cooldown(self) -> datetime | None:
         gate = await self.session.get(AdPublicationGate, 1, populate_existing=True)
@@ -64,23 +191,38 @@ class PublicationService:
 
     async def one(self, actor: int, cid: int) -> AdSchedule | None:
         await self.ads.get(actor, cid, archived=True)
+        if self.schedule_id is not None:
+            self.ads.database_id(self.schedule_id)
         rows = list(
             await self.session.scalars(
                 select(AdSchedule)
-                .where(AdSchedule.campaign_id == cid)
+                .where(
+                    AdSchedule.campaign_id == cid,
+                    *([AdSchedule.id == self.schedule_id] if self.schedule_id is not None else []),
+                )
                 .execution_options(populate_existing=True)
                 .limit(2)
             )
         )
         if len(rows) > 1:
-            raise DomainError("ap_multiple")  # 3.3 will add explicit group selection.
+            raise DomainError("ap_multiple")
         return rows[0] if rows else None
 
     async def ensure(self, actor: int, cid: int) -> AdSchedule:
+        if self.schedule_id is not None:
+            row = await self.one(actor, cid)
+            if row is None:
+                raise DomainError("ap_stale")
+            await self.session.commit()
+            return row
         async with self.ads.write(actor):
             await self.ads.get(actor, cid)
             row = await self.one(actor, cid)
+            if await self.session.get(AdAssignmentPolicy, cid) is None:
+                self.session.add(AdAssignmentPolicy(campaign_id=cid, authorized_by=actor))
             if row is None:
+                if self.schedule_id is not None:
+                    raise DomainError("ap_stale")
                 row = AdSchedule(campaign_id=cid, authorized_by=actor)
                 self.session.add(row)
                 await self.session.flush()
@@ -149,7 +291,7 @@ class PublicationService:
         if chat is not None:
             await publication_rights(bot, chat, actor)
         payload = hashlib.sha256(json.dumps([field, value], default=str).encode()).hexdigest()
-        async with self.ads.write(actor):
+        async with self.write(actor, cid):
             await self.ads.get(actor, cid)
             row = await self.one(actor, cid)
             assert row is not None
@@ -157,7 +299,9 @@ class PublicationService:
                 if row.last_payload != payload or row.authorized_by != actor:
                     raise DomainError("ap_stale")
                 return row
-            if row.version != expected:
+            if row.version != expected or row.excluded:
+                raise DomainError("ap_stale")
+            if self.schedule_id is not None and field == "chat_id" and value != row.chat_id:
                 raise DomainError("ap_stale")
             if field == "interval_seconds":
                 if type(value) is not int or value not in INTERVALS:
@@ -187,6 +331,9 @@ class PublicationService:
             )
             if row.end_at and row.start_at and utc(row.end_at) <= utc(row.start_at):
                 raise DomainError("ap_dates")
+            override = "start_at" if field in {"start_date", "start_time"} else field
+            if override in {"interval_seconds", "start_at", "end_at"}:
+                row.override_fields = sorted(set(row.override_fields or []) | {override})
             row.status = "PAUSED" if row.status == "ACTIVE" else "DRAFT"
             row.version += 1
             row.next_run_at = None
@@ -201,7 +348,13 @@ class PublicationService:
     async def validate(self, actor: int, cid: int) -> tuple[AdSchedule, AdContentVersion]:
         campaign = await self.ads.get(actor, cid)
         row = await self.one(actor, cid)
-        if not row or not row.chat_id or row.interval_seconds not in INTERVALS or not row.start_at:
+        if (
+            not row
+            or row.excluded
+            or not row.chat_id
+            or row.interval_seconds not in INTERVALS
+            or not row.start_at
+        ):
             raise DomainError("ap_incomplete")
         await self.group(row.chat_id)
         if row.end_at and (utc(row.end_at) <= utc(row.start_at) or utc(row.end_at) <= now()):
@@ -216,7 +369,7 @@ class PublicationService:
         assert chat is not None
         await self.session.commit()
         await publication_rights(bot, chat, actor)
-        async with self.ads.write(actor):
+        async with self.write(actor, cid):
             row, content = await self.validate(actor, cid)
             if row.chat_id != chat or content.revision != revision:
                 raise DomainError("ap_stale")
@@ -262,7 +415,7 @@ class PublicationService:
         await self.session.commit()
         if chat is not None:
             await publication_rights(bot, chat, actor, require_bot=False)
-        async with self.ads.write(actor):
+        async with self.write(actor, cid):
             row = await self.one(actor, cid)
             if row is None:
                 raise DomainError("ap_stale")
@@ -349,22 +502,50 @@ class PublicationService:
             await self.group(row.chat_id)
         except DomainError:
             return False
-        return bool(campaign and campaign.status == "DRAFT" and row.status == "ACTIVE")
+        return bool(
+            campaign and campaign.status == "DRAFT" and row.status == "ACTIVE" and not row.excluded
+        )
 
     async def enqueue(self, limit: int = 20) -> int:
         count = 0
-        # Short SQL serialization also works across independent SQLite processes.
-        async with self.ads.write_system():
-            instant = now()
-            schedules = list(
-                await self.session.scalars(
-                    select(AdSchedule)
-                    .where(AdSchedule.status == "ACTIVE")
-                    .order_by(AdSchedule.next_run_at)
+        instant = now()
+        # Rank within campaigns, then interleave their due rows rather than filling
+        # a batch from one campaign. Only short per-schedule transactions follow.
+        ranked = (
+            select(
+                AdSchedule.id.label("sid"),
+                AdSchedule.campaign_id.label("cid"),
+                AdSchedule.next_run_at.label("due"),
+                func.row_number()
+                .over(
+                    partition_by=AdSchedule.campaign_id,
+                    order_by=(AdSchedule.next_run_at, AdSchedule.id),
+                )
+                .label("rank"),
+            )
+            .where(
+                AdSchedule.status == "ACTIVE",
+                or_(AdSchedule.next_run_at <= instant, AdSchedule.end_at <= instant),
+            )
+            .subquery()
+        )
+        candidates = list(
+            (
+                await self.session.execute(
+                    select(ranked.c.cid, ranked.c.sid)
+                    .order_by(ranked.c.rank, ranked.c.due, ranked.c.sid)
                     .limit(limit)
                 )
-            )
-            for schedule in schedules:
+            ).all()
+        )
+        await self.session.commit()
+        for cid, sid in candidates:
+            async with self.transition(cid=cid, sid=sid, skip_locked=True) as acquired:
+                if not acquired:
+                    continue
+                schedule = await self.session.get(AdSchedule, sid, populate_existing=True)
+                if schedule.status != "ACTIVE":
+                    continue
                 if not await self.eligible(schedule):
                     schedule.status, schedule.next_run_at = "PAUSED", None
                     schedule.last_error, schedule.alert_pending = "AUTHORITY_LOST", True
@@ -445,28 +626,49 @@ class PublicationService:
         return count
 
     async def claim(self) -> tuple[int, str, int] | None:
-        async with self.ads.write_system():
-            instant = now()
-            expired = list(
+        instant = now()
+        expired = list(
+            (
                 await self.session.scalars(
-                    select(AdPublicationAttempt).where(
+                    select(AdPublicationAttempt.id)
+                    .where(
                         AdPublicationAttempt.status.in_(("CLAIMED", "SENDING")),
                         AdPublicationAttempt.lease_until <= instant,
                     )
+                    .order_by(AdPublicationAttempt.id)
+                    .limit(100)
                 )
-            )
-            for row in expired:
+            ).all()
+        )
+        await self.session.commit()
+        for aid in expired:
+            async with self.transition(aid=aid, skip_locked=True) as acquired:
+                if not acquired:
+                    continue
+                row = await self.session.get(AdPublicationAttempt, aid, populate_existing=True)
+                if (
+                    row.status not in {"CLAIMED", "SENDING"}
+                    or not row.lease_until
+                    or utc(row.lease_until) > instant
+                ):
+                    continue
                 if row.status == "SENDING":
                     await self.terminal(row, "UNCERTAIN", "LEASE_EXPIRED_DURING_SEND")
                     await self.pause_failed_generation(row, row.error)
                 else:
                     row.status, row.token, row.lease_until = "PENDING", None, None
                     self.event(row, "PENDING", recovery=True)
-            if await self.cooldown():
-                return None
-            rows = list(
-                await self.session.scalars(
-                    select(AdPublicationAttempt)
+        if await self.cooldown():
+            await self.session.commit()
+            return None
+        candidates = list(
+            (
+                await self.session.execute(
+                    select(AdPublicationAttempt.id, AdSchedule.id, AdSchedule.campaign_id)
+                    .join(AdSchedule, AdPublicationAttempt.schedule_id == AdSchedule.id)
+                    .join(
+                        AdAssignmentPolicy, AdAssignmentPolicy.campaign_id == AdSchedule.campaign_id
+                    )
                     .where(
                         AdPublicationAttempt.status.in_(("PENDING", "DEFERRED")),
                         or_(
@@ -474,14 +676,26 @@ class PublicationService:
                             AdPublicationAttempt.retry_at <= instant,
                         ),
                     )
-                    .order_by(AdPublicationAttempt.id)
-                    .limit(100)
+                    .order_by(
+                        AdAssignmentPolicy.last_dispatched_at.asc().nulls_first(),
+                        AdSchedule.last_dispatched_at.asc().nulls_first(),
+                        AdPublicationAttempt.id,
+                    )
+                    .limit(64)
                 )
-            )
-            for row in rows:
-                if row.retry_at and utc(row.retry_at) > instant:
+            ).all()
+        )
+        await self.session.commit()
+        for aid, sid, cid in candidates:
+            async with self.transition(cid=cid, sid=sid, policy=True, skip_locked=True) as acquired:
+                if not acquired:
                     continue
-                schedule = await self.session.get(AdSchedule, row.schedule_id)
+                row = await self.session.get(AdPublicationAttempt, aid, populate_existing=True)
+                if row.status not in {"PENDING", "DEFERRED"} or (
+                    row.retry_at and utc(row.retry_at) > instant
+                ):
+                    continue
+                schedule = await self.session.get(AdSchedule, sid, populate_existing=True)
                 if self.obsolete(row, schedule, instant):
                     await self.terminal(row, "CANCELLED", "OBSOLETE_SLOT")
                     continue
@@ -492,6 +706,9 @@ class PublicationService:
                 ):
                     await self.terminal(row, "CANCELLED", "INELIGIBLE")
                     continue
+                policy = await self.session.get(AdAssignmentPolicy, cid)
+                # Fairness uses actual ordering time, independent of a synthetic due clock.
+                policy.last_dispatched_at = schedule.last_dispatched_at = datetime.now(UTC)
                 row.status, row.token = "CLAIMED", uuid4().hex
                 row.fence += 1
                 row.lease_until = instant + timedelta(seconds=LEASE_SECONDS)
@@ -502,7 +719,7 @@ class PublicationService:
     async def preflight_failure(
         self, aid: int, token: str, fence: int, error: str, *, retry: int | None = None
     ) -> None:
-        async with self.ads.write_system():
+        async with self.transition(aid=aid):
             row = await self.session.get(AdPublicationAttempt, aid, populate_existing=True)
             if not row or (row.token, row.fence, row.status) != (token, fence, "CLAIMED"):
                 return
@@ -523,7 +740,7 @@ class PublicationService:
                 await self.pause_failed_generation(row, error)
 
     async def begin(self, aid: int, token: str, fence: int) -> tuple[Any, Any, Any] | None:
-        async with self.ads.write_system():
+        async with self.transition(aid=aid):
             row = await self.session.get(AdPublicationAttempt, aid, populate_existing=True)
             if (
                 not row
@@ -559,6 +776,12 @@ class PublicationService:
                 await self.terminal(row, "FAILED", "RETRY_LIMIT")
                 await self.pause_failed_generation(row, row.error)
                 return None
+            content = await self.session.get(AdContentVersion, row.content_version_id)
+            rate_wait = await self.reserve_rate(row, part, content)
+            if rate_wait:
+                row.status, row.retry_at, row.lease_until = "DEFERRED", rate_wait, None
+                self.event(row, "DEFERRED", rate_budget=True)
+                return None
             row.status, part.status = "SENDING", "SENDING"
             part.tries += 1
             row.lease_until = now() + timedelta(seconds=LEASE_SECONDS)
@@ -579,7 +802,7 @@ class PublicationService:
     ) -> bool:
         if status not in {"SENT", "FAILED", "DEFERRED", "UNCERTAIN"}:
             raise DomainError("ap_stale")
-        async with self.ads.write_system():
+        async with self.transition(aid=aid):
             row = await self.session.get(AdPublicationAttempt, aid, populate_existing=True)
             part = await self.session.get(AdPublicationPart, part_id, populate_existing=True)
             if (

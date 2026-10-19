@@ -28,7 +28,7 @@ from app.ads_content import (
     validate_content,
 )
 from app.ads_services import AdsService
-from app.bot.callbacks import AdPublication, AdsAction, AdsPreview, PublishedAd
+from app.bot.callbacks import AdPublication, AdsAction, AdsPreview, GlobalAd, PublishedAd
 from app.bot.keyboards import action, keyboard
 from app.bot.local_admin import display
 from app.bot.states import AdsFlow
@@ -95,12 +95,15 @@ async def private(service: Service, message: Message, actor: int) -> AdsService:
 async def root(message: Message, ads: AdsService, actor: int, *, edit: bool = True) -> None:
     await ads.authorize(actor)
     drafts = await ads.unfinished(actor)
-    rows = [[(t("ads.new"), cb("new"))], [(t("ads.list"), cb("list"))]]
+    rows = [
+        [(t("ads.new"), cb("new")), ("🌐 Global ADS", GlobalAd(action="root").pack())],
+        [(t("ads.list"), cb("list")), (t("ap.stats"), GlobalAd(action="stats").pack())],
+        [(t("g.settings"), GlobalAd(action="settings").pack()), (t("ads.back"), action("admin"))],
+    ]
     if drafts:
         rows.append([(t("ads.drafts"), cb("drafts"))])
-    rows.append([(t("ads.back"), action("admin"))])
     await ads.session.commit()
-    await display(message, t("ads.title") + "\n\n" + t("ads.draft_note"), keyboard(rows), edit=edit)
+    await display(message, t("g.main") + "\n\n" + t("ads.draft_note"), keyboard(rows), edit=edit)
 
 
 async def campaign_panel(
@@ -116,6 +119,7 @@ async def campaign_panel(
     ]
     rows += [
         [(t("ap.manage"), AdPublication(action="panel", campaign=campaign.id).pack())],
+        [("🌐 Global ADS", GlobalAd(action="campaign", campaign=campaign.id).pack())],
         [(t("ads.full"), cb("preview", campaign.id, "FULL"))],
         [(t("ads.history"), cb("history", campaign.id))],
         [(t("ads.delete"), cb("delete", campaign.id, str(campaign.version)))],
@@ -288,7 +292,22 @@ def register_ads_handlers(router: Router) -> None:
             if field == "NAME":
                 campaign = await ads.create(actor, message.text or "", request)
                 await state.set_state(None)
-                await campaign_panel(panel, ads, actor, campaign.id)
+                if data.get("global_new"):
+                    from app.ads_global import GlobalAdsService
+                    from app.ads_locks import ads_transaction
+                    from app.bot.global_ads import campaign_panel as global_panel
+
+                    global_ads = GlobalAdsService(service.settings, service.session)
+                    await global_ads.policy(actor, campaign.id)
+                    async with ads_transaction(service.session, campaign.id, policy=True):
+                        policy = await global_ads.policy(actor, campaign.id)
+                        policy.mode = "SELECTED"
+                        policy.version += 1
+                        global_ads.ads.audit(actor, "global_created", campaign.id)
+                    await state.update_data(global_new=False)
+                    await global_panel(panel, service, actor, campaign.id)
+                else:
+                    await campaign_panel(panel, ads, actor, campaign.id)
                 return
             if field == "MEDIA":
                 draft = await ads.append_media(
@@ -397,7 +416,9 @@ def register_ads_handlers(router: Router) -> None:
                 await campaign_panel(message, ads, actor, cid)
             elif name == "new":
                 await state.set_state(AdsFlow.input)
-                await state.update_data(ads_field="NAME", ads_panel=message.message_id)
+                await state.update_data(
+                    ads_field="NAME", ads_panel=message.message_id, global_new=False
+                )
                 await service.session.commit()
                 await display(message, t("ads.name_prompt"), navigation(), edit=True)
             elif name == "edit":

@@ -60,3 +60,7 @@ class AdsFlow(StatesGroup):
 
 class AdScheduleFlow(StatesGroup):
     input = State()
+
+
+class GlobalAdsFlow(StatesGroup):
+    input = State()

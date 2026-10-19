@@ -562,6 +562,13 @@ class AdSchedule(Base):
     last_payload: Mapped[str | None] = mapped_column(String(64))
     last_error: Mapped[str | None] = mapped_column(String(512))
     alert_pending: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    excluded: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    override_fields: Mapped[list[str]] = mapped_column(
+        JSON,
+        default=lambda: ["interval_seconds", "start_at", "end_at"],
+        server_default=text('\'["interval_seconds","start_at","end_at"]\''),
+    )
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         UniqueConstraint("campaign_id", "chat_id", name="uq_ad_schedule_group"),
@@ -579,6 +586,7 @@ class AdSchedule(Base):
             name="ck_ad_schedule_interval",
         ),
         CheckConstraint("version > 0 AND authorized_by > 0", name="ck_ad_schedule_ids"),
+        Index("ix_ad_schedule_due", "status", "next_run_at", "id"),
         CheckConstraint(
             "end_at IS NULL OR start_at IS NULL OR end_at > start_at", name="ck_ad_schedule_dates"
         ),
@@ -616,6 +624,7 @@ class AdPublicationAttempt(Base):
             "fence >= 0 AND schedule_version > 0 AND chat_id < 0", name="ck_ad_attempt_ids"
         ),
         Index("ix_ad_attempt_work", "status", "retry_at", "lease_until"),
+        Index("ix_ad_attempt_schedule_status", "schedule_id", "status", "id"),
     )
 
 
@@ -648,4 +657,100 @@ class AdPublicationGate(Base):
     __tablename__ = "ad_publication_gate"
     id: Mapped[int] = mapped_column(primary_key=True)
     until_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    next_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     __table_args__ = (CheckConstraint("id = 1", name="ck_ad_gate_singleton"),)
+
+
+class AdAssignmentPolicy(Base):
+    __tablename__ = "ad_assignment_policies"
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(10), default="SINGLE", server_default="SINGLE")
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    interval_seconds: Mapped[int] = mapped_column(default=3600, server_default="3600")
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auto_activate: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    authorized_by: Mapped[int] = mapped_column(BigInteger)
+    scan_after: Mapped[int | None] = mapped_column(BigInteger)
+    reconcile_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(512))
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('SINGLE','SELECTED','EXISTING','FUTURE')", name="ck_ad_assignment_mode"
+        ),
+        CheckConstraint("version > 0 AND authorized_by > 0", name="ck_ad_assignment_ids"),
+        CheckConstraint(
+            "interval_seconds IN (1800,3600,7200,10800,14400,21600,28800,43200,86400)",
+            name="ck_ad_assignment_interval",
+        ),
+        CheckConstraint(
+            "end_at IS NULL OR start_at IS NULL OR end_at > start_at", name="ck_ad_assignment_dates"
+        ),
+        Index("ix_ad_assignment_reconcile", "mode", "reconcile_at", "campaign_id"),
+    )
+
+
+class AdGlobalOperation(Base):
+    __tablename__ = "ad_global_operations"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"))
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    action: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(12), default="SELECTING")
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    policy_version: Mapped[int] = mapped_column()
+    content_revision: Mapped[int | None] = mapped_column()
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    request_key: Mapped[str] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('SELECTING','READY','RUNNING','DONE','CANCELLED')",
+            name="ck_ad_global_status",
+        ),
+        CheckConstraint(
+            "action IN ('ASSIGN','START','PAUSE','STOP','REMOVE','DEFAULTS','INHERIT','CHANGE','FUTURE_ON','FUTURE_OFF')",
+            name="ck_ad_global_action",
+        ),
+        CheckConstraint(
+            "actor_id > 0 AND version > 0 AND policy_version > 0", name="ck_ad_global_ids"
+        ),
+        Index("ix_ad_global_resume", "status", "created_at"),
+    )
+
+
+class AdGlobalOperationItem(Base):
+    __tablename__ = "ad_global_operation_items"
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("ad_global_operations.id"), primary_key=True
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    schedule_id: Mapped[int | None] = mapped_column(ForeignKey("ad_schedules.id"))
+    expected_version: Mapped[int | None] = mapped_column()
+    action: Mapped[str] = mapped_column(String(16), default="ASSIGN", server_default="ASSIGN")
+    status: Mapped[str] = mapped_column(String(12), default="PENDING")
+    token: Mapped[str | None] = mapped_column(String(32))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(String(512))
+    __table_args__ = (
+        CheckConstraint("chat_id < 0", name="ck_ad_global_item_chat"),
+        CheckConstraint(
+            "status IN ('PENDING','CLAIMED','SUCCEEDED','FAILED','SKIPPED')",
+            name="ck_ad_global_item_status",
+        ),
+        CheckConstraint(
+            "status != 'CLAIMED' OR (token IS NOT NULL AND lease_until IS NOT NULL)",
+            name="ck_ad_global_item_lease",
+        ),
+        Index("ix_ad_global_item_work", "operation_id", "status", "lease_until"),
+    )
+
+
+class AdChatPublicationGate(Base):
+    __tablename__ = "ad_chat_publication_gates"
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
+    next_send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("chat_id < 0", name="ck_ad_chat_gate_id"),)

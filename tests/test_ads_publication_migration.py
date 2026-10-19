@@ -59,7 +59,7 @@ def test_0014_preserves_old_data_and_refuses_history_loss(tmp_path):
     migrate("downgrade", "0013", success=False)
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT count(*) FROM ad_schedules").fetchone() == (1,)
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("0014",)
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("0015",)
 
 
 @pytest.mark.asyncio
@@ -77,6 +77,13 @@ async def test_postgres_0014_ddl_and_all_legacy_rows(postgres_contract):
             function()
 
     async with engine.begin() as connection:
+        global_spec = importlib.util.spec_from_file_location(
+            "global_migration",
+            ROOT / "migrations/versions/0015_global_ads_assignments_operations_and_.py",
+        )
+        global_module = importlib.util.module_from_spec(global_spec)
+        global_spec.loader.exec_module(global_module)
+        await connection.run_sync(lambda c: run(c, global_module.downgrade))
         await connection.run_sync(lambda c: run(c, module.downgrade))
         for sql in SEED + ADS_SEED:
             await connection.execute(text(sql))

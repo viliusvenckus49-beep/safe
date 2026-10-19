@@ -98,6 +98,10 @@ class Bot:
 
 async def configured(sessions, settings, clock, *, album=False, seconds=1800, prefix=""):
     bot = Bot()
+    # State-machine tests use a fixed clock; dedicated GLOBAL ADS tests cover
+    # positive SQL rate budgets without real-time sleeping or Telegram requests.
+    settings.ads_global_messages_per_second = 0
+    settings.ads_group_messages_per_minute = 0
     async with sessions() as session:
         ads = AdsService(settings, session)
         campaign = await ads.create(900, "INTERNAL <secret>", prefix + "create-ad")
@@ -848,7 +852,9 @@ async def test_worker_loop_starts_cancels_and_restarts_without_duplicate(
 
     async def tick(self):
         await original(self)
-        completed.set()
+        attempts, _, _ = await snapshot(database, settings)
+        if attempts and attempts[0].status == "SENT":
+            completed.set()
 
     monkeypatch.setattr(AdsPublisher, "tick", tick)
     for _ in range(2):
