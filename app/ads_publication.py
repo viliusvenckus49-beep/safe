@@ -316,6 +316,30 @@ class PublicationService:
                 part.error = reason
         self.event(row, status, error=reason)
 
+    async def pause_failed_generation(self, row: AdPublicationAttempt, error: str | None) -> None:
+        schedule = await self.session.get(AdSchedule, row.schedule_id)
+        # A late result belongs to its pinned generation, not a later stop/edit/expiry.
+        if schedule.status == "ACTIVE" and schedule.version == row.schedule_version:
+            schedule.status, schedule.next_run_at = "PAUSED", None
+            schedule.last_error = error
+
+    async def cancel_obsolete(self, schedule: AdSchedule, instant: datetime) -> None:
+        # Retry a known-unsent part only within its original interval. After downtime,
+        # obsolete waiting work must not suppress the current slot or create a burst.
+        rows = await self.session.scalars(
+            select(AdPublicationAttempt).where(
+                AdPublicationAttempt.schedule_id == schedule.id,
+                AdPublicationAttempt.status.in_(("PENDING", "CLAIMED", "DEFERRED")),
+            )
+        )
+        for row in rows:
+            if self.obsolete(row, schedule, instant):
+                await self.terminal(row, "CANCELLED", "OBSOLETE_SLOT")
+
+    @staticmethod
+    def obsolete(row: AdPublicationAttempt, schedule: AdSchedule, instant: datetime) -> bool:
+        return instant >= utc(row.due_at) + timedelta(seconds=schedule.interval_seconds or 0)
+
     async def eligible(self, row: AdSchedule) -> bool:
         campaign = await self.session.get(AdCampaign, row.campaign_id, populate_existing=True)
         try:
@@ -358,6 +382,7 @@ class PublicationService:
                     continue
                 if not schedule.next_run_at or utc(schedule.next_run_at) > instant:
                     continue
+                await self.cancel_obsolete(schedule, instant)
                 due = utc(schedule.next_run_at)
                 following = slot(schedule.start_at, schedule.interval_seconds, instant)
                 schedule.next_run_at = following
@@ -433,8 +458,7 @@ class PublicationService:
             for row in expired:
                 if row.status == "SENDING":
                     await self.terminal(row, "UNCERTAIN", "LEASE_EXPIRED_DURING_SEND")
-                    schedule = await self.session.get(AdSchedule, row.schedule_id)
-                    schedule.status, schedule.next_run_at = "PAUSED", None
+                    await self.pause_failed_generation(row, row.error)
                 else:
                     row.status, row.token, row.lease_until = "PENDING", None, None
                     self.event(row, "PENDING", recovery=True)
@@ -458,6 +482,9 @@ class PublicationService:
                 if row.retry_at and utc(row.retry_at) > instant:
                     continue
                 schedule = await self.session.get(AdSchedule, row.schedule_id)
+                if self.obsolete(row, schedule, instant):
+                    await self.terminal(row, "CANCELLED", "OBSOLETE_SLOT")
+                    continue
                 if (
                     not await self.eligible(schedule)
                     or row.schedule_version != schedule.version
@@ -493,9 +520,7 @@ class PublicationService:
             else:
                 part.status = "FAILED"
                 await self.terminal(row, "FAILED", error)
-                schedule = await self.session.get(AdSchedule, row.schedule_id)
-                schedule.status, schedule.next_run_at = "PAUSED", None
-                schedule.last_error = error
+                await self.pause_failed_generation(row, error)
 
     async def begin(self, aid: int, token: str, fence: int) -> tuple[Any, Any, Any] | None:
         async with self.ads.write_system():
@@ -510,6 +535,9 @@ class PublicationService:
             ):
                 return None
             schedule = await self.session.get(AdSchedule, row.schedule_id, populate_existing=True)
+            if self.obsolete(row, schedule, now()):
+                await self.terminal(row, "CANCELLED", "OBSOLETE_SLOT")
+                return None
             if (
                 not await self.eligible(schedule)
                 or row.schedule_version != schedule.version
@@ -529,7 +557,7 @@ class PublicationService:
                 return None
             if part.status not in {"PENDING", "DEFERRED"} or part.tries >= MAX_TRIES:
                 await self.terminal(row, "FAILED", "RETRY_LIMIT")
-                schedule.status, schedule.next_run_at = "PAUSED", None
+                await self.pause_failed_generation(row, row.error)
                 return None
             row.status, part.status = "SENDING", "SENDING"
             part.tries += 1
@@ -564,7 +592,6 @@ class PublicationService:
                 or part.status != "SENDING"
             ):
                 return False
-            schedule = await self.session.get(AdSchedule, row.schedule_id)
             if status == "SENT":
                 if not ids or any(type(i) is not int or i <= 0 for i in ids):
                     raise DomainError("ap_result")
@@ -576,6 +603,11 @@ class PublicationService:
                 else:
                     row.status = "CLAIMED"
                 return row.status == "CLAIMED"
+            if status == "UNCERTAIN" and ids:
+                if any(type(i) is not int or i <= 0 for i in ids):
+                    raise DomainError("ap_result")
+                part.message_ids = list(dict.fromkeys(ids))
+                self.event(row, "partial_response", part_id=part.id, message_ids=part.message_ids)
             part.status, part.error = status, error
             if status == "DEFERRED":
                 await self.defer_all(retry)
@@ -588,8 +620,7 @@ class PublicationService:
                 if status == "DEFERRED":
                     part.status = "FAILED"
                 await self.terminal(row, "FAILED" if status == "DEFERRED" else status, error)
-                schedule.status, schedule.next_run_at = "PAUSED", None
-                schedule.last_error = error
+                await self.pause_failed_generation(row, error)
             return False
 
     async def history(

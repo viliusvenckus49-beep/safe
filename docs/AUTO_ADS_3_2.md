@@ -57,6 +57,12 @@ due slot up to 60 seconds late. Older slots are skipped and the next UTC slot
 strictly after now is persisted. Never backfill all missed slots or spin through
 each missed interval. A busy previous attempt suppresses that slot. Expired
 policies stop scheduling and retain history; sent Telegram messages are retained.
+An already persisted PENDING/CLAIMED/DEFERRED attempt is also cancelled when its
+original interval ends (`due_at + interval <= now`). It cannot escape missed-run
+handling after downtime, even if it already delivered an album. Confirmed part
+IDs are retained, unfinished parts are cancelled, and no old ad is replayed.
+Short safe retries within that interval remain possible. SENDING is never
+cancelled as obsolete: its result must be recorded or recovered as UNCERTAIN.
 
 ## Durable execution and transitions
 
@@ -103,6 +109,8 @@ because the server may have accepted the request. There is no exactly-once claim
 If a response arrives after lease recovery, a stale fence cannot overwrite the
 terminal record. Reconciliation requires inspecting Telegram; Bot API provides
 no universal idempotency key or arbitrary message-history lookup.
+Failure/recovery pauses only the still-active matching schedule generation.
+A late result cannot overwrite STOPPED, EXPIRED or a subsequently edited policy.
 
 ## Composite media and public callbacks
 
@@ -111,6 +119,9 @@ group, then a native keyboard message labelled `↳`. Only its unsent part can b
 deferred/retried. Successful album message IDs remain recorded even if buttons
 fail or become uncertain. Partial CANCELLED/FAILED/UNCERTAIN attempts remain
 visible with each part's status/IDs; they are not counted as successful campaigns.
+An incomplete/duplicate album response is UNCERTAIN, but any valid, distinct
+message IDs returned for the requested chat remain available for reconciliation.
+Messages for a different chat are never accepted as evidence of delivery here.
 
 Text and captions preserve native entities and Custom Emoji metadata with
 `parse_mode=None`. URL/share/copy buttons reuse the 3.1 native renderer. Public
@@ -155,8 +166,9 @@ workers/transactions, fencing/restart checkpoints, duplicate confirmations,
 pause/resume/stop, 429 budgets, actual timeout, partial albums, content pinning,
 revocation, removed groups, expiry, private/public callback isolation and LT/EN/RU.
 Exact test and quality results are recorded in the PR, not inferred from mocks.
-CI also imports the packaged engine and resolves Vilnius time inside the built
-read-only image with networking disabled and no runtime secrets.
+CI starts the actual worker, completes a SQL polling cycle and verifies clean
+cancellation inside the built read-only image with networking disabled and no
+runtime secrets. It also resolves Vilnius time in that packaged environment.
 Telegram API tests use doubles: actual entitlement/rendering, native share/copy,
 album layout, permissions and physical VPS power-loss still need an isolated
 staging smoke test before separately approved production deployment.

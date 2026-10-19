@@ -155,3 +155,30 @@ async def test_publication_history_can_reach_older_retained_attempts(
     await journey.click(next_button.callback_data, actor=900)
     second = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
     assert "#1 " in second.text and "#6 " not in second.text
+
+
+async def test_schedule_navigation_closes_sql_transactions_before_telegram(
+    journey, database, settings, clock, members, monkeypatch
+):
+    import app.bot.ads_schedule as module
+
+    cid, sid, _, _, _ = await configured(database, settings, clock)
+    observed = []
+    original_private = module.private
+    original_request = journey.transport.make_request
+
+    async def private(service, message, actor):
+        result = await original_private(service, message, actor)
+        observed.append(service.session)
+        return result
+
+    async def request(bot, method, timeout=None):
+        if observed and isinstance(method, (AnswerCallbackQuery, EditMessageText, GetChatMember)):
+            assert not observed[-1].in_transaction()
+        return await original_request(bot, method, timeout)
+
+    monkeypatch.setattr(module, "private", private)
+    monkeypatch.setattr(journey.transport, "make_request", request)
+    for action in ["panel", "intervals", "calendar", "groups", "start", "stats", "history"]:
+        await journey.click(cb(action, cid), actor=900)
+    assert len(observed) == 7

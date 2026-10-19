@@ -28,6 +28,12 @@ API_TIMEOUT = 20
 log = structlog.get_logger()
 
 
+class UnconfirmedDelivery(RuntimeError):
+    def __init__(self, message_ids: list[int]):
+        super().__init__("Incomplete Telegram delivery response")
+        self.message_ids = message_ids
+
+
 def diagnostic(error: Exception) -> str:
     if isinstance(error, DomainError):
         return error.code
@@ -69,14 +75,21 @@ async def send_part(bot: Any, attempt: Any, part: Any, version: Any) -> list[int
             )
         result = await bot.send_media_group(chat_id=attempt.chat_id, media=album)
     messages = result if isinstance(result, list) else [result]
+    confirmed = list(
+        dict.fromkeys(
+            m.message_id
+            for m in messages
+            if isinstance(m, Message) and m.chat.id == attempt.chat_id and m.message_id > 0
+        )
+    )
     expected = len(content["media"]) if part.kind == "ALBUM" else 1
     if len(messages) != expected or any(
         not isinstance(m, Message) or m.chat.id != attempt.chat_id or m.message_id <= 0
         for m in messages
     ):
-        raise RuntimeError("Unconfirmed Telegram message identifiers")
+        raise UnconfirmedDelivery(confirmed)
     if len({m.message_id for m in messages}) != expected:
-        raise RuntimeError("Duplicated Telegram message identifiers")
+        raise UnconfirmedDelivery(confirmed)
     return [m.message_id for m in messages]
 
 
@@ -128,6 +141,8 @@ class AdsPublisher:
                 status, reason = "FAILED", type(error).__name__
                 if hasattr(error, "message"):
                     reason += ": " + safe_telegram_reason(error.message)
+            except UnconfirmedDelivery as error:
+                status, reason, ids = "UNCERTAIN", type(error).__name__, error.message_ids
             except Exception as error:
                 # Includes timeouts, connection loss, 5xx and malformed success replies.
                 status, reason = "UNCERTAIN", type(error).__name__

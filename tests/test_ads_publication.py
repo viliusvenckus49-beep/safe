@@ -654,3 +654,211 @@ async def test_existing_removed_group_marker_overrides_stale_enabled_flags(
     await AdsPublisher(bot, settings, database).tick()
     assert not any(args["chat_id"] < 0 for _, args in bot.calls)
     assert (await snapshot(database, settings))[2][0].status == "PAUSED"
+
+
+@pytest.mark.parametrize("state", ["PENDING", "CLAIMED", "DEFERRED", "PARTIAL"])
+async def test_restart_discards_obsolete_waiting_attempt_then_uses_future_slot(
+    database, settings, clock, state
+):
+    _, _, bot, _, _ = await configured(database, settings, clock, album=state == "PARTIAL")
+    async with database() as session:
+        pub = PublicationService(settings, session)
+        await pub.enqueue()
+        if state != "PENDING":
+            claim = await pub.claim()
+            if state in {"DEFERRED", "PARTIAL"}:
+                row, part, _ = await pub.begin(*claim)
+                if state == "PARTIAL":
+                    assert await pub.result(*claim, part.id, "SENT", [501, 502])
+                    row, part, _ = await pub.begin(*claim)
+                await pub.result(*claim, part.id, "DEFERRED", error="429", retry=30)
+    clock[0] += timedelta(hours=6)
+    await AdsPublisher(bot, settings, database).tick()
+    attempts, _, schedules = await snapshot(database, settings)
+    assert [a.status for a in attempts] == ["CANCELLED"]
+    assert not bot.calls
+    assert schedules[0].next_run_at.replace(tzinfo=UTC) == clock[0] + timedelta(minutes=30)
+    clock[0] += timedelta(minutes=30)
+    await AdsPublisher(bot, settings, database).tick()
+    attempts, parts, _ = await snapshot(database, settings)
+    assert [a.status for a in attempts] == ["CANCELLED", "SENT"]
+    assert attempts[0].error == "OBSOLETE_SLOT"
+    assert attempts[1].due_at.replace(tzinfo=UTC) == clock[0]
+    assert len([c for c in bot.calls if c[1]["chat_id"] < 0]) == (2 if state == "PARTIAL" else 1)
+    if state == "PARTIAL":
+        assert parts[0].status == "SENT" and parts[0].message_ids == [501, 502]
+
+
+@pytest.mark.parametrize("outcome", ["FAILED", "UNCERTAIN", "LEASE"])
+@pytest.mark.parametrize("policy", ["STOPPED", "EXPIRED"])
+async def test_old_inflight_failure_cannot_overwrite_stopped_or_expired_policy(
+    database, settings, clock, outcome, policy
+):
+    cid, sid, bot, _, _ = await configured(database, settings, clock)
+    async with database() as session:
+        pub = PublicationService(settings, session)
+        await pub.enqueue()
+        claim = await pub.claim()
+        _, part, _ = await pub.begin(*claim)
+        row = await pub.one(900, cid)
+        if policy == "STOPPED":
+            await pub.control(900, cid, row.version, policy, bot)
+        else:
+            row.end_at = clock[0] + timedelta(seconds=1)
+            await session.commit()
+            clock[0] += timedelta(seconds=1)
+            await pub.enqueue()
+        if outcome == "LEASE":
+            clock[0] += timedelta(seconds=LEASE_SECONDS + 1)
+            assert await pub.claim() is None
+        else:
+            await pub.result(*claim, part.id, outcome, error="Rejected or lost reply")
+    attempts, _, schedules = await snapshot(database, settings)
+    assert attempts[0].status == ("UNCERTAIN" if outcome == "LEASE" else outcome)
+    assert schedules[0].status == policy
+    assert schedules[0].next_run_at is None
+
+
+async def test_partial_album_response_retains_confirmed_ids_without_claiming_success(
+    database, settings, clock
+):
+    _, _, bot, _, _ = await configured(database, settings, clock, album=True)
+
+    async def partial(**args):
+        bot.calls.append(("album", args))
+        return [Message(message_id=501, date=INSTANT, chat=Chat(id=-100, type="supergroup"))]
+
+    bot.send_media_group = partial
+    worker = AdsPublisher(bot, settings, database)
+    await worker.tick()
+    await worker.tick()
+    attempts, parts, schedules = await snapshot(database, settings)
+    assert attempts[0].status == "UNCERTAIN" and schedules[0].status == "PAUSED"
+    assert [p.status for p in parts] == ["UNCERTAIN", "CANCELLED"]
+    assert parts[0].message_ids == [501]
+    assert len([c for c in bot.calls if c[1]["chat_id"] < 0]) == 1
+
+
+async def test_expiry_during_album_preserves_media_and_cancels_buttons(database, settings, clock):
+    _, sid, bot, _, _ = await configured(database, settings, clock, album=True)
+    async with database() as session:
+        (await session.get(AdSchedule, sid)).end_at = clock[0] + timedelta(seconds=1)
+        await session.commit()
+
+    async def expire(kind, args):
+        if kind == "album":
+            clock[0] += timedelta(seconds=1)
+
+    bot.on_send = expire
+    worker = AdsPublisher(bot, settings, database)
+    await worker.tick()
+    await worker.tick()
+    attempts, parts, schedules = await snapshot(database, settings)
+    assert attempts[0].status == "CANCELLED" and schedules[0].status == "EXPIRED"
+    assert [p.status for p in parts] == ["SENT", "CANCELLED"]
+    assert parts[0].message_ids == [100, 101] and len(bot.calls) == 1
+
+
+async def test_content_save_during_api_write_keeps_pinned_revision(database, settings, clock):
+    cid, sid, bot, _, _ = await configured(database, settings, clock)
+
+    async def edit(kind, args):
+        async with database() as session:
+            row = await session.get(AdSchedule, sid)
+            before = row.version, row.next_run_at, row.interval_seconds
+            ads = AdsService(settings, session)
+            draft = await ads.stage(
+                900, cid, 2, "TEXT", {"text": "Changed during send", "entities": []}, "during-send"
+            )
+            await ads.mark_previewed(900, draft.id)
+            await ads.save(900, draft.id)
+            await session.refresh(row)
+            assert (row.version, row.next_run_at, row.interval_seconds) == before
+
+    bot.on_send = edit
+    await AdsPublisher(bot, settings, database).tick()
+    assert bot.calls[0][1]["text"].startswith("Old")
+    bot.on_send = None
+    clock[0] += timedelta(minutes=30)
+    await AdsPublisher(bot, settings, database).tick()
+    assert bot.calls[-1][1]["text"] == "Changed during send"
+
+
+@pytest.mark.parametrize("revoked", ["local", "global"])
+async def test_authority_revoked_before_activation_confirmation(database, settings, clock, revoked):
+    settings.admin_ids, settings.group_owner_id = "900,999", 999
+    cid, sid, bot, _, revision = await configured(database, settings, clock)
+    async with database() as session:
+        pub = PublicationService(settings, session)
+        row = await pub.one(900, cid)
+        row = await pub.control(900, cid, row.version, "PAUSED", bot)
+        confirmation = row.version
+        if revoked == "global":
+            session.add(Administrator(telegram_id=900, active=False, assigned_by=999))
+            await session.commit()
+        else:
+            bot.roles[900] = "member"
+        with pytest.raises(DomainError):
+            await pub.activate(900, cid, confirmation, revision, bot)
+        await session.rollback()
+        row = await session.get(AdSchedule, sid, populate_existing=True)
+        assert row.status == "PAUSED" and row.version == confirmation
+
+
+async def test_simultaneous_floodwaits_keep_longest_global_deadline(database, settings, clock):
+    _, _, bot, _, _ = await configured(database, settings, clock)
+    await configured(database, settings, clock, prefix="other-")
+    async with database() as session:
+        pub = PublicationService(settings, session)
+        assert await pub.enqueue() == 2
+        claims = [await pub.claim(), await pub.claim()]
+    both_sending = asyncio.Event()
+    entered = 0
+
+    async def synchronize(kind, args):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both_sending.set()
+        await asyncio.wait_for(both_sending.wait(), 3)
+
+    bot.on_send = synchronize
+    bot.errors = [
+        TelegramRetryAfter(method=METHOD, message="Wait", retry_after=delay) for delay in [60, 30]
+    ]
+    await asyncio.gather(*(AdsPublisher(bot, settings, database).execute(c) for c in claims))
+    bot.on_send = None
+    clock[0] += timedelta(seconds=31)
+    await AdsPublisher(bot, settings, database).tick()
+    assert len(bot.calls) == 2
+    clock[0] += timedelta(seconds=30)
+    await AdsPublisher(bot, settings, database).tick()
+    attempts, _, _ = await snapshot(database, settings)
+    assert [a.status for a in attempts] == ["SENT", "SENT"] and len(bot.calls) == 4
+
+
+async def test_worker_loop_starts_cancels_and_restarts_without_duplicate(
+    database, settings, clock, monkeypatch
+):
+    from app.bot.ads_publisher import ads_worker
+
+    _, _, bot, _, _ = await configured(database, settings, clock)
+    completed = asyncio.Event()
+    original = AdsPublisher.tick
+
+    async def tick(self):
+        await original(self)
+        completed.set()
+
+    monkeypatch.setattr(AdsPublisher, "tick", tick)
+    for _ in range(2):
+        completed.clear()
+        task = asyncio.create_task(ads_worker(bot, settings, database))
+        try:
+            await asyncio.wait_for(completed.wait(), 5)
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    assert len(bot.calls) == 1
+    assert (await snapshot(database, settings))[0][0].status == "SENT"

@@ -180,6 +180,7 @@ def register_publication_handlers(router: Router) -> None:
             cid, action, value = callback_data.campaign, callback_data.action, callback_data.value
             pub = PublicationService(service.settings, service.session)
             await pub.ads.get(actor, cid)
+            await service.session.commit()
             await callback.answer()
             acknowledged = True
             await state.set_state(None)
