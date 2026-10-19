@@ -114,6 +114,9 @@ async def test_default_interval_requires_actor_bound_confirmation(
 ):
     from app.services import Service
 
+    # The foreign actor is also a global admin: denial must come from operation
+    # ownership, rather than simply failing the global administrator check.
+    settings.admin_ids = "900,901"
     cid, _, _ = await setup(database, settings, clock)
     async with database() as session:
         await Service(settings, session).set_language(900, lang)
