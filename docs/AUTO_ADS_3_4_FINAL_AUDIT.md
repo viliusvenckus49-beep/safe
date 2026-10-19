@@ -3,7 +3,9 @@
 Reviewed foundation: PR #37 HEAD
 `34f975a5922ee7dc69f381b4aa1983e71cda6974`. The 3.4 patch is developed on an
 isolated branch whose base tree is identical to that commit. Final patch/CI
-identities are recorded in the linked pull request. No deployment was performed.
+identities are recorded in [PR #38](https://github.com/viliusvenckus49-beep/safe/pull/38).
+Final audited runtime source: `d9c1fb960b50322818fe89b617d3abe21123d57b`;
+the following documentation-only update records its completed validation. No deployment was performed.
 
 The review is a separate source-reading and adversarial-test pass after initial
 implementation, not a claim that CI or request doubles prove real Telegram delivery.
@@ -52,22 +54,23 @@ advertisements are sent. Request doubles are never reported as live delivery.
 
 | Completed check | Result |
 | --- | --- |
-| Initial complete suite, PostgreSQL 17 + Redis 7.4 | 1,779 passed, four existing Alembic configuration deprecation warnings, 305.17 s |
-| Final complete suite including the last regressions | **1,791 passed before the final index correction**, no skips, four existing Alembic configuration deprecation warnings, **297.42 s** |
-| Customer service/UI/migration tests, including real PostgreSQL and Redis | 94 passed, 29.91 s |
+| Final complete suite, including the retained-grant index regression | **1,792 passed**, no skips, four existing Alembic configuration deprecation warnings, **293.01 s** |
+| New 3.4 customer regression cases in the final complete suite | **95 passed**, including actual PostgreSQL concurrency/rollback and Redis restart |
+| Additional customer-to-worker contract | Passed: next attempt uses customer-saved content, schedule authority/interval unchanged; isolated PostgreSQL, Telegram request double |
 | Ruff check / format check | Passed, 285 files formatted |
 | mypy | Passed, 93 source files |
 | Python compilation | Passed for app, migrations and tests |
 | Alembic upgrade through 0016 and schema drift | Passed; real PostgreSQL migration/retention tests also participate in the complete suite |
 | Production Compose validation | Passed using dummy secret files only |
-| Docker build | Passed, review image `d10c650d86eccff1ba3104931da0446d846c43b2e275f8b99013b4f788ccb99c` |
+| Initial local Docker build (before the index-only correction; final source build is also a CI gate) | Passed, review image `d10c650d86eccff1ba3104931da0446d846c43b2e275f8b99013b4f788ccb99c` |
 | Packaged worker startup/shutdown | Passed, read-only image, no network, disposable tmpfs SQLite |
 
 Final GitHub CI is a separate remote gate. Its run IDs/conclusions are recorded
 in the PR validation section after completion; use the branch-specific badge and
 PR checks for the final remote head. Local request doubles are not substituted
 for live Telegram verification. The customer cases extend the unchanged 1,697-test foundation. Final index
-correction validation and remote run evidence are recorded in the PR. No unrelated user worktree edits were included.
+correction validation is included above. Remote run IDs/conclusions are recorded
+in the [PR validation section](https://github.com/viliusvenckus49-beep/safe/pull/38). No unrelated user worktree edits were included.
 
 [![3.4 quality checks](https://github.com/viliusvenckus49-beep/safe/actions/workflows/ci.yml/badge.svg?branch=auto-ads-3-4-20261019)](https://github.com/viliusvenckus49-beep/safe/actions?query=branch%3Aauto-ads-3-4-20261019)
 
