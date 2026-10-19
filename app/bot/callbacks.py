@@ -65,3 +65,15 @@ class AdsPreview(CallbackData, prefix="ab3"):
     source: str
     row: int
     column: int
+
+
+class AdPublication(CallbackData, prefix="ap3"):
+    action: str
+    campaign: int
+    value: str = ""
+
+
+class PublishedAd(CallbackData, prefix="apb"):
+    attempt: int
+    row: int
+    column: int

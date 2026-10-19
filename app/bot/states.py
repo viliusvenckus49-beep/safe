@@ -56,3 +56,7 @@ class LocalModerationFlow(StatesGroup):
 
 class AdsFlow(StatesGroup):
     input = State()
+
+
+class AdScheduleFlow(StatesGroup):
+    input = State()

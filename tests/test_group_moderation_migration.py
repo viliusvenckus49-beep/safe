@@ -17,6 +17,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_TABLES = {
+    "ad_publication_gate",
+    "ad_schedules",
+    "ad_publication_attempts",
+    "ad_publication_parts",
     "group_moderation_settings",
     "group_sanctions",
     "group_sanction_jobs",

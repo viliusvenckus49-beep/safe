@@ -28,7 +28,7 @@ from app.ads_content import (
     validate_content,
 )
 from app.ads_services import AdsService
-from app.bot.callbacks import AdsAction, AdsPreview
+from app.bot.callbacks import AdPublication, AdsAction, AdsPreview, PublishedAd
 from app.bot.keyboards import action, keyboard
 from app.bot.local_admin import display
 from app.bot.states import AdsFlow
@@ -115,6 +115,7 @@ async def campaign_panel(
         for field in ("TEXT", "MEDIA", "BUTTONS")
     ]
     rows += [
+        [(t("ap.manage"), AdPublication(action="panel", campaign=campaign.id).pack())],
         [(t("ads.full"), cb("preview", campaign.id, "FULL"))],
         [(t("ads.history"), cb("history", campaign.id))],
         [(t("ads.delete"), cb("delete", campaign.id, str(campaign.version)))],
@@ -159,7 +160,9 @@ async def draft_panel(
     await display(message, t("ads.title") + "\n\n" + text, keyboard(rows), edit=edit)
 
 
-def preview_keyboard(content: dict, source: str) -> InlineKeyboardMarkup | None:
+def preview_keyboard(
+    content: dict, source: str, *, public_attempt: int | None = None
+) -> InlineKeyboardMarkup | None:
     rows = []
     for r, row in enumerate(content["buttons"]):
         buttons = []
@@ -177,7 +180,11 @@ def preview_keyboard(content: dict, source: str) -> InlineKeyboardMarkup | None:
             elif kind == "copy":
                 args["copy_text"] = CopyTextButton(text=value)
             else:
-                args["callback_data"] = AdsPreview(source=source, row=r, column=c).pack()
+                args["callback_data"] = (
+                    PublishedAd(attempt=public_attempt, row=r, column=c).pack()
+                    if public_attempt is not None
+                    else AdsPreview(source=source, row=r, column=c).pack()
+                )
             buttons.append(InlineKeyboardButton(**args))
         rows.append(buttons)
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None

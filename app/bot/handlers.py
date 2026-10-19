@@ -12,6 +12,7 @@ from app.bot import keyboards as kb
 from app.bot import redsafe_profile as rp
 from app.bot.administrators import register_administrator_handlers
 from app.bot.ads import register_ads_handlers
+from app.bot.ads_schedule import register_publication_handlers
 from app.bot.callbacks import (
     Action,
     Language,
@@ -193,6 +194,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     router.callback_query.outer_middleware(middleware)
     register_local_handlers(router)
     register_ads_handlers(router)
+    register_publication_handlers(router)
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext, service: Service) -> None:

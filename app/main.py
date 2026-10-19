@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from app import __version__
 from app.bot import create_router
+from app.bot.ads_publisher import ads_worker
 from app.bot.commands import commands, group_commands, user_commands
 from app.bot.errors import error_response
 from app.bot.group_runtime import group_worker
@@ -40,6 +41,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
     storage: BaseStorage | None = None
     isolation: BaseEventIsolation | None = None
     worker: asyncio.Task[None] | None = None
+    advertising: asyncio.Task[None] | None = None
     health: RuntimeHealth | None = None
     relay: GroupHelpRelay | None = None
     try:
@@ -115,6 +117,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         worker = asyncio.create_task(
             group_worker(bot, settings, sessions, on_progress=health.worker), name="group-worker"
         )
+        advertising = asyncio.create_task(ads_worker(bot, settings, sessions), name="ads-worker")
         await dispatcher.start_polling(bot, close_bot_session=False)
     finally:
         if health:
@@ -123,6 +126,12 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
             worker.cancel()
             try:
                 await worker
+            except asyncio.CancelledError:
+                pass
+        if advertising:
+            advertising.cancel()
+            try:
+                await advertising
             except asyncio.CancelledError:
                 pass
         set_relay(None)

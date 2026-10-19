@@ -47,3 +47,41 @@ jobs:
       - run: mypy
       - run: DATABASE_URL=sqlite+aiosqlite:////tmp/safecheck-ci.db alembic upgrade head
       - run: docker build -t safecheck:ci .
+      - name: Start packaged ADS worker without network or runtime secrets
+        run: |
+          docker run --rm -i --network none --read-only --entrypoint python safecheck:ci - <<'PY'
+          import asyncio
+          from datetime import UTC, datetime
+          from types import SimpleNamespace
+          from app.ads_schedule import local_datetime
+          from app.bot.ads_publisher import AdsPublisher, ads_worker
+          from app.config import Settings
+          from app.db import create_database
+          from app.models import Base
+
+          async def smoke():
+              assert local_datetime('2026-11-20 12:00') == datetime(2026,11,20,10,tzinfo=UTC)
+              engine, sessions = create_database('sqlite+aiosqlite:///:memory:')
+              async with engine.begin() as connection:
+                  await connection.run_sync(Base.metadata.create_all)
+              completed = asyncio.Event()
+              original = AdsPublisher.tick
+              async def tick(self):
+                  await original(self)
+                  completed.set()
+              AdsPublisher.tick = tick
+              settings = Settings(bot_token='123456:TEST_ONLY', admin_ids='900', _env_file=None)
+              task = asyncio.create_task(ads_worker(SimpleNamespace(id=777), settings, sessions))
+              try:
+                  await asyncio.wait_for(completed.wait(), 10)
+              finally:
+                  task.cancel()
+                  try:
+                      await task
+                  except asyncio.CancelledError:
+                      pass
+                  await engine.dispose()
+              print('ADS worker startup and shutdown: OK (no Telegram network)')
+
+          asyncio.run(smoke())
+          PY

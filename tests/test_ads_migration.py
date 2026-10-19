@@ -76,6 +76,12 @@ async def test_postgres_actual_migration_preserves_legacy_schema_and_rows(postgr
             function()
 
     async with engine.begin() as connection:
+        publication = importlib.util.spec_from_file_location(
+            "publication_migration", ROOT / "migrations/versions/0014_ad_publication.py"
+        )
+        publication_module = importlib.util.module_from_spec(publication)
+        publication.loader.exec_module(publication_module)
+        await connection.run_sync(lambda c: run(c, publication_module.downgrade))
         await connection.run_sync(lambda c: run(c, module.downgrade))
         for sql in SEED + LOCAL_SEED:
             await connection.execute(text(sql))
