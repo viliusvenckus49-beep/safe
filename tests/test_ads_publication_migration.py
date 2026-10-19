@@ -11,6 +11,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import inspect, text
+from test_ads_customers_migration import remove_customer_schema
 from test_group_moderation_migration import SEED
 from test_integration_contracts import postgres_contract as postgres_contract
 
@@ -77,6 +78,7 @@ async def test_postgres_0014_ddl_and_all_legacy_rows(postgres_contract):
             function()
 
     async with engine.begin() as connection:
+        await connection.run_sync(remove_customer_schema)
         global_spec = importlib.util.spec_from_file_location(
             "global_migration",
             ROOT / "migrations/versions/0015_global_ads_assignments_operations_and_.py",

@@ -11,6 +11,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import inspect, text
+from test_ads_customers_migration import remove_customer_schema
 from test_ads_publication_migration import ADS_SEED
 from test_group_moderation_migration import SEED
 from test_integration_contracts import postgres_contract as postgres_contract
@@ -90,6 +91,7 @@ async def test_postgres_0015_actual_ddl_and_retention(postgres_contract):
             function()
 
     async with engine.begin() as conn:
+        await conn.run_sync(remove_customer_schema)
         await conn.run_sync(lambda c: run(c, module.downgrade))
         for sql in SEED + ADS_SEED:
             await conn.execute(text(sql))

@@ -16,7 +16,14 @@ from app.admin_services import AdminService
 from app.ads_content import EMPTY, validate_content
 from app.errors import DomainError
 from app.group_authorization import numeric_id
-from app.models import AdCampaign, AdContentDraft, AdContentVersion, AuditEvent, now
+from app.models import (
+    AdCampaign,
+    AdContentDraft,
+    AdContentVersion,
+    AdCustomerDraft,
+    AuditEvent,
+    now,
+)
 from app.moderation_services import utc
 from app.repositories import Repository
 
@@ -39,7 +46,7 @@ class AdsService:
             await self.authorize(actor)
             yield
             await self.session.commit()
-        except Exception:
+        except BaseException:
             await self.session.rollback()
             raise
 
@@ -139,6 +146,13 @@ class AdsService:
             self.audit(actor, "created", campaign.id, revision=1)
         return campaign
 
+    async def draft_grant(self, actor: int, campaign_id: int) -> int | None:
+        return None
+
+    async def check_draft_scope(self, actor: int, draft: AdContentDraft) -> None:
+        if await self.session.get(AdCustomerDraft, draft.id, populate_existing=True):
+            raise DomainError("forbidden")
+
     async def stage(
         self, actor: int, campaign_id: int, base: int, field: str, value: Any, request: str
     ) -> AdContentDraft:
@@ -169,6 +183,7 @@ class AdsService:
                     previous.request_fingerprint,
                 ) != (actor, campaign_id, base, field, fingerprint):
                     raise DomainError("ads_stale")
+                await self.check_draft_scope(actor, previous)
                 return previous
             if campaign.version != base:
                 raise DomainError("ads_conflict")
@@ -202,6 +217,17 @@ class AdsService:
                 expires_at=now() + timedelta(hours=1),
             )
             self.session.add(draft)
+            grant_id = await self.draft_grant(actor, campaign_id)
+            if grant_id is not None:
+                await self.session.flush()
+                self.session.add(
+                    AdCustomerDraft(
+                        draft_id=draft.id,
+                        grant_id=grant_id,
+                        campaign_id=campaign_id,
+                        customer_id=actor,
+                    )
+                )
             self.audit(
                 actor,
                 "draft_created",
@@ -218,6 +244,7 @@ class AdsService:
         if row is None or row.actor_id != actor:
             raise DomainError("ads_stale")
         campaign = await self.get(actor, row.campaign_id)
+        await self.check_draft_scope(actor, row)
         if editable and (row.status not in {"READY", "COLLECTING"} or utc(row.expires_at) <= now()):
             raise DomainError("ads_stale")
         if editable and campaign.version != row.base_version:
@@ -232,6 +259,9 @@ class AdsService:
                 .join(AdCampaign)
                 .where(
                     AdContentDraft.actor_id == actor,
+                    ~select(AdCustomerDraft.draft_id)
+                    .where(AdCustomerDraft.draft_id == AdContentDraft.id)
+                    .exists(),
                     AdContentDraft.status.in_(("READY", "COLLECTING")),
                     AdContentDraft.expires_at > now(),
                     AdCampaign.status == "DRAFT",

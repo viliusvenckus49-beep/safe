@@ -8,6 +8,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -754,3 +755,85 @@ class AdChatPublicationGate(Base):
     chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
     next_send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     __table_args__ = (CheckConstraint("chat_id < 0", name="ck_ad_chat_gate_id"),)
+
+
+class AdCustomerGrant(Base):
+    """Retained assignments; revocation never resurrects an older grant."""
+
+    __tablename__ = "ad_customer_grants"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"))
+    customer_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(8), default="ACTIVE")
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    editing_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    assigned_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    revoked_by: Mapped[int | None] = mapped_column(BigInteger)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint(
+            "customer_id > 0 AND assigned_by > 0 AND version > 0", name="ck_ad_grant_ids"
+        ),
+        CheckConstraint(
+            "(status = 'ACTIVE' AND revoked_at IS NULL AND revoked_by IS NULL) OR (status = 'REVOKED' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revoked_by > 0)",
+            name="ck_ad_grant_status",
+        ),
+        UniqueConstraint("id", "campaign_id", "customer_id", name="uq_ad_grant_identity"),
+        Index(
+            "uq_ad_active_customer",
+            "campaign_id",
+            unique=True,
+            sqlite_where=text("status = 'ACTIVE'"),
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+        Index("ix_ad_customer_campaigns", "customer_id", "status", "campaign_id"),
+        Index("ix_ad_grant_campaign", "campaign_id", "id"),
+    )
+
+
+class AdCustomerDraft(Base):
+    """Capability binding, committed atomically with the existing content draft."""
+
+    __tablename__ = "ad_customer_drafts"
+    draft_id: Mapped[str] = mapped_column(ForeignKey("ad_content_drafts.id"), primary_key=True)
+    grant_id: Mapped[int] = mapped_column()
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"))
+    customer_id: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["grant_id", "campaign_id", "customer_id"],
+            [
+                "ad_customer_grants.id",
+                "ad_customer_grants.campaign_id",
+                "ad_customer_grants.customer_id",
+            ],
+            name="fk_ad_draft_customer",
+        ),
+    )
+
+
+class AdCustomerLink(Base):
+    __tablename__ = "ad_customer_links"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    grant_id: Mapped[int] = mapped_column(ForeignKey("ad_customer_grants.id"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(8), default="ACTIVE")
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    revoked_by: Mapped[int | None] = mapped_column(BigInteger)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("length(token_hash) = 64 AND created_by > 0", name="ck_ad_link_hash"),
+        CheckConstraint(
+            "(status = 'ACTIVE' AND revoked_at IS NULL AND revoked_by IS NULL) OR (status = 'REVOKED' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revoked_by > 0)",
+            name="ck_ad_link_status",
+        ),
+        Index(
+            "uq_ad_active_link",
+            "grant_id",
+            unique=True,
+            sqlite_where=text("status = 'ACTIVE'"),
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+    )
