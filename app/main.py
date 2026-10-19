@@ -42,6 +42,8 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
     isolation: BaseEventIsolation | None = None
     worker: asyncio.Task[None] | None = None
     advertising: asyncio.Task[None] | None = None
+    polling: asyncio.Task[None] | None = None
+    dispatcher: Dispatcher | None = None
     health: RuntimeHealth | None = None
     relay: GroupHelpRelay | None = None
     try:
@@ -71,7 +73,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         if settings.group_help_enabled:
             relay = await GroupHelpRelay.connect(settings, sessions)
             set_relay(relay)
-        health = RuntimeHealth()
+        health = RuntimeHealth(advertising=True)
         bot = Bot(
             settings.bot_token.get_secret_value(),
             session=telegram_session(settings, on_poll=health.polling, icon_fallback=True),
@@ -117,33 +119,75 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         worker = asyncio.create_task(
             group_worker(bot, settings, sessions, on_progress=health.worker), name="group-worker"
         )
-        advertising = asyncio.create_task(ads_worker(bot, settings, sessions), name="ads-worker")
-        await dispatcher.start_polling(bot, close_bot_session=False)
+        advertising = asyncio.create_task(
+            ads_worker(bot, settings, sessions, on_progress=health.advertising), name="ads-worker"
+        )
+        polling = asyncio.create_task(
+            dispatcher.start_polling(bot, close_bot_session=False), name="telegram-polling"
+        )
+        done, _ = await asyncio.wait(
+            (polling, worker, advertising), return_when=asyncio.FIRST_COMPLETED
+        )
+        # A background worker must never die silently while polling looks healthy.
+        for task in (worker, advertising):
+            if task in done:
+                if not task.cancelled() and task.exception() is not None:
+                    task.result()
+                raise RuntimeError(f"Required task stopped: {task.get_name()}")
+        polling.result()
     finally:
-        if health:
-            health.close()
-        if worker:
-            worker.cancel()
+        primary_error = sys.exception()
+        # Let aiogram join its own polling/stop-signal children before cancelling
+        # its parent. Cancelling start_polling directly can orphan those children.
+        for background_task in (worker, advertising):
+            if background_task is not None:
+                background_task.cancel()
+        if polling and not polling.done() and dispatcher:
             try:
-                await worker
-            except asyncio.CancelledError:
-                pass
-        if advertising:
-            advertising.cancel()
-            try:
-                await advertising
-            except asyncio.CancelledError:
-                pass
+                await asyncio.wait_for(dispatcher.stop_polling(), 5)
+            except (RuntimeError, TimeoutError):
+                pass  # Startup may have failed before polling acquired its lock.
+        tasks = [task for task in (polling, worker, advertising) if task is not None]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        # aiogram keeps concurrently handled updates separately from polling.
+        # Stop accepting updates first, then drain/cancel them before closing DB.
+        updates = set(getattr(dispatcher, "_handle_update_tasks", ()))
+        if updates:
+            _, pending = await asyncio.wait(updates, timeout=5)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*updates, return_exceptions=True)
         set_relay(None)
-        if relay:
-            await relay.close()
-        if isolation:
-            await isolation.close()
-        if storage:
-            await storage.close()
+        health_error = False
+        if health:
+            try:
+                health.close()
+            except OSError as error:
+                health_error = True
+                log.error("shutdown_failed", resource="health", exception_type=type(error).__name__)
+
+        async def close_resource(name, close):
+            try:
+                await asyncio.wait_for(close(), 10)
+            except Exception as error:
+                log.error("shutdown_failed", resource=name, exception_type=type(error).__name__)
+                return False
+            return True
+
+        # One failing closer must not leak every remaining resource or hide the
+        # failure that triggered shutdown. Redis storage/isolation share a client.
+        clean = not health_error
+        for name, resource in (("relay", relay), ("isolation", isolation), ("storage", storage)):
+            if resource is not None:
+                clean = await close_resource(name, resource.close) and clean
         if bot:
-            await bot.session.close()
-        await engine.dispose()
+            clean = await close_resource("bot", bot.session.close) and clean
+        clean = await close_resource("database", engine.dispose) and clean
+        if not clean and primary_error is None:
+            raise RuntimeError("Runtime cleanup failed")
 
 
 def run() -> None:

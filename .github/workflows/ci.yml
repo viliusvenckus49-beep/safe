@@ -89,3 +89,10 @@ jobs:
 
           asyncio.run(smoke())
           PY
+      - name: Start packaged bot and all workers without network or runtime secrets
+        run: |
+          docker run --rm -i --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=32m --entrypoint python safecheck:ci - < tests/run_runtime_smoke.py
+      - name: Rehearse PostgreSQL backup and restore in disposable Compose project
+        run: |
+          docker tag safecheck:ci safecheck:3.5.0-ci
+          SAFECHECK_ACCEPTANCE_IMAGE=safecheck:3.5.0-ci PYTHONPATH=. python tests/run_operations_acceptance.py

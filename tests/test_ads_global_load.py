@@ -7,10 +7,11 @@ not Telegram throughput; normal defaults enforce 20 msg/s globally and 20/min/ch
 import asyncio
 import json
 import os
+import resource
 import time
 
 import pytest
-from sqlalchemy import func, insert, select
+from sqlalchemy import event, func, insert, select
 from test_ads_publication import INSTANT, configured
 from test_ads_publication import clock as clock
 from test_integration_contracts import postgres_contract as postgres_contract
@@ -49,6 +50,30 @@ async def test_synthetic_multi_group_capacity(postgres_contract, clock, count):
             ],
         )
         await session.commit()
+    metrics = {"sql_queries": 0, "sql_elapsed_s": 0.0, "connections": 0, "peak_connections": 0}
+    engine = sessions.kw["bind"].sync_engine
+
+    def before(conn, cursor, statement, parameters, context, many):
+        context._load_started = time.perf_counter()
+        metrics["sql_queries"] += 1
+
+    def after(conn, cursor, statement, parameters, context, many):
+        metrics["sql_elapsed_s"] += time.perf_counter() - context._load_started
+
+    def checkout(*args):
+        metrics["connections"] += 1
+        metrics["peak_connections"] = max(metrics["peak_connections"], metrics["connections"])
+
+    def checkin(*args):
+        metrics["connections"] -= 1
+
+    for name, listener in (
+        ("before_cursor_execute", before),
+        ("after_cursor_execute", after),
+        ("checkout", checkout),
+        ("checkin", checkin),
+    ):
+        event.listen(engine, name, listener)
     started = time.perf_counter()
     scheduled = 0
     while scheduled < count:
@@ -73,6 +98,13 @@ async def test_synthetic_multi_group_capacity(postgres_contract, clock, count):
             task.cancel()
         await asyncio.gather(*publisher.inflight, return_exceptions=True)
     completed = time.perf_counter()
+    for name, listener in (
+        ("before_cursor_execute", before),
+        ("after_cursor_execute", after),
+        ("checkout", checkout),
+        ("checkin", checkin),
+    ):
+        event.remove(engine, name, listener)
     async with sessions() as session:
         sent = await session.scalar(
             select(func.count())
@@ -83,12 +115,16 @@ async def test_synthetic_multi_group_capacity(postgres_contract, clock, count):
         assert await session.scalar(select(func.count()).select_from(AdPublicationAttempt)) == count
     assert len(bot.calls) == count and len({args["chat_id"] for _, args in bot.calls}) == count
     print(
-        "ADS33_LOAD "
+        "ADS35_LOAD "
         + json.dumps(
             {
                 "groups": count,
                 "pool": settings.ads_worker_concurrency,
                 "logical_cpus": os.cpu_count(),
+                "sql_queries": metrics["sql_queries"],
+                "sql_elapsed_aggregate_s": round(metrics["sql_elapsed_s"], 3),
+                "peak_sql_connections": metrics["peak_connections"],
+                "process_peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
                 "enqueue_s": round(enqueued - started, 3),
                 "delivery_s": round(completed - enqueued, 3),
                 "total_s": round(completed - started, 3),

@@ -1,6 +1,7 @@
 """Durable ADS worker. Never retry an ambiguous Telegram write."""
 
 import asyncio
+from collections.abc import Callable
 from html import escape
 from typing import Any
 
@@ -94,8 +95,15 @@ async def send_part(bot: Any, attempt: Any, part: Any, version: Any) -> list[int
 
 
 class AdsPublisher:
-    def __init__(self, bot: Any, settings: Any, sessions: Any):
+    def __init__(
+        self,
+        bot: Any,
+        settings: Any,
+        sessions: Any,
+        on_progress: Callable[[str], None] | None = None,
+    ):
         self.bot, self.settings, self.sessions = bot, settings, sessions
+        self.on_progress = on_progress or (lambda phase: None)
         self.background = False
         self.inflight: set[asyncio.Task] = set()
 
@@ -304,6 +312,7 @@ class AdsPublisher:
             try:
                 async with self.sessions() as session:
                     await PublicationService(self.settings, session).enqueue(limit=128)
+                self.on_progress("plan")
             except Exception as error:
                 log.error("ads_planning_failed", exception_type=type(error).__name__)
             await asyncio.sleep(0.5)
@@ -323,12 +332,14 @@ class AdsPublisher:
                             .limit(4)
                         )
                     )
+                self.on_progress("coord")
                 for oid in operations:
                     async with self.sessions() as session:
                         await GlobalAdsService(self.settings, session).run(oid, self.bot)
+                    self.on_progress("coord")
                 async with self.sessions() as session:
                     await GlobalAdsService(self.settings, session).reconcile(
-                        self.bot, groups_per_policy=8
+                        self.bot, groups_per_policy=8, on_progress=lambda: self.on_progress("coord")
                     )
                 async with self.sessions() as session:
                     attempts = list(
@@ -348,28 +359,40 @@ class AdsPublisher:
                             .limit(10)
                         )
                     )
+                self.on_progress("coord")
                 for aid in attempts:
                     await self.notify(aid)
+                    self.on_progress("coord")
                 for sid in policies:
                     await self.notify_policy(sid)
+                    self.on_progress("coord")
             except Exception as error:
                 log.error("ads_coordination_failed", exception_type=type(error).__name__)
             await asyncio.sleep(1)
 
 
-async def ads_worker(bot: Any, settings: Any, sessions: Any) -> None:
-    publisher = AdsPublisher(bot, settings, sessions)
+async def ads_worker(
+    bot: Any, settings: Any, sessions: Any, *, on_progress: Callable[[str], None] | None = None
+) -> None:
+    publisher = AdsPublisher(bot, settings, sessions, on_progress)
     # Complete the first planning cycle before dispatching; a separate loop keeps
     # scheduling responsive while a Telegram call in one pool slot is slow.
     async with sessions() as session:
         await PublicationService(settings, session).enqueue(limit=128)
+    publisher.on_progress("plan")
     publisher.background = True
     planning = asyncio.create_task(publisher.planning())
     coordination = asyncio.create_task(publisher.coordination())
     try:
         while True:
+            for task in (planning, coordination):
+                if task.done():
+                    if not task.cancelled() and task.exception() is not None:
+                        task.result()
+                    raise RuntimeError("Required ADS loop stopped")
             try:
                 await publisher.tick()
+                publisher.on_progress("dispatch")
             except Exception as error:
                 log.error("ads_worker_failed", exception_type=type(error).__name__)
             await asyncio.sleep(0.1)
