@@ -124,11 +124,21 @@ async def profile_data(service: Any, bot: Any, target: str) -> dict[str, Any]:
     # Release identity locks before contacting Telegram. Membership is never inferred from backups.
     await session.commit()
 
+    # Share the bound across concurrent profiles using this bot, not just within
+    # one request. No cached membership/authority is inferred from this limiter.
+    membership_slots = getattr(bot, "_redsafe_membership_slots", None)
+    if membership_slots is None:
+        membership_slots = asyncio.Semaphore(8)
+        bot._redsafe_membership_slots = membership_slots
+
     async def member(group: ManagedGroup) -> bool:
         if not user.telegram_id:
             return False
         try:
-            result = await asyncio.wait_for(bot.get_chat_member(group.chat_id, user.telegram_id), 3)
+            async with membership_slots:
+                result = await asyncio.wait_for(
+                    bot.get_chat_member(group.chat_id, user.telegram_id), 3
+                )
             return result.status in {"member", "administrator", "creator"} or (
                 result.status == "restricted" and bool(getattr(result, "is_member", False))
             )

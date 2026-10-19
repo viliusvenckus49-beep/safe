@@ -780,7 +780,7 @@ class GlobalAdsService:
                 op.status = "DONE"
                 self.ads.audit(op.actor_id, "global_done", op.campaign_id, operation_id=oid)
 
-    async def reconcile(self, bot, *, groups_per_policy=32):
+    async def reconcile(self, bot, *, groups_per_policy=32, on_progress=None):
         ids = list(
             await self.session.scalars(
                 select(AdAssignmentPolicy.campaign_id)
@@ -839,6 +839,8 @@ class GlobalAdsService:
                     )
                 )
                 await self.session.commit()
+                if on_progress:
+                    on_progress()
                 if exists:
                     continue
                 try:

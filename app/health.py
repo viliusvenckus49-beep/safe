@@ -9,9 +9,17 @@ from pathlib import Path
 
 
 class RuntimeHealth:
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None, *, advertising: bool = False):
         self.path = path or Path(os.getenv("HEALTH_PATH", "/tmp/safecheck-health.json"))
-        self.progress = {"started_at": time.time(), "poll_at": 0.0, "worker_at": 0.0}
+        self.progress: dict[str, float | bool] = {
+            "started_at": time.time(),
+            "poll_at": 0.0,
+            "worker_at": 0.0,
+        }
+        if advertising:
+            self.progress.update(
+                ads_required=True, ads_plan_at=0.0, ads_dispatch_at=0.0, ads_coord_at=0.0
+            )
         self._write()
 
     def _write(self) -> None:
@@ -29,6 +37,16 @@ class RuntimeHealth:
         self.progress["worker_at"] = time.time()
         self._write()
 
+    def advertising(self, phase: str) -> None:
+        if phase not in {"plan", "dispatch", "coord"}:
+            raise ValueError("Unknown advertising phase")
+        key = f"ads_{phase}_at"
+        current = time.time()
+        # Dispatch checks can run ten times a second. Persist at most once/s.
+        if current - self.progress.get(key, 0.0) >= 1:
+            self.progress[key] = current
+            self._write()
+
     def close(self) -> None:
         self.path.unlink(missing_ok=True)
 
@@ -39,12 +57,15 @@ def healthy(path: Path, max_age: float = 180, *, current: float | None = None) -
         if not math.isfinite(max_age) or max_age <= 0:
             return False
         data = json.loads(path.read_text())
+        keys = ["poll_at", "worker_at"]
+        if data.get("ads_required") is True:
+            keys += ["ads_plan_at", "ads_dispatch_at", "ads_coord_at"]
         return all(
             isinstance(data.get(key), (int, float))
             and not isinstance(data[key], bool)
             and math.isfinite(data[key])
             and 0 <= current - data[key] <= max_age
-            for key in ("poll_at", "worker_at")
+            for key in keys
         )
     except (OSError, ValueError, TypeError, AttributeError):
         return False
@@ -58,7 +79,10 @@ def snapshot(path: Path | None = None) -> dict:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
         data = {}
-    for label, key in (("uptime", "started_at"), ("poll", "poll_at"), ("worker", "worker_at")):
+    signals = [("uptime", "started_at"), ("poll", "poll_at"), ("worker", "worker_at")]
+    if isinstance(data, dict) and data.get("ads_required") is True:
+        signals += [(f"ads_{phase}", f"ads_{phase}_at") for phase in ("plan", "dispatch", "coord")]
+    for label, key in signals:
         value = data.get(key) if isinstance(data, dict) else None
         result[label] = (
             int(current - value)
