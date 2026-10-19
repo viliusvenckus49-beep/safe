@@ -229,3 +229,63 @@ for _lang, _values in _STATES.items():
             )
         }
     )
+
+# Public receipts share the existing language selection, without altering panel text.
+NOTICE = {
+    "lt": {
+        "user": "Naudotojas",
+        "id": "ID",
+        "duration": "Trukmė",
+        "reason": "Priežastis",
+        "admin": "Administratorius",
+        "warnings": "Įspėjimai",
+        "permanent": "Neterminuotai",
+        "minute.one": "minutė",
+        "minute.few": "minutės",
+        "minute.other": "minučių",
+        "hour.one": "valanda",
+        "hour.few": "valandos",
+        "hour.other": "valandų",
+        "day.one": "diena",
+        "day.few": "dienos",
+        "day.other": "dienų",
+    },
+    "en": {
+        "user": "User",
+        "id": "ID",
+        "duration": "Duration",
+        "reason": "Reason",
+        "admin": "Admin",
+        "warnings": "Warnings",
+        "permanent": "Permanent",
+        "minute.one": "minute",
+        "minute.few": "minutes",
+        "minute.other": "minutes",
+        "hour.one": "hour",
+        "hour.few": "hours",
+        "hour.other": "hours",
+        "day.one": "day",
+        "day.few": "days",
+        "day.other": "days",
+    },
+    "ru": {
+        "user": "Пользователь",
+        "id": "ID",
+        "duration": "Срок",
+        "reason": "Причина",
+        "admin": "Администратор",
+        "warnings": "Предупреждения",
+        "permanent": "Бессрочно",
+        "minute.one": "минута",
+        "minute.few": "минуты",
+        "minute.other": "минут",
+        "hour.one": "час",
+        "hour.few": "часа",
+        "hour.other": "часов",
+        "day.one": "день",
+        "day.few": "дня",
+        "day.other": "дней",
+    },
+}
+for _lang, _labels in NOTICE.items():
+    CATALOGS[_lang].update({"lm.notice." + key: value for key, value in _labels.items()})
