@@ -53,3 +53,15 @@ class LocalAction(CallbackData, prefix="lm2", sep="|"):
     action: str
     chat: int = 0
     value: str = ""
+
+
+class AdsAction(CallbackData, prefix="ad3"):
+    action: str
+    campaign: int = 0
+    value: str = ""
+
+
+class AdsPreview(CallbackData, prefix="ab3"):
+    source: str
+    row: int
+    column: int

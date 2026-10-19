@@ -52,3 +52,7 @@ class ScamAdminFlow(StatesGroup):
 
 class LocalModerationFlow(StatesGroup):
     target = State()
+
+
+class AdsFlow(StatesGroup):
+    input = State()

@@ -8,6 +8,7 @@ from typing import Any
 import structlog
 
 from app.locales.administrators import CATALOGS as ADMINISTRATORS
+from app.locales.ads import CATALOGS as ADS
 from app.locales.button_icons import CATALOGS as BUTTON_ICONS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
@@ -46,6 +47,7 @@ CATALOGS = {
         **SCAM_MANAGEMENT[lang],
         **DIAGNOSTICS[lang],
         **LOCAL_MODERATION[lang],
+        **ADS[lang],
     }
     for lang in LANGUAGES
 }
