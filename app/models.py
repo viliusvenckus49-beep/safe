@@ -477,6 +477,50 @@ class GroupModerationDraft(Base):
     )
 
 
+class GroupWarningEscalation(Base):
+    """One durable, group-scoped escalation per triggering warning."""
+
+    __tablename__ = "group_warning_escalations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"))
+    telegram_id: Mapped[int] = mapped_column(BigInteger)
+    trigger_id: Mapped[int] = mapped_column(ForeignKey("group_sanctions.id"), unique=True)
+    sanction_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"), unique=True)
+    draft_id: Mapped[str | None] = mapped_column(ForeignKey("group_moderation_drafts.id"))
+    state: Mapped[str] = mapped_column(String(16), default="PENDING")
+    result: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("telegram_id > 0", name="ck_warning_escalation_user"),
+        CheckConstraint(
+            "state IN ('PENDING','SUCCEEDED','FAILED','UNCERTAIN','CANCELLED')",
+            name="ck_warning_escalation_state",
+        ),
+        Index("ix_warning_escalation_target", "chat_id", "telegram_id", "state"),
+    )
+
+
+class GroupWarningReset(Base):
+    """Expiring confirmation bound to an actor, public receipt and warning set."""
+
+    __tablename__ = "group_warning_resets"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    origin_id: Mapped[int] = mapped_column(ForeignKey("group_sanctions.id"))
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    max_warning_id: Mapped[int] = mapped_column()
+    expected_count: Mapped[int] = mapped_column()
+    state: Mapped[str] = mapped_column(String(16), default="PENDING")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("actor_id > 0 AND expected_count > 0", name="ck_warning_reset_actor_count"),
+        CheckConstraint(
+            "state IN ('PENDING','CONFIRMED','CANCELLED')", name="ck_warning_reset_state"
+        ),
+    )
+
+
 class AdCampaign(Base):
     """Stage 3.1 campaigns are drafts only; content never stores publishing settings."""
 

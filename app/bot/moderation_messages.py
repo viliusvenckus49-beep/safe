@@ -11,13 +11,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.i18n import language, t
-from app.models import GroupModerationDraft, GroupSanction, User
+from app.models import GroupModerationDraft, GroupSanction, GroupWarningEscalation, User
 from app.moderation_services import utc
 
 BRAND = "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™"
 HEADINGS = {
     "BAN": "⛔️ 𝗨𝗦𝗘𝗥 • 𝗕𝗔𝗡𝗡𝗘𝗗",
-    "WARN": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
+    "WARN": "⚠️ NAUDOTOJAS ĮSPĖTAS",
     "MUTE": "🔇 𝗨𝗦𝗘𝗥 • 𝗠𝗨𝗧𝗘𝗗",
     "KICK": "🚪 𝗨𝗦𝗘𝗥 • 𝗞𝗜𝗖𝗞𝗘𝗗",
     "UNBAN": "🔓 𝗨𝗦𝗘𝗥 • 𝗨𝗡𝗕𝗔𝗡𝗡𝗘𝗗",
@@ -99,10 +99,11 @@ async def identity_labels(
 
 
 def identity_fields(telegram_id: int, label: str) -> str:
-    return (
-        f"👤 <b>{t('lm.notice.user')}:</b> {escape(compact(label))}"
-        f"\n🆔 <b>{t('lm.notice.id')}:</b> <code>{telegram_id}</code>"
-    )
+    fields = []
+    if compact(label) != str(telegram_id):
+        fields.append(f"👤 <b>{t('lm.notice.user')}:</b> {escape(compact(label))}")
+    fields.append(f"🆔 <b>{t('lm.notice.id')}:</b> <code>{telegram_id}</code>")
+    return "\n".join(fields)
 
 
 def duration_text(seconds: int | None, kind: str) -> str:
@@ -150,17 +151,16 @@ def format_success(
     warnings: int | None = None,
 ) -> str:
     """Labels use real HTML bold; every external value is escaped exactly once."""
-    fields = [
-        HEADINGS[kind],
-        f"👤 <b>{t('lm.notice.user')}:</b> {escape(compact(user))}",
-        f"🆔 <b>{t('lm.notice.id')}:</b> <code>{telegram_id}</code>",
-    ]
+    fields = ["<b>" + t("lm.control.warn_title") + "</b>" if kind == "WARN" else HEADINGS[kind]]
+    if compact(user) != str(telegram_id):
+        fields.append(f"👤 <b>{t('lm.notice.user')}:</b> {escape(compact(user))}")
+    fields.append(f"🆔 <b>{t('lm.notice.id')}:</b> <code>{telegram_id}</code>")
     if kind in {"BAN", "MUTE"}:
         fields.append(
             f"⏳ <b>{t('lm.notice.duration')}:</b> {escape(duration_text(duration_seconds, kind))}"
         )
     if kind == "WARN" and warnings is not None:
-        fields.append(f"⚠️ <b>{t('lm.notice.warnings')}:</b> {warnings}")
+        fields.append(f"⚠️ <b>{t('lm.notice.warnings')}:</b> {warnings}/3")
     if compact(reason):
         fields.append(f"📋 <b>{t('lm.notice.reason')}:</b> {escape(compact(reason))}")
     fields += [f"👑 <b>{t('lm.notice.admin')}:</b> {escape(compact(admin))}", BRAND]
@@ -181,7 +181,7 @@ async def success_message(
     warnings = None
     if draft.kind == "WARN":
         # Stable count at this warning, isolated to this group and numeric user.
-        # Stage 2 has no configured warning limit, so never invent a denominator.
+        # Only active warnings count; cleared and consumed history is retained.
         warnings = await session.scalar(
             select(func.count())
             .select_from(GroupSanction)
@@ -198,7 +198,7 @@ async def success_message(
         if sanction.until_date is not None
         else None
     )
-    return format_success(
+    text = format_success(
         draft.kind,
         draft.telegram_id,
         user=labels[draft.telegram_id],
@@ -207,3 +207,51 @@ async def success_message(
         duration_seconds=seconds,
         warnings=warnings,
     )
+
+    if draft.kind == "WARN" and sanction.status in {"CANCELLED", "COMPLETED"}:
+        text += "\n\n" + t(
+            "lm.control.warn_cancelled"
+            if sanction.status == "CANCELLED"
+            else "lm.control.warn_consumed"
+        )
+    if draft.kind == "WARN" and (warnings or 0) >= 3:
+        event = await session.scalar(
+            select(GroupWarningEscalation)
+            .where(
+                GroupWarningEscalation.chat_id == sanction.chat_id,
+                GroupWarningEscalation.telegram_id == sanction.telegram_id,
+            )
+            .order_by(GroupWarningEscalation.id.desc())
+            .limit(1)
+        )
+        if event is not None:
+            linked = (
+                await session.get(GroupSanction, event.sanction_id) if event.sanction_id else None
+            )
+            state = linked.status if linked is not None else event.state
+            text += "\n\n" + t(
+                "lm.control.auto_"
+                + (
+                    "uncertain"
+                    if state == "UNCERTAIN"
+                    else "pending"
+                    if state == "PENDING"
+                    else "failed"
+                )
+            )
+    if draft.kind in {"BAN", "MUTE"} and sanction.status in {"REVOKED", "EXPIRED"}:
+        text += "\n\n" + t(
+            "lm.control.released" if sanction.status == "REVOKED" else "lm.control.expired"
+        )
+    automatic = (
+        await session.scalar(
+            select(GroupWarningEscalation.id).where(
+                GroupWarningEscalation.sanction_id == sanction.id
+            )
+        )
+        if draft.kind == "MUTE"
+        else None
+    )
+    if automatic is not None:
+        text += "\n\n" + t("lm.control.auto_reason")
+    return text

@@ -123,13 +123,10 @@ def validate_policy(
     if kind in {"WARN", "KICK"}:
         if until_date is not None:
             raise DomainError("group_moderation_invalid_duration")
-    elif until_date is None:
-        if not (
-            (kind == "BAN" and policy.allow_permanent_bans)
-            or (kind == "MUTE" and policy.allow_permanent_mutes)
-        ):
-            raise DomainError("group_moderation_invalid_duration")
-    elif not 60 <= (until_date - now()).total_seconds() <= policy.max_duration_seconds:
+    elif (
+        until_date is not None
+        and not 60 <= (until_date - now()).total_seconds() <= policy.max_duration_seconds
+    ):
         raise DomainError("group_moderation_invalid_duration")
 
 
@@ -418,6 +415,10 @@ class GroupModerationService:
             )
             self.session.add(sanction)
             await self.session.flush()
+            if kind == "WARN":
+                from app.warning_services import schedule_warning_mute
+
+                await schedule_warning_mute(self.session, sanction, policy, group)
             if draft is not None:
                 draft.status, draft.sanction_id = "CONFIRMED", sanction.id
             if kind != "WARN":

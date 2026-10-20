@@ -561,20 +561,13 @@ async def test_expiry_uses_remaining_wire_duration_after_authorization(
     )
 
 
-async def test_permanent_bans_require_explicit_group_permission(database):
+@pytest.mark.parametrize("kind", ["BAN", "MUTE"])
+async def test_omitted_duration_is_permanent_without_legacy_permission_flags(database, kind):
     bot = NativeBot()
     await setup_groups(database, bot)
     async with database() as session:
-        service = GroupModerationService(session, bot)
-        with pytest.raises(DomainError, match="invalid_duration"):
-            await service.submit(
-                CHAT, 42, 51, "BAN", until_date=None, reason="Rule", key="permanent-01"
-            )
-        await service.configure(
-            CHAT, 42, enabled=True, bans_enabled=True, allow_permanent_bans=True
-        )
-        await service.submit(
-            CHAT, 42, 51, "BAN", until_date=None, reason="Rule", key="permanent-01"
+        await GroupModerationService(session, bot).submit(
+            CHAT, 42, 51, kind, until_date=None, reason="Rule", key="permanent-01"
         )
     await LocalModerationExecutor(database, bot).process()
     assert bot.calls[0][1]["until_date"] is None

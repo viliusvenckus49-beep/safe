@@ -577,6 +577,21 @@ class LocalModerationExecutor:
                 else state
             )
         sanction.updated_at = now()
+        if job.operation == "RELEASE" and state == "SUCCEEDED":
+            from app.models import GroupModerationDraft
+
+            await session.execute(
+                update(GroupModerationDraft)
+                .where(
+                    GroupModerationDraft.sanction_id == sanction.id,
+                    GroupModerationDraft.kind == sanction.kind,
+                    GroupModerationDraft.panel_message_id.is_not(None),
+                )
+                .values(receipt_done=False, receipt_checked_at=None)
+            )
+        from app.warning_services import complete_warning_mute
+
+        await complete_warning_mute(session, sanction, job, state, result)
         audit(
             session,
             "attempt",
@@ -607,13 +622,31 @@ class LocalModerationExecutor:
 
     async def process(self, *, limit: int = 1, sanction_id: int | None = None) -> int:
         processed = await self.recover()
+        if sanction_id is not None:
+            from app.models import GroupWarningEscalation
+
+            async with self.sessions() as session:
+                automatic = await session.scalar(
+                    select(GroupWarningEscalation.sanction_id).where(
+                        GroupWarningEscalation.trigger_id == sanction_id,
+                        GroupWarningEscalation.state == "PENDING",
+                    )
+                )
+                if automatic is not None:
+                    sanction_id = automatic
         for _ in range(min(max(limit, 0), 5)):
             claim = await self.claim(sanction_id)
             if claim is None:
                 break
             await self.execute(*claim)
             processed += 1
-        from app.bot.local_admin import publish_receipts
+        from app.warning_services import sync_warning_events
 
+        async with self.sessions() as session:
+            await sync_warning_events(session)
+        from app.bot.local_admin import publish_receipts
+        from app.bot.moderation_controls import publish_warning_announcements
+
+        await publish_warning_announcements(self.sessions, self.bot)
         await publish_receipts(self.sessions, self.bot)
         return processed

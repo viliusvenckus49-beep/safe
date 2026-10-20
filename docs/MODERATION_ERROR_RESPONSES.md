@@ -79,6 +79,7 @@ or known identity, with numeric ID as fallback. HTML values are escaped. Direct
 actions retain a transient display snapshot before BAN/KICK removes the target.
 Display failures never authorize or retry actions or update global identity data.
 
-Permanent BAN/MUTE rejection now asks for a duration with the actual command and
-a 30m example. A disabled module has a separate localized message. Existing
-permission checks, duration defaults and permanent-action policy are unchanged.
+Enabled BAN/MUTE commands accept omitted duration as permanent and explicit duration
+as timed. Legacy permanent-permission switches no longer block these commands.
+Disabled modules retain a separate localized error. See WARN_CONTROLS.md for the
+new warning limit, automatic 24-hour MUTE and public receipt controls.

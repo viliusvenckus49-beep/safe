@@ -102,3 +102,9 @@ class CustomerAdmin(CallbackData, prefix="aca4"):
     action: str
     campaign: int
     value: str = ""
+
+
+class ModerationControl(CallbackData, prefix="mc3", sep="|"):
+    action: str
+    sanction: int
+    token: str = ""

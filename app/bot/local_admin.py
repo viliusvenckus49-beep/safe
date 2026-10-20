@@ -41,6 +41,7 @@ from app.group_authorization import numeric_id
 from app.group_services import GroupService
 from app.i18n import language, t, use_language
 from app.models import (
+    AuditEvent,
     GroupModerationDraft,
     GroupModerationSettings,
     GroupSanction,
@@ -72,8 +73,6 @@ SWITCHES = (
     "mutes_enabled",
     "warnings_enabled",
     "kicks_enabled",
-    "allow_permanent_bans",
-    "allow_permanent_mutes",
 )
 
 
@@ -166,25 +165,8 @@ async def command_error(
         await deliver_error(message, None, "", command)
         return
     kind = basic_kind(error)
-    if (
-        isinstance(error, DomainError)
-        and (
-            error.code == "group_moderation_disabled"
-            or (error.code == "group_moderation_invalid_duration" and permanent_requested)
-        )
-        and chat is not None
-    ):
-        policy = await service.session.get(GroupModerationSettings, chat)
-        action = command_name(command).split("@", 1)[0][1:]
-        kind = "module_disabled" if error.code == "group_moderation_disabled" else kind
-        if (
-            policy
-            and policy.enabled
-            and action in {"ban", "mute"}
-            and getattr(policy, action + "s_enabled")
-            and not getattr(policy, "allow_permanent_" + action + "s")
-        ):
-            kind = "duration_required"
+    if isinstance(error, DomainError) and error.code == "group_moderation_disabled":
+        kind = "module_disabled"
     target = target_read(error, chat, actor, bound_bot(message).id) if chat is not None else None
     if target is not None and local is not None and chat is not None:
         kind = (
@@ -396,10 +378,47 @@ async def history_panel(
         + "\n\n"
         + t("lm.warnings" if warnings else "lm.history")
     )
+    changes = list(
+        await service.session.scalars(
+            select(AuditEvent)
+            .where(
+                AuditEvent.action.in_(
+                    ("group_moderation_warnings_cancelled", "group_moderation_warnings_consumed")
+                ),
+                AuditEvent.details["chat_id"].as_integer() == chat,
+                AuditEvent.details["user_id"].as_integer() == target,
+            )
+            .order_by(AuditEvent.id.desc())
+            .limit(20)
+        )
+    )
     for row in rows[:5]:
-        text += f"\n\n<b>#{row.id} · {t('lm.' + row.kind)}</b>\n{utc(row.created_at).strftime('%Y-%m-%d %H:%M UTC')} · {t('lm.state.' + row.status)}\n👑 <b>{t('lm.notice.admin')}:</b> {escape(labels[row.actor_id])} · <code>{row.actor_id}</code>"
+        state_label = (
+            t(
+                "lm.control.warn_"
+                + {"RECORDED": "active", "CANCELLED": "cancelled", "COMPLETED": "consumed"}.get(
+                    row.status, "active"
+                )
+            )
+            if row.kind == "WARN"
+            else t("lm.state." + row.status)
+        )
+        text += f"\n\n<b>#{row.id} · {t('lm.' + row.kind)}</b>\n{utc(row.created_at).strftime('%Y-%m-%d %H:%M UTC')} · {state_label}\n👑 <b>{t('lm.notice.admin')}:</b> {escape(labels[row.actor_id])} · <code>{row.actor_id}</code>"
         if row.reason:
             text += "\n" + t("lm.reason", reason=escape(row.reason[:120]))
+        if row.kind == "WARN" and row.status in {"CANCELLED", "COMPLETED"}:
+            change = next(
+                (event for event in changes if row.id in event.details.get("warning_ids", [])), None
+            )
+            if change is not None:
+                who = await identity_labels(
+                    service.session, {change.actor_id}, bot=bound_bot(message), chat=chat
+                )
+                text += "\n" + t(
+                    "lm.control.history_clear",
+                    admin=escape(who[change.actor_id]),
+                    date=utc(change.created_at).strftime("%Y-%m-%d %H:%M UTC"),
+                )
         release = await service.session.scalar(
             select(GroupModerationDraft)
             .where(
@@ -459,7 +478,7 @@ async def receipt_text(
     release = next((j for j in jobs if j.operation == "RELEASE"), None)
     apply = next((j for j in jobs if j.operation == "APPLY"), None)
     key, done = "queued", False
-    if row.status == "RECORDED":
+    if row.kind == "WARN" and row.status in {"RECORDED", "CANCELLED", "COMPLETED"}:
         key, done = "recorded", True
     elif row.status == "UNCERTAIN":
         key, done = "uncertain", True
@@ -504,9 +523,14 @@ async def show_draft(
     observed: tuple[TelegramUser, ...] = (),
 ) -> None:
     if draft.status == "CONFIRMED":
+        from app.bot.moderation_controls import public_receipt
+
+        await public_receipt(service.session, bound_bot(message), draft, observed=observed)
         text, _ = await receipt_text(
             service.session, draft, observed=observed, bot=bound_bot(message)
         )
+        await display(message, text, None, edit=edit)
+        return
     elif draft.status == "CANCELLED":
         text = t("lm.cancelled")
     else:
@@ -549,6 +573,8 @@ async def show_draft(
 
 
 async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
+    from app.bot.moderation_controls import receipt_markup
+
     async with sessions() as session:
         drafts = list(
             await session.scalars(
@@ -589,6 +615,7 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
                                 message_id=draft.panel_message_id,
                                 text=text,
                                 parse_mode="HTML",
+                                reply_markup=await receipt_markup(session, draft),
                             )
                         draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
                             digest,
@@ -614,6 +641,10 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
 
 
 def register_local_handlers(router: Router) -> None:
+    from app.bot.moderation_controls import register_control_handlers
+
+    register_control_handlers(router)
+
     @router.message(Command("moderation"))
     async def open_local(message: Message, state: FSMContext, service: Service) -> None:
         try:
@@ -703,26 +734,12 @@ def register_local_handlers(router: Router) -> None:
                 )
                 if person is not None
             )
-            text, done = await receipt_text(
-                service.session, draft, observed=people + verified_people, bot=bound_bot(message)
+            from app.bot.moderation_controls import public_receipt, publish_warning_announcements
+
+            await public_receipt(
+                service.session, bound_bot(message), draft, observed=people + verified_people
             )
-            if draft.panel_message_id:
-                try:
-                    await bound_bot(message).edit_message_text(
-                        chat_id=draft.panel_chat_id,
-                        message_id=draft.panel_message_id,
-                        text=text,
-                        parse_mode="HTML",
-                    )
-                except TelegramBadRequest as error:
-                    if "message is not modified" not in error.message.lower():
-                        raise
-            else:
-                panel = await message.answer(text, parse_mode="HTML")
-                draft.panel_chat_id, draft.panel_message_id = panel.chat.id, panel.message_id
-            draft.language, draft.receipt_done = language.get(), done
-            draft.receipt_hash = hashlib.sha256(text.encode()).hexdigest()
-            await service.session.commit()
+            await publish_warning_announcements(session_factory, bound_bot(message))
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
             await service.session.rollback()
             await command_error(
@@ -863,6 +880,8 @@ def register_local_handlers(router: Router) -> None:
                     **current,
                     expected_version=int(expected),
                     max_duration_seconds=policy.max_duration_seconds if policy else 2592000,
+                    allow_permanent_bans=bool(policy and policy.allow_permanent_bans),
+                    allow_permanent_mutes=bool(policy and policy.allow_permanent_mutes),
                 )
                 await settings_panel(message, service, actor, chat)
             elif action == "action":
