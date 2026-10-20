@@ -6,6 +6,15 @@ Legacy `allow_permanent_*` columns are retained for compatibility but no longer
 block enabled commands or appear as separate UI switches. Current Telegram rights,
 protected administrators/owners, opt-in modules and time-range checks still apply.
 
+UNMUTE lifts the owned personal restriction using all supported permission flags
+set to true, as required by `restrictChatMember`; group defaults continue to apply.
+Copying group defaults into a personal restriction can leave Telegram reporting
+`restricted` after release and previously blocked subsequent MUTE/BAN/KICK. A
+legacy, permanent member exception exactly matching every current group-default
+flag is accepted as having no additional restriction. Unknown flags, departed
+members, finite deadlines and stricter restrictions remain protected. This repair
+does not clear historical sanctions or grant ownership of a foreign restriction.
+
 ## Warning lifecycle
 
 Each distinct `/warn` records one `GroupSanction(kind=WARN)`. Telegram redelivery

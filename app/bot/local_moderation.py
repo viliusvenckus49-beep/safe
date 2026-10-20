@@ -28,10 +28,31 @@ MAX_ATTEMPTS = 5
 MUTE_PERMISSIONS = ChatPermissions(
     **{key: False for key in ChatPermissions.model_fields if key.startswith("can_")}
 )
+UNMUTE_PERMISSIONS = ChatPermissions(
+    **{key: True for key in ChatPermissions.model_fields if key.startswith("can_")}
+)
 
 
 def deadline(value: Any) -> int | None:
     return int(utc(value).timestamp()) if value is not None and value.timestamp() > 0 else None
+
+
+def matches_group_defaults(member: Any, permissions: Any) -> bool:
+    """A permanent default-shaped exception is not an additional restriction.
+
+    Older releases copied group defaults into the member's personal permissions.
+    Unknown fields, a deadline or a departed member must never qualify.
+    """
+    return (
+        isinstance(permissions, ChatPermissions)
+        and getattr(member, "is_member", None) is True
+        and deadline(getattr(member, "until_date", None)) is None
+        and all(
+            type(getattr(member, key, None)) is bool
+            and getattr(member, key) is (getattr(permissions, key) is True)
+            for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
+        )
+    )
 
 
 class LocalModerationExecutor:
@@ -375,7 +396,13 @@ class LocalModerationExecutor:
                         result, owned = "ALREADY_BANNED", False
                     else:
                         if member.status == "restricted":
-                            raise DomainError("group_moderation_existing_restriction")
+                            chat = await asyncio.wait_for(
+                                self.bot.get_chat(sanction.chat_id), API_TIMEOUT
+                            )
+                            if not matches_group_defaults(
+                                member, getattr(chat, "permissions", None)
+                            ):
+                                raise DomainError("group_moderation_existing_restriction")
                         self.check_write_deadline(job, sanction)
                         sent = True
                         if sanction.kind in {"BAN", "KICK"}:
@@ -429,19 +456,15 @@ class LocalModerationExecutor:
                             return
                         result = "RELEASED"
                     else:
-                        chat = await asyncio.wait_for(
-                            self.bot.get_chat(sanction.chat_id), API_TIMEOUT
-                        )
-                        permissions = getattr(chat, "permissions", None)
-                        if not isinstance(permissions, ChatPermissions):
-                            raise DomainError("group_moderation_permissions_unavailable")
                         self.check_write_deadline(job, sanction)
                         sent = True
                         success = await asyncio.wait_for(
                             self.bot.restrict_chat_member(
                                 chat_id=sanction.chat_id,
                                 user_id=sanction.telegram_id,
-                                permissions=permissions,
+                                # Bot API: all True removes the personal restriction.
+                                # Group-wide default permissions still apply.
+                                permissions=UNMUTE_PERMISSIONS,
                                 use_independent_chat_permissions=True,
                             ),
                             API_TIMEOUT,
