@@ -20,6 +20,14 @@ from sqlalchemy import or_, select, update
 from app.bot.callbacks import LocalAction
 from app.bot.keyboards import keyboard
 from app.bot.local_moderation import LocalModerationExecutor
+from app.bot.moderation_errors import (
+    basic_kind,
+    command_name,
+    deliver_error,
+    diagnose_target,
+    error_message,
+    target_read,
+)
 from app.bot.moderation_messages import success_message
 from app.bot.states import LocalModerationFlow
 from app.bot.validation import actor_id
@@ -80,7 +88,7 @@ def parse_target(text: str, replied: Message | None, kind: str) -> tuple[int, An
     elif replied and replied.from_user and not replied.sender_chat:
         target, rest = replied.from_user.id, text.strip()
     else:
-        raise DomainError("local_invalid")
+        raise DomainError("group_moderation_invalid_target")
     numeric_id(target)
     if rest.startswith("@"):
         raise DomainError("local_invalid")
@@ -133,6 +141,36 @@ def error_text(error: Exception) -> str:
         "group_moderation_uncertain": "uncertain",
     }.get(error.code, "error")
     return t("lm." + key)
+
+
+async def command_error(
+    message: Message,
+    service: Service,
+    error: Exception,
+    *,
+    command: str,
+    local: GroupModerationService | None,
+    chat: int | None,
+    username: str | None,
+    may_have_executed: bool = False,
+) -> None:
+    try:
+        actor = actor_id(message)
+    except DomainError:
+        await deliver_error(message, None, "", command)
+        return
+    kind = basic_kind(error)
+    target = target_read(error, chat, actor, bound_bot(message).id) if chat is not None else None
+    if target is not None and local is not None and chat is not None:
+        kind = (
+            "check_unavailable"
+            if may_have_executed
+            else await diagnose_target(local, chat, actor, target, username=username)
+        )
+    if kind is None and not isinstance(error, DomainError):
+        kind = "check_unavailable"
+    text = error_message(command, kind, fallback=error_text(error))
+    await deliver_error(message, actor, text, command)
 
 
 async def access(
@@ -543,15 +581,21 @@ def register_local_handlers(router: Router) -> None:
     async def local_command(
         message: Message, state: FSMContext, service: Service, session_factory: Any
     ) -> None:
+        local, chat, username = None, None, None
+        may_have_executed = False
+        called = command_name(message.text or "")
         try:
             actor = actor_id(message)
             command, *args = (message.text or "").split(maxsplit=1)
             kind = command.split("@", 1)[0][1:].upper()
             data = await state.get_data()
-            chat = message.chat.id if message.chat.type != "private" else data.get("lm_chat")
+            selected = message.chat.id if message.chat.type != "private" else data.get("lm_chat")
+            chat = int(selected) if selected else None
             if not chat:
                 await groups_panel(message, service, actor)
                 return
+            first = args[0].split(maxsplit=1)[0] if args and args[0].strip() else ""
+            username = first if first.startswith("@") else None
             local = await access(service, bound_bot(message), int(chat), actor)
             target, until, reason = await parse_target_input(
                 local, int(chat), actor, args[0] if args else "", message.reply_to_message, kind
@@ -584,6 +628,7 @@ def register_local_handlers(router: Router) -> None:
             )
             # Explicit textual commands are the administrator's direct instruction.
             # Menu-selected actions instead require a durable confirmation below.
+            may_have_executed = True
             sanction = await local.confirm(draft.id, actor)
             await LocalModerationExecutor(session_factory, bound_bot(message)).process(
                 limit=2, sanction_id=sanction.id
@@ -617,15 +662,29 @@ def register_local_handlers(router: Router) -> None:
             await service.session.commit()
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
             await service.session.rollback()
-            await message.answer(error_text(error))
+            await command_error(
+                message,
+                service,
+                error,
+                command=called,
+                local=local,
+                chat=chat,
+                username=username,
+                may_have_executed=may_have_executed,
+            )
 
     @router.message(LocalModerationFlow.target, F.text, ~F.text.startswith("/"))
     async def local_input(message: Message, state: FSMContext, service: Service) -> None:
+        local, chat, username = None, None, None
+        called = "/moderation"
         try:
             if message.chat.type != "private":
                 raise DomainError("group_moderation_forbidden")
             data = await state.get_data()
             chat, kind = int(data["lm_chat"]), data["lm_kind"]
+            called = command_name(kind)
+            first = (message.text or "").split(maxsplit=1)
+            username = first[0] if first and first[0].startswith("@") else None
             local = await access(service, bound_bot(message), chat, actor_id(message))
             target, until, reason = await parse_target_input(
                 local, chat, actor_id(message), message.text or "", None, kind
@@ -659,7 +718,9 @@ def register_local_handlers(router: Router) -> None:
             KeyError,
         ) as error:
             await service.session.rollback()
-            await message.answer(error_text(error))
+            await command_error(
+                message, service, error, command=called, local=local, chat=chat, username=username
+            )
 
     @router.callback_query(LocalAction.filter())
     async def local_callback(

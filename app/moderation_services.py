@@ -163,6 +163,7 @@ class GroupModerationService:
         await self.authorization.actor(chat_id, actor_id)
         normalized = username[1:].lower()
         target_id: int | None = None
+        lookup_code = "unavailable"
         if self.use_mtproto_lookup:
             from app.mtproto_relay import active_relay
 
@@ -170,9 +171,11 @@ class GroupModerationService:
             if relay is not None:
                 observed = None
                 try:
-                    observed = (
-                        await asyncio.wait_for(relay.lookup_identity(normalized, refresh=True), 6)
-                    ).user
+                    result = await asyncio.wait_for(
+                        relay.lookup_identity(normalized, refresh=True), 6
+                    )
+                    observed = result.user
+                    lookup_code = result.code
                 except (TimeoutError, OSError):
                     pass  # A known ID still needs fresh Bot API verification below.
                 if observed is not None:
@@ -194,6 +197,8 @@ class GroupModerationService:
                 )
             )
             if len(candidates) != 1 or candidates[0] is None:
+                if lookup_code in {"not_found", "invalid_username", "not_user"}:
+                    raise DomainError("group_moderation_target_not_found")
                 raise DomainError("group_moderation_username_unknown")
             target_id = candidates[0]
         numeric_id(target_id)

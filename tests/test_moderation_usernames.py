@@ -105,7 +105,7 @@ async def test_unknown_username_command_has_no_write_or_telegram_action(
         chat=CHAT,
     )
     assert native.calls == []
-    assert t("lm.username_unknown") in journey.text()
+    assert t("lm.diagnostic.identity_unverified.title") in journey.text()
     await no_sanctions(database)
     async with database() as session:
         assert await session.scalar(select(User).where(User.username == "unknown_user")) is None
