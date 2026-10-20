@@ -5,7 +5,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from app.models import (
     GroupSanction,
     GroupSanctionJob,
     ManagedGroup,
+    User,
     now,
 )
 
@@ -143,6 +144,39 @@ class GroupModerationService:
         except Exception:
             await self.session.rollback()
             raise
+
+    async def resolve_username(self, chat_id: int, actor_id: int, username: str) -> int:
+        """Pin a known username only after a live, numeric Telegram identity check.
+
+        Cached names alone never authorize a sanction. Bot API cannot resolve an
+        arbitrary private user's username, so unknown/ambiguous names fail closed.
+        This lookup does not create users or modify global identity/SCAM records.
+        """
+        if not isinstance(username, str) or not re.fullmatch(
+            r"@[a-zA-Z][a-zA-Z0-9_]{4,31}", username
+        ):
+            raise DomainError("group_moderation_invalid_username")
+        await self._check_group(chat_id)
+        await self.authorization.actor(chat_id, actor_id)
+        normalized = username[1:].lower()
+        candidates = list(
+            await self.session.scalars(
+                select(User.telegram_id)
+                .where(User.telegram_id.is_not(None), func.lower(User.username) == normalized)
+                .limit(2)
+            )
+        )
+        if len(candidates) != 1:
+            raise DomainError("group_moderation_username_unknown")
+        target_id = candidates[0]
+        if target_id is None:
+            raise DomainError("group_moderation_username_unknown")
+        numeric_id(target_id)
+        member = await self.authorization.member(chat_id, target_id)
+        current = getattr(member.user, "username", None)
+        if not isinstance(current, str) or current.lower() != normalized:
+            raise DomainError("group_moderation_username_changed")
+        return target_id
 
     async def configure(
         self,

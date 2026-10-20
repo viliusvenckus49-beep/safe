@@ -1,4 +1,4 @@
-"""Numeric-ID local commands and private, live-authorized administration panels."""
+"""ID/reply/verified-username commands and live-authorized administration panels."""
 
 import asyncio
 import hashlib
@@ -99,12 +99,31 @@ def parse_target(text: str, replied: Message | None, kind: str) -> tuple[int, An
     return target, duration, reason
 
 
+async def parse_target_input(
+    local: GroupModerationService,
+    chat: int,
+    actor: int,
+    text: str,
+    replied: Message | None,
+    kind: str,
+) -> tuple[int, Any, str]:
+    parts = text.strip().split(maxsplit=1)
+    if parts and parts[0].startswith("@"):
+        target = await local.resolve_username(chat, actor, parts[0])
+        text = str(target) + (" " + parts[1] if len(parts) > 1 else "")
+        replied = None  # An explicit target never silently falls back to a reply.
+    return parse_target(text, replied, kind)
+
+
 def error_text(error: Exception) -> str:
     if not isinstance(error, DomainError):
         return t("lm.error")
     key = {
         "local_invalid": "invalid",
         "group_moderation_invalid_id": "invalid",
+        "group_moderation_invalid_username": "invalid",
+        "group_moderation_username_unknown": "username_unknown",
+        "group_moderation_username_changed": "username_changed",
         "group_moderation_invalid_duration": "disabled",
         "group_moderation_disabled": "disabled",
         "group_moderation_invalid_draft": "stale",
@@ -528,8 +547,8 @@ def register_local_handlers(router: Router) -> None:
                 await groups_panel(message, service, actor)
                 return
             local = await access(service, bound_bot(message), int(chat), actor)
-            target, until, reason = parse_target(
-                args[0] if args else "", message.reply_to_message, kind
+            target, until, reason = await parse_target_input(
+                local, int(chat), actor, args[0] if args else "", message.reply_to_message, kind
             )
             if kind == "WARNINGS":
                 panel = (
@@ -602,7 +621,9 @@ def register_local_handlers(router: Router) -> None:
             data = await state.get_data()
             chat, kind = int(data["lm_chat"]), data["lm_kind"]
             local = await access(service, bound_bot(message), chat, actor_id(message))
-            target, until, reason = parse_target(message.text or "", None, kind)
+            target, until, reason = await parse_target_input(
+                local, chat, actor_id(message), message.text or "", None, kind
+            )
             panel = message.model_copy(
                 update={"message_id": data.get("lm_panel", message.message_id)}
             ).as_(bound_bot(message))
