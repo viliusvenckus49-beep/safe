@@ -17,7 +17,7 @@ from app.moderation_services import utc
 BRAND = "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™"
 HEADINGS = {
     "BAN": "⛔️ 𝗨𝗦𝗘𝗥 • 𝗕𝗔𝗡𝗡𝗘𝗗",
-    "WARN": "⚠️ NAUDOTOJAS ĮSPĖTAS",
+    "WARN": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
     "MUTE": "🔇 𝗨𝗦𝗘𝗥 • 𝗠𝗨𝗧𝗘𝗗",
     "KICK": "🚪 𝗨𝗦𝗘𝗥 • 𝗞𝗜𝗖𝗞𝗘𝗗",
     "UNBAN": "🔓 𝗨𝗦𝗘𝗥 • 𝗨𝗡𝗕𝗔𝗡𝗡𝗘𝗗",

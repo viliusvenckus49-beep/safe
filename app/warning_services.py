@@ -206,7 +206,11 @@ async def invalidate_warning_receipts(session: AsyncSession, ids: list[int]) -> 
 
 
 async def reset_prompt(
-    local: GroupModerationService, origin: GroupSanction, actor: int
+    local: GroupModerationService,
+    origin: GroupSanction,
+    actor: int,
+    *,
+    selected_warning_id: int | None = None,
 ) -> GroupWarningReset:
     await local._check_group(origin.chat_id)
     await local.authorization.actor(origin.chat_id, actor)
@@ -226,9 +230,12 @@ async def reset_prompt(
         )
         if not ids:
             raise DomainError("group_moderation_stale_control")
+        if selected_warning_id is not None and selected_warning_id not in ids:
+            raise DomainError("group_moderation_stale_control")
         prompt = GroupWarningReset(
             id=uuid4().hex,
             origin_id=origin.id,
+            selected_warning_id=selected_warning_id,
             actor_id=actor,
             max_warning_id=max(ids),
             expected_count=len(ids),
@@ -275,6 +282,12 @@ async def reset_warnings(local: GroupModerationService, token: str, actor: int) 
             or max(ids) != prompt.max_warning_id
         ):
             raise DomainError("group_moderation_stale_control")
+        snapshot_ids = list(ids)
+        if prompt.selected_warning_id is not None:
+            if prompt.selected_warning_id not in ids:
+                raise DomainError("group_moderation_stale_control")
+            ids = [prompt.selected_warning_id]
+        remaining_count = prompt.expected_count - len(ids)
         events = list(
             await local.session.scalars(
                 select(GroupWarningEscalation).where(
@@ -285,6 +298,8 @@ async def reset_warnings(local: GroupModerationService, token: str, actor: int) 
             )
         )
         for event in events:
+            if remaining_count >= LIMIT:
+                continue
             if event.sanction_id:
                 sanction = await local.session.get(
                     GroupSanction, event.sanction_id, populate_existing=True
@@ -312,7 +327,7 @@ async def reset_warnings(local: GroupModerationService, token: str, actor: int) 
             .where(GroupSanction.id.in_(ids))
             .values(status="CANCELLED", updated_at=now())
         )
-        await invalidate_warning_receipts(local.session, ids)
+        await invalidate_warning_receipts(local.session, snapshot_ids)
         prompt.state = "CONFIRMED"
         audit(
             local.session,

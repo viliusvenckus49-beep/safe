@@ -16,6 +16,7 @@ from app.locales.button_icons import CATALOGS as BUTTON_ICONS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
 from app.locales.local_moderation import CATALOGS as LOCAL_MODERATION
+from app.locales.moderation_control import CATALOGS as MODERATION_CONTROL
 from app.locales.presentation import CATALOGS as PRESENTATION
 from app.locales.scam_management import CATALOGS as SCAM_MANAGEMENT
 from app.locales.trusted_management import CATALOGS as TRUSTED_MANAGEMENT
@@ -57,6 +58,14 @@ CATALOGS = {
     }
     for lang in LANGUAGES
 }
+
+for _lang, _entries in MODERATION_CONTROL.items():
+    for _key, _value in _entries.items():
+        if isinstance(_value, tuple):
+            CATALOGS[_lang]["lm.diagnostic." + _key + ".title"] = _value[0]
+            CATALOGS[_lang]["lm.diagnostic." + _key + ".body"] = _value[1]
+        else:
+            CATALOGS[_lang]["lm.control." + _key] = _value
 
 
 @contextmanager

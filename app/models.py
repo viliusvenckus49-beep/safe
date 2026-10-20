@@ -460,6 +460,8 @@ class GroupModerationDraft(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     panel_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     panel_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    receipt_visibility: Mapped[str | None] = mapped_column(String(8))
+    original_command: Mapped[str | None] = mapped_column(String(64))
     language: Mapped[str] = mapped_column(String(2), default="lt")
     receipt_hash: Mapped[str | None] = mapped_column(String(64))
     receipt_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -507,6 +509,7 @@ class GroupWarningReset(Base):
     __tablename__ = "group_warning_resets"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     origin_id: Mapped[int] = mapped_column(ForeignKey("group_sanctions.id"))
+    selected_warning_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"))
     actor_id: Mapped[int] = mapped_column(BigInteger)
     max_warning_id: Mapped[int] = mapped_column()
     expected_count: Mapped[int] = mapped_column()

@@ -61,7 +61,7 @@ def test_exact_english_templates(kind):
     with use_language("en"):
         text = render(kind, reason="Spam", duration_seconds=604800, warnings=2)
     fields = [
-        "<b>⚠️ USER WARNED</b>" if kind == "WARN" else HEADINGS[kind],
+        "<b>⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗</b>" if kind == "WARN" else HEADINGS[kind],
         "👤 <b>User:</b> @example",
         "🆔 <b>Telegram ID:</b> <code>123456789</code>",
     ]
@@ -286,7 +286,7 @@ async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
         from app.bot.callbacks import ModerationControl
 
         data = ModerationControl.unpack(notice.reply_markup.inline_keyboard[0][0].callback_data)
-        assert data.action == ("reset" if kind == "WARN" else "release")
+        assert data.action == ("manage" if kind == "WARN" else "release")
     async with database() as session:
         notice_id = (
             await session.scalar(
@@ -414,7 +414,8 @@ async def test_numeric_receipts_use_live_username_without_global_user_write(
         await journey.send(
             "/ban 51 30m" if kind == "UNBAN" else "/mute 51 30m", actor=42, chat=CHAT
         )
-    native.members[CHAT, 51] = native.peer(51)
+    if kind not in {"UNBAN", "UNMUTE"}:
+        native.members[CHAT, 51] = native.peer(51)
     native.members[CHAT, 51].user.username = "redsafeads"
     await journey.send(
         f"/{kind.lower()} 51" + (" 30m" if kind in {"BAN", "MUTE"} else ""), actor=42, chat=CHAT

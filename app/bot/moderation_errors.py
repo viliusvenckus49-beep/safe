@@ -21,7 +21,7 @@ from aiogram.types import (
 from app.errors import DomainError
 from app.i18n import t
 
-COMMANDS = {"warn", "ban", "mute", "kick", "unban", "unmute", "warnings"}
+COMMANDS = {"warn", "unwarn", "warns", "ban", "mute", "kick", "unban", "unmute", "warnings"}
 
 
 def command_name(value: str) -> str:
@@ -54,7 +54,91 @@ def basic_kind(error: Exception) -> str | None:
             return "check_unavailable"
         if error.code == "local_invalid":
             return "input_invalid"
+        return {
+            "group_moderation_invalid_duration": "duration_invalid",
+            "group_moderation_protected_target": "protected_target",
+            "group_moderation_scam_protected": "scam",
+            "group_moderation_busy": "busy",
+            "group_moderation_uncertain": "uncertain",
+            "group_moderation_invalid_draft": "stale",
+            "group_moderation_stale_control": "stale",
+            "group_moderation_request_conflict": "stale",
+            "group_moderation_no_warnings": "no_warnings",
+            "group_moderation_supergroup_required": "supergroup",
+        }.get(error.code)
     return None
+
+
+async def diagnose_state(local: Any, chat: int, actor: int, target: int, command: str) -> str:
+    """Only fresh verified Telegram reads justify an already/clear explanation."""
+    from sqlalchemy import select
+
+    from app.models import GroupSanction, now
+    from app.moderation_services import utc
+
+    try:
+        await local._check_group(chat)
+        await local.authorization.actor(chat, actor)
+        await local.authorization.bot_rights(chat)
+        member = await local.authorization.member(chat, target)
+        requested = command_name(command).split("@")[0]
+        if requested in {"/mute", "/ban", "/kick"}:
+            if member.status == "kicked":
+                return "already_banned"
+            if (
+                member.status == "restricted"
+                and getattr(member, "can_send_messages", None) is False
+            ):
+                return "already_muted"
+            if member.status == "restricted":
+                return "restriction"
+            from app.models import GroupSanctionJob
+
+            outstanding = await local.session.scalar(
+                select(GroupSanctionJob.status)
+                .join(GroupSanction, GroupSanction.id == GroupSanctionJob.sanction_id)
+                .where(
+                    GroupSanction.chat_id == chat,
+                    GroupSanction.telegram_id == target,
+                    GroupSanctionJob.status.in_({"PENDING", "PROCESSING", "UNCERTAIN"}),
+                )
+                .limit(1)
+            )
+            return (
+                "uncertain"
+                if outstanding == "UNCERTAIN"
+                else "busy"
+                if outstanding
+                else "check_unavailable"
+            )
+        if requested in {"/unmute", "/unban"}:
+            expected = "restricted" if requested == "/unmute" else "kicked"
+            if member.status == expected:
+                return "foreign"
+            # Another kind of restriction is not proof of an unrestricted member.
+            if member.status not in {"member", "left", "administrator", "creator"}:
+                return "check_unavailable"
+            latest = await local.session.scalar(
+                select(GroupSanction)
+                .where(
+                    GroupSanction.chat_id == chat,
+                    GroupSanction.telegram_id == target,
+                    GroupSanction.kind.in_(["MUTE"] if requested == "/unmute" else ["BAN", "KICK"]),
+                )
+                .order_by(GroupSanction.id.desc())
+                .limit(1)
+            )
+            if (
+                latest
+                and latest.status == "EXPIRED"
+                and latest.until_date
+                and utc(latest.until_date) <= now()
+            ):
+                return "expired"
+            return "already_unmuted" if requested == "/unmute" else "already_unbanned"
+    except (DomainError, TelegramAPIError, TimeoutError, OSError) as error:
+        return basic_kind(error) or "check_unavailable"
+    return "check_unavailable"
 
 
 def target_read(error: Exception, chat: int, actor: int, bot_id: int) -> int | None:
@@ -127,14 +211,23 @@ def error_message(
 
 
 async def deliver_error(
-    message: Message, actor: int | None, text: str, command: str
+    message: Message,
+    actor: int | None,
+    text: str,
+    command: str,
+    *,
+    reply_markup: InlineKeyboardMarkup | None = None,
 ) -> Message | None:
     """Use native recipient-only group messages; never publish diagnostic details."""
     bot = message.bot
     if bot is None:
         raise RuntimeError("Message has no bot context")
     if message.chat.type == "private":
-        return await message.answer(text, parse_mode="HTML") if actor is not None else None
+        return (
+            await message.answer(text, parse_mode="HTML", reply_markup=reply_markup)
+            if actor is not None
+            else None
+        )
     if type(actor) is int and 0 < actor < 2**63:
         try:
             return await bot.send_message(
@@ -143,6 +236,7 @@ async def deliver_error(
                 parse_mode="HTML",
                 message_thread_id=message.message_thread_id,
                 ephemeral_message_parameters=EphemeralMessageParameters(receiver_user_id=actor),
+                reply_markup=reply_markup,
             )
         except TelegramRetryAfter:
             return None
@@ -154,7 +248,7 @@ async def deliver_error(
             # Unknown delivery outcome: do not duplicate the diagnostic via DM.
             return None
         try:
-            return await bot.send_message(actor, text, parse_mode="HTML")
+            return await bot.send_message(actor, text, parse_mode="HTML", reply_markup=reply_markup)
         except TelegramRetryAfter:
             return None
         except (TelegramBadRequest, TelegramForbiddenError):

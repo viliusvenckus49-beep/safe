@@ -375,13 +375,15 @@ async def test_catalogs_have_all_stage_two_keys():
         assert {k for k in CATALOGS[lang] if k.startswith("lm.")} == keys
 
 
-async def test_queued_receipt_updates_same_message_after_restart(local_journey, database):
+async def test_private_queued_receipt_becomes_separate_public_success_after_restart(
+    local_journey, database
+):
     journey, native = local_journey
     native.error = TelegramRetryAfter(
         method=BanChatMember(chat_id=CHAT, user_id=51), message="Flood", retry_after=60
     )
     await journey.send("/ban 51 1h", actor=42, chat=CHAT)
-    assert t("lm.queued") in journey.text()
+    assert t("lm.diagnostic.queued.title") in journey.text()
     sends = len([c for c in journey.transport.calls if isinstance(c, SendMessage)])
     async with database() as session:
         draft = await session.scalar(select(GroupModerationDraft))
@@ -395,9 +397,16 @@ async def test_queued_receipt_updates_same_message_after_restart(local_journey, 
     native.error = None
     await LocalModerationExecutor(database, journey.bot).process()
     edits = [c for c in journey.transport.calls if isinstance(c, EditMessageText)]
-    assert edits[-1].message_id == message_id and edits[-1].chat_id == CHAT
-    assert "𝗨𝗦𝗘𝗥 • 𝗕𝗔𝗡𝗡𝗘𝗗" in edits[-1].text
-    assert len([c for c in journey.transport.calls if isinstance(c, SendMessage)]) == sends
+    public = [
+        c
+        for c in journey.transport.calls
+        if isinstance(c, SendMessage)
+        and c.chat_id == CHAT
+        and c.ephemeral_message_parameters is None
+    ]
+    assert len(public) == 1 and "𝗨𝗦𝗘𝗥 • 𝗕𝗔𝗡𝗡𝗘𝗗" in public[0].text
+    assert not any(c.message_id == message_id for c in edits)
+    assert len([c for c in journey.transport.calls if isinstance(c, SendMessage)]) == sends + 1
     count = len(edits)
     await LocalModerationExecutor(database, journey.bot).process(limit=0)
     assert len([c for c in journey.transport.calls if isinstance(c, EditMessageText)]) == count
@@ -467,5 +476,12 @@ async def test_private_navigation_preserves_independent_public_receipt(local_jou
     native.error = None
     await LocalModerationExecutor(database, journey.bot).process()
     edits = [c for c in journey.transport.calls[count:] if isinstance(c, EditMessageText)]
-    assert edits and all(c.chat_id == CHAT for c in edits)
-    assert edits[-1].reply_markup is not None
+    public = [
+        c
+        for c in journey.transport.calls[count:]
+        if isinstance(c, SendMessage)
+        and c.chat_id == CHAT
+        and c.ephemeral_message_parameters is None
+    ]
+    assert public and public[-1].reply_markup is not None
+    assert not edits

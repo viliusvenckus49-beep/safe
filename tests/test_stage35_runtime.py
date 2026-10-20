@@ -19,7 +19,7 @@ async def prepared(database, settings, monkeypatch, tmp_path):
         await conn.execute(
             text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)")
         )
-        await conn.execute(text("INSERT INTO alembic_version VALUES ('0017')"))
+        await conn.execute(text("INSERT INTO alembic_version VALUES ('0018')"))
     monkeypatch.setattr(main, "create_database", lambda _: (engine, database))
     monkeypatch.setattr(main, "configure_logging", lambda _: None)
     monkeypatch.setenv("HEALTH_PATH", str(tmp_path / "health.json"))

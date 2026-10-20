@@ -15,7 +15,18 @@ from app.i18n import LANGUAGES, t
 PUBLIC = ("start", "ask", "rep", "report")
 GROUP = (*PUBLIC, "help")
 ADMIN: tuple[str, ...] = ()
-LOCAL_COMMANDS = ("ban", "unban", "mute", "unmute", "warn", "kick", "warnings", "moderation")
+LOCAL_COMMANDS = (
+    "ban",
+    "unban",
+    "mute",
+    "unmute",
+    "warn",
+    "unwarn",
+    "kick",
+    "warnings",
+    "warns",
+    "moderation",
+)
 
 
 def commands(lang: str, *, admin: bool = False, group: bool = False) -> list[BotCommand]:
@@ -40,7 +51,9 @@ async def group_commands(bot: Bot) -> None:
                 command=name,
                 description=t(
                     "lm.history"
-                    if name == "warnings"
+                    if name in {"warnings", "warns"}
+                    else "lm.control.unwarn"
+                    if name == "unwarn"
                     else "lm.title_command"
                     if name == "moderation"
                     else "lm." + name.upper(),

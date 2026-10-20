@@ -600,6 +600,35 @@ class LocalModerationExecutor:
                 else state
             )
         sanction.updated_at = now()
+        if job.operation == "APPLY" and state in {"FAILED", "CANCELLED"} and not sanction.owned:
+            # A definitively rejected APPLY must not leave a future RELEASE
+            # queued: no restriction was acquired and nothing may be lifted.
+            abandoned = list(
+                await session.scalars(
+                    select(GroupSanctionJob).where(
+                        GroupSanctionJob.sanction_id == sanction.id,
+                        GroupSanctionJob.operation == "RELEASE",
+                        GroupSanctionJob.status == "PENDING",
+                        GroupSanctionJob.attempts == 0,
+                        GroupSanctionJob.lease_token.is_(None),
+                    )
+                )
+            )
+            for pending in abandoned:
+                pending.status, pending.result, pending.updated_at = (
+                    "CANCELLED",
+                    "NO_CONFIRMED_RESTRICTION",
+                    now(),
+                )
+                audit(
+                    session,
+                    "orphan_release_cancelled",
+                    job.actor_id or 0,
+                    sanction.chat_id,
+                    sanction_id=sanction.id,
+                    job_id=pending.id,
+                    result=pending.result,
+                )
         if job.operation == "RELEASE" and state == "SUCCEEDED":
             from app.models import GroupModerationDraft
 
