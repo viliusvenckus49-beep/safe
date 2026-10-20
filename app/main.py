@@ -73,6 +73,9 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         if settings.group_help_enabled:
             relay = await GroupHelpRelay.connect(settings, sessions)
             set_relay(relay)
+        elif settings.moderation_mtproto_enabled:
+            relay = await GroupHelpRelay.connect_identity(settings, sessions)
+            set_relay(relay)
         health = RuntimeHealth(advertising=True)
         bot = Bot(
             settings.bot_token.get_secret_value(),

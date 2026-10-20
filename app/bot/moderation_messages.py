@@ -1,8 +1,11 @@
 """Read-only formatting of confirmed local moderation receipts; no enforcement here."""
 
+import asyncio
 from html import escape
 from math import ceil
+from typing import Any
 
+from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import User as TelegramUser
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +39,70 @@ def identity_label(user: User | TelegramUser | None, telegram_id: int) -> str:
         if name and name not in {"Vartotojas", "User", f"User {telegram_id}"}:
             return name
     return str(telegram_id)
+
+
+async def observed_users(
+    ids: set[int],
+    *,
+    observed: tuple[TelegramUser, ...] = (),
+    bot: Any = None,
+    chat: int | None = None,
+) -> tuple[TelegramUser, ...]:
+    """Take a read-only display snapshot, including before a target leaves the group."""
+    seen = {person.id: person for person in observed if person.id in ids}
+    getter = getattr(bot, "get_chat_member", None)
+    if callable(getter) and chat is not None:
+        for user_id in sorted(ids):
+            try:
+                member = await asyncio.wait_for(getter(chat, user_id), timeout=2)
+                user = member.user
+                if type(user.id) is not int or user.id != user_id:
+                    continue
+                if isinstance(user, TelegramUser):
+                    seen[user_id] = user
+                elif getattr(user, "username", None) or getattr(user, "first_name", None):
+                    seen[user_id] = TelegramUser(
+                        id=user_id,
+                        is_bot=bool(getattr(user, "is_bot", False)),
+                        first_name=getattr(user, "first_name", "") or "",
+                        last_name=getattr(user, "last_name", None),
+                        username=getattr(user, "username", None),
+                    )
+            except TelegramRetryAfter:
+                break  # No further identity reads inside a Telegram FloodWait.
+            except (TelegramAPIError, TimeoutError, OSError, ValueError):
+                continue  # Formatting failure must never retry or fail a sanction.
+    return tuple(seen.values())
+
+
+async def identity_labels(
+    session: AsyncSession,
+    ids: set[int],
+    *,
+    observed: tuple[TelegramUser, ...] = (),
+    bot: Any = None,
+    chat: int | None = None,
+) -> dict[int, str]:
+    """Read names by pinned numeric ID; a display lookup never changes an action."""
+    seen = {
+        person.id: person
+        for person in await observed_users(ids, observed=observed, bot=bot, chat=chat)
+    }
+    people = {
+        person.telegram_id: person
+        for person in await session.scalars(select(User).where(User.telegram_id.in_(ids)))
+    }
+    return {
+        user_id: identity_label(seen.get(user_id) or people.get(user_id), user_id)
+        for user_id in ids
+    }
+
+
+def identity_fields(telegram_id: int, label: str) -> str:
+    return (
+        f"👤 <b>{t('lm.notice.user')}:</b> {escape(compact(label))}"
+        f"\n🆔 <b>{t('lm.notice.id')}:</b> <code>{telegram_id}</code>"
+    )
 
 
 def duration_text(seconds: int | None, kind: str) -> str:
@@ -106,15 +173,11 @@ async def success_message(
     sanction: GroupSanction,
     *,
     observed: tuple[TelegramUser, ...] = (),
+    bot: Any = None,
 ) -> str:
-    # Numeric identity lookup only: never resolve/reassign a username for an action.
-    people = {
-        person.telegram_id: person
-        for person in await session.scalars(
-            select(User).where(User.telegram_id.in_({draft.telegram_id, draft.actor_id}))
-        )
-    }
-    seen = {person.id: person for person in observed}
+    labels = await identity_labels(
+        session, {draft.telegram_id, draft.actor_id}, observed=observed, bot=bot, chat=draft.chat_id
+    )
     warnings = None
     if draft.kind == "WARN":
         # Stable count at this warning, isolated to this group and numeric user.
@@ -138,12 +201,8 @@ async def success_message(
     return format_success(
         draft.kind,
         draft.telegram_id,
-        user=identity_label(
-            seen.get(draft.telegram_id) or people.get(draft.telegram_id), draft.telegram_id
-        ),
-        admin=identity_label(
-            seen.get(draft.actor_id) or people.get(draft.actor_id), draft.actor_id
-        ),
+        user=labels[draft.telegram_id],
+        admin=labels[draft.actor_id],
         reason=draft.reason,
         duration_seconds=seconds,
         warnings=warnings,

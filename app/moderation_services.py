@@ -1,11 +1,12 @@
 """Local, opt-in group restrictions. Public commands/UI are intentionally not installed yet."""
 
+import asyncio
 import re
 from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.models import (
     GroupSanction,
     GroupSanctionJob,
     ManagedGroup,
+    User,
     now,
 )
 
@@ -132,9 +134,10 @@ def validate_policy(
 
 
 class GroupModerationService:
-    def __init__(self, session: AsyncSession, bot: Any):
+    def __init__(self, session: AsyncSession, bot: Any, *, use_mtproto_lookup: bool = False):
         self.session, self.bot = session, bot
         self.authorization = GroupAuthorizer(bot)
+        self.use_mtproto_lookup = use_mtproto_lookup
 
     async def _check_group(self, chat_id: int) -> None:
         try:
@@ -143,6 +146,67 @@ class GroupModerationService:
         except Exception:
             await self.session.rollback()
             raise
+
+    async def resolve_username(self, chat_id: int, actor_id: int, username: str) -> int:
+        """Pin a username only after a live, numeric Telegram identity check.
+
+        Reuse an explicitly enabled MTProto relay, otherwise a unique known ID.
+        Cached names alone never authorize a sanction; both paths need Bot API
+        confirmation. Unresolved/ambiguous names fail closed.
+        This lookup does not create users or modify global identity/SCAM records.
+        """
+        if not isinstance(username, str) or not re.fullmatch(
+            r"@[a-zA-Z][a-zA-Z0-9_]{4,31}", username
+        ):
+            raise DomainError("group_moderation_invalid_username")
+        await self._check_group(chat_id)
+        await self.authorization.actor(chat_id, actor_id)
+        normalized = username[1:].lower()
+        target_id: int | None = None
+        lookup_code = "unavailable"
+        if self.use_mtproto_lookup:
+            from app.mtproto_relay import active_relay
+
+            relay = active_relay()
+            if relay is not None:
+                observed = None
+                try:
+                    result = await asyncio.wait_for(
+                        relay.lookup_identity(normalized, refresh=True), 6
+                    )
+                    observed = result.user
+                    lookup_code = result.code
+                except (TimeoutError, OSError):
+                    pass  # A known ID still needs fresh Bot API verification below.
+                if observed is not None:
+                    numeric_id(getattr(observed, "id", 0))
+                    current = getattr(observed, "username", None)
+                    if (
+                        getattr(observed, "deleted", False)
+                        or not isinstance(current, str)
+                        or current.lower() != normalized
+                    ):
+                        raise DomainError("group_moderation_username_changed")
+                    target_id = observed.id
+        if target_id is None:
+            candidates = list(
+                await self.session.scalars(
+                    select(User.telegram_id)
+                    .where(User.telegram_id.is_not(None), func.lower(User.username) == normalized)
+                    .limit(2)
+                )
+            )
+            if len(candidates) != 1 or candidates[0] is None:
+                if lookup_code in {"not_found", "invalid_username", "not_user"}:
+                    raise DomainError("group_moderation_target_not_found")
+                raise DomainError("group_moderation_username_unknown")
+            target_id = candidates[0]
+        numeric_id(target_id)
+        member = await self.authorization.member(chat_id, target_id)
+        current = getattr(member.user, "username", None)
+        if not isinstance(current, str) or current.lower() != normalized:
+            raise DomainError("group_moderation_username_changed")
+        return target_id
 
     async def configure(
         self,

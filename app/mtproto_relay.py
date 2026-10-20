@@ -65,6 +65,23 @@ def due(event: AuditEvent | None) -> bool:
     return event is None or event.created_at.replace(tzinfo=UTC) < now() - timedelta(seconds=60)
 
 
+class _UsernameOnlyClient:
+    """Identity-only mode has no transport capable of submitting staff commands."""
+
+    def __init__(self, client: Any):
+        self._client = client
+
+    async def __call__(self, request: Any) -> Any:
+        from telethon.tl.functions.contacts import ResolveUsernameRequest
+
+        if not isinstance(request, ResolveUsernameRequest):
+            raise ValueError("Username-only MTProto transport rejects non-lookup requests")
+        return await self._client(request)
+
+    async def disconnect(self) -> None:
+        await self._client.disconnect()
+
+
 class GroupHelpRelay:
     def __init__(self, settings: Settings, sessions: Any, client: Any, staff: Any):
         self.settings, self.sessions, self.client, self.staff = settings, sessions, client, staff
@@ -106,6 +123,55 @@ class GroupHelpRelay:
                 self.lookups.pop(next(iter(self.lookups)))
             self.lookups[username] = (monotonic() + (30 if result.user is not None else 15), result)
             return result
+
+    @classmethod
+    async def connect_identity(cls, settings: Settings, sessions: Any) -> "GroupHelpRelay":
+        """Connect an explicitly enabled moderation lookup without staff or ban activation."""
+        from datetime import datetime
+
+        from telethon import TelegramClient
+
+        if not settings.moderation_mtproto_enabled:
+            raise ValueError("Moderation MTProto lookup is disabled")
+        directory = Path(settings.group_help_state_dir)
+        config = private_configuration(directory)
+        os.umask(0o077)
+        client = TelegramClient(
+            str(directory / "account.session"),
+            config["api_id"],
+            config["api_hash"],
+            flood_sleep_threshold=0,
+            request_retries=1,
+            connection_retries=2,
+            retry_delay=1,
+            timeout=5,
+        )
+        try:
+            await asyncio.wait_for(client.connect(), 15)
+            if not await client.is_user_authorized():
+                raise ValueError("MTProto session is not authenticated")
+            me = await client.get_me()
+            if me is None or me.bot:
+                raise ValueError("A Telegram user account is required")
+            relay = cls(settings, sessions, _UsernameOnlyClient(client), None)
+            # Share durable FloodWait across restart/mode changes without activating
+            # staff transport or requeueing any global SCAM ban outbox entries.
+            async with sessions() as session:
+                last = await session.scalar(
+                    select(AuditEvent)
+                    .where(AuditEvent.action == "mtproto_flood_wait")
+                    .order_by(AuditEvent.id.desc())
+                    .limit(1)
+                )
+                if last is not None:
+                    relay.flood_until = max(
+                        relay.flood_until, datetime.fromisoformat(last.details["until"])
+                    )
+            structlog.get_logger().info("moderation_mtproto_connected", account_id=me.id)
+            return relay
+        except BaseException:
+            await client.disconnect()
+            raise
 
     @classmethod
     async def connect(cls, settings: Settings, sessions: Any) -> "GroupHelpRelay":

@@ -392,3 +392,110 @@ async def test_cancel_and_rejected_confirmations_do_not_add_receipt_buttons(
     await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
     edit = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
     assert edit.reply_markup is None and not any(h in edit.text for h in HEADINGS.values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", HEADINGS)
+async def test_numeric_receipts_use_live_username_without_global_user_write(
+    local_journey, database, kind
+):
+    journey, native = local_journey
+    if kind in {"UNBAN", "UNMUTE"}:
+        await journey.send(
+            "/ban 51 30m" if kind == "UNBAN" else "/mute 51 30m", actor=42, chat=CHAT
+        )
+    native.members[CHAT, 51] = native.peer(51)
+    native.members[CHAT, 51].user.username = "redsafeads"
+    await journey.send(
+        f"/{kind.lower()} 51" + (" 30m" if kind in {"BAN", "MUTE"} else ""), actor=42, chat=CHAT
+    )
+    notice = [
+        call
+        for call in journey.transport.calls
+        if isinstance(call, SendMessage) and HEADINGS[kind] in call.text
+    ][-1]
+    assert "@redsafeads" in notice.text and "<code>51</code>" in notice.text
+    async with database() as session:
+        assert await session.scalar(select(User).where(User.telegram_id == 51)) is None
+
+
+@pytest.mark.asyncio
+async def test_username_command_receipt_uses_verified_name_not_raw_input(
+    local_journey, database, settings
+):
+    journey, native = local_journey
+    async with database() as session:
+        await Service(settings, session).observe(51, "redsafeads", "Old label")
+    native.members[CHAT, 51] = native.peer(51)
+    native.members[CHAT, 51].user.username = "redsafeads"
+    await journey.send("/warn @RedSafeAds", actor=42, chat=CHAT)
+    notice = [
+        call
+        for call in journey.transport.calls
+        if isinstance(call, SendMessage) and HEADINGS["WARN"] in call.text
+    ][-1]
+    assert "@redsafeads" in notice.text and "<code>51</code>" in notice.text
+    assert "Old label" not in notice.text and "@RedSafeAds" not in notice.text
+
+
+@pytest.mark.asyncio
+async def test_private_preview_confirmation_and_history_show_username(local_journey, database):
+    journey, native = local_journey
+    native.members[CHAT, 51] = native.peer(51)
+    native.members[CHAT, 51].user.username = "redsafeads"
+    await journey.send("/moderation", actor=42)
+    await journey.click(LocalAction(action="action", chat=CHAT, value="WARN").pack(), actor=42)
+    await journey.send("51", actor=42)
+    preview = [call for call in journey.transport.calls if isinstance(call, EditMessageText)][-1]
+    assert "@redsafeads" in preview.text and "<code>51</code>" in preview.text
+    async with database() as session:
+        draft = await session.scalar(select(GroupModerationDraft))
+        draft_id = draft.id
+    await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
+    receipt = [
+        call
+        for call in journey.transport.calls
+        if isinstance(call, EditMessageText) and HEADINGS["WARN"] in call.text
+    ][-1]
+    assert "@redsafeads" in receipt.text
+    await journey.click(LocalAction(action="whist", chat=CHAT, value="51:0").pack(), actor=42)
+    history = [call for call in journey.transport.calls if isinstance(call, EditMessageText)][-1]
+    assert "@redsafeads" in history.text and "<code>51</code>" in history.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["wrong_id", "unavailable", "renamed", "removed"])
+async def test_receipt_lookup_is_display_only_and_fails_safely(database, settings, failure):
+    from types import SimpleNamespace
+
+    from app.bot.moderation_messages import identity_labels
+
+    async with database() as session:
+        await Service(settings, session).observe(51, "old_username", "Known name")
+
+        async def member(chat, user):
+            if failure == "unavailable":
+                raise OSError("temporary read failure")
+            return SimpleNamespace(
+                user=TelegramUser(
+                    id=99 if failure == "wrong_id" else 51,
+                    is_bot=False,
+                    first_name="Current name",
+                    username=None if failure == "removed" else "current_username",
+                )
+            )
+
+        labels = await identity_labels(
+            session, {51}, bot=SimpleNamespace(get_chat_member=member), chat=CHAT
+        )
+        expected = (
+            "@old_username"
+            if failure in {"wrong_id", "unavailable"}
+            else "Current name"
+            if failure == "removed"
+            else "@current_username"
+        )
+        assert labels[51] == expected
+        assert (
+            await session.scalar(select(User).where(User.telegram_id == 51))
+        ).username == "old_username"
