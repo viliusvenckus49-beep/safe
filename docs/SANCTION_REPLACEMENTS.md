@@ -33,6 +33,9 @@ read-only reconciliation against Telegram and the audit trail.
 Old release buttons are checked against the current sanction state and cannot
 release a replacement. Terminal historical rows cannot be rewritten by a fresh
 revoke request. Concurrent BAN/KICK requests serialize and only one is accepted.
+KICK also checks confirmed absence both at submission and immediately before
+execution. A repeat KICK of a departed member sends a private membership error
+without issuing another BAN/UNBAN pair.
 
 The migration preserves existing data and refuses to discard populated
 replacement history on downgrade. Deployment must use an isolated test DB

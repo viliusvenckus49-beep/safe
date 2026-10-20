@@ -358,7 +358,13 @@ class GroupModerationService:
         await self._check_group(chat_id)
         await self.authorization.actor(chat_id, actor_id)
         await self.authorization.bot_rights(chat_id)
-        await self.authorization.target(chat_id, target_id)
+        member = await self.authorization.target(chat_id, target_id)
+        if kind == "KICK" and (
+            member.status == "left"
+            or member.status == "restricted"
+            and getattr(member, "is_member", None) is False
+        ):
+            raise DomainError("group_moderation_target_not_member")
         try:
             group = await lock_group(self.session, chat_id)
             draft = await self.check_draft(draft_id, chat_id, actor_id, target_id, kind)

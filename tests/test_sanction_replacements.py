@@ -179,6 +179,29 @@ async def test_unowned_mute_cannot_be_used_as_replacement_authority(database):
     assert len(bot.calls) == 1
 
 
+async def test_repeated_kick_does_not_ban_departed_member_again(username_journey):
+    journey, native = username_journey
+    await journey.send("/kick 51", actor=42, chat=CHAT)
+    count = len(native.calls)
+    assert count == 2 and native.members[CHAT, 51].status == "left"
+    await journey.send("/kick 51", actor=42, chat=CHAT)
+    assert len(native.calls) == count
+    response = sent(journey)[-1]
+    assert t("lm.diagnostic.not_in_group.title") in response.text
+    assert response.ephemeral_message_parameters.receiver_user_id == 42
+
+
+async def test_departure_between_kick_request_and_execution_is_private_failure(database):
+    bot = NativeBot()
+    await enabled(database, bot)
+    sid = await request(database, bot, "KICK", "left-before-execution")
+    bot.members[CHAT, 51] = bot.peer(51, "left")
+    await LocalModerationExecutor(database, bot).process(sanction_id=sid)
+    assert not bot.calls
+    async with database() as session:
+        assert (await session.get(GroupSanction, sid)).status == "CANCELLED"
+
+
 @pytest.mark.parametrize("path", ["policy", "deadline", "group"])
 async def test_all_pre_send_cancellations_cancel_unused_release(database, path):
     from app.models import GroupModerationSettings, ManagedGroup

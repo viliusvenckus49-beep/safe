@@ -5,19 +5,23 @@
 
 ## Results
 
-- **2,155 distinct collected tests covered successfully**, across partitions.
-  The completed prefix covers 1,203 tests before `test_moderation_messages.py`;
-  the remainder covers 952 tests from that file onward (952 passed).
-  The initial complete-run attempt also passed 70 overlapping tests from the
-  latter partition; outdated UI expectations were repaired and rerun there.
-- **218 final targeted routing/SQL/privacy tests passed** after callback/menu
-  refinements. This overlaps the collection above, not 218 additional tests.
-- Real isolated PostgreSQL 17.6 and Redis 7.4.5, using Unix sockets and Docker
-  `--network none`, no published ports. No real Telegram credential/session.
-- Ruff lint and format: passed (315 Python files formatted).
-- mypy: passed (99 application source files).
-- `git diff --check`: passed.
-- Remaining warnings were existing Alembic `path_separator` deprecation notices.
+- **2,173 tests passed in one complete run** (`347.95s`), with real isolated
+  PostgreSQL 17.6 and Redis 7.4.5. The later KICK absence refinement and its two
+  additional regressions passed in a **437-test final moderation run** (`64.86s`),
+  overlapping the complete suite. Telegram is a stateful API double.
+- **45 isolated operator tests passed**, including pinned source/session retention,
+  exact native-target allowlisting, schema 0019 and distinct active/pending/
+  processing/uncertain upgrade-stop explanations.
+- Docker services used Unix sockets, `--network none`, and no published ports.
+  No real Telegram credential/session was used in these tests.
+- Ruff lint and format passed (319 Python files); mypy passed (99 application
+  source files); compileall and `git diff --check` passed.
+- 17 warnings in the complete run are the existing Alembic `path_separator`
+  deprecation notices, not test failures.
+- The first broad run exposed two old migration snapshot assertions comparing
+  entire row tuples after an additive column. They now compare every original
+  column and value. Both were rerun successfully and the complete run above is
+  green. No retained-data assertion was removed.
 
 ## Covered behavior
 
@@ -41,6 +45,12 @@ blocks destructive downgrade. Unused additions may be removed while older
 history-preservation guards remain in effect. Production deployment whitelists
 were deliberately not expanded.
 
+Owned MUTE → BAN/KICK, replacement rejection/timeout/RetryAfter, exact MUTE
+signatures, release fencing, old controls, external-ban races, duplicate KICK
+without another native write, and concurrent PostgreSQL replacement requests
+are covered. Schema 0019 retains rows, matches model metadata and refuses to
+discard used replacement links. See [replacement policy](SANCTION_REPLACEMENTS.md).
+
 ## Reproduce
 
 Use the repository's locked Python environment, an isolated TEST_POSTGRES_URL
@@ -53,6 +63,8 @@ PostgreSQL fixture creates/drops unique test schemas.
 Telegram uses a stateful API double. Tests do not establish client-side
 Ephemeral visibility, second-account invisibility, actual personal/group
 permission semantics, live flood control, or delivery timing. These require the
-approved isolated bot/group after reviewing and applying schema 0018. No VPS
-installer was created or run for this branch. No production migration, restart,
-deployment or PR merge was performed.
+approved isolated bot/group after reviewing and applying schema 0019. A pinned
+self-contained test updater is prepared separately as
+`SAFECHECK_WARN_CONTROLS_TEST.py`; it has not been run on the VPS by this agent.
+It preserves the test DB/cache/session and requires idle test work. No production
+migration, restart, deployment or PR merge was performed.

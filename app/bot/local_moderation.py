@@ -386,6 +386,16 @@ class LocalModerationExecutor:
                     await self.authorization.actor(sanction.chat_id, job.actor_id)
                 await self.authorization.bot_rights(sanction.chat_id)
                 member = await self.authorization.target(sanction.chat_id, sanction.telegram_id)
+                if (
+                    job.operation == "APPLY"
+                    and sanction.kind == "KICK"
+                    and (
+                        member.status == "left"
+                        or member.status == "restricted"
+                        and getattr(member, "is_member", None) is False
+                    )
+                ):
+                    raise DomainError("group_moderation_target_not_member")
                 group = await lock_group(session, sanction.chat_id)
                 await session.refresh(job)
                 await session.refresh(sanction)

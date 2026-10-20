@@ -55,6 +55,7 @@ def basic_kind(error: Exception) -> str | None:
         if error.code == "local_invalid":
             return "input_invalid"
         return {
+            "group_moderation_target_not_member": "not_in_group",
             "group_moderation_invalid_duration": "duration_invalid",
             "group_moderation_protected_target": "protected_target",
             "group_moderation_scam_protected": "scam",
