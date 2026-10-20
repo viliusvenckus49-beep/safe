@@ -194,7 +194,9 @@ async def test_unverified_live_identity_cannot_use_cached_name(database, monkeyp
 
 
 @pytest.mark.parametrize("change", ["actor", "bot"])
-async def test_rights_revoked_after_username_lookup_deny_prepare(username_journey, database, change):
+async def test_rights_revoked_after_username_lookup_deny_prepare(
+    username_journey, database, change
+):
     journey, native = username_journey
     await known(database, native)
     original = native.get_chat_member
