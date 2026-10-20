@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     redis_url: SecretStr | None = None
     telegram_proxy_url: SecretStr | None = None
     group_help_enabled: bool = False
+    moderation_mtproto_enabled: bool = False
     group_help_state_dir: str = "/run/mtproto"
     group_help_staff_id: int = Field(default=-1004300060813, lt=0, ge=-9223372036854775808)
     group_help_bot_id: int = Field(default=0, ge=0, le=9223372036854775807)
@@ -86,6 +87,8 @@ class Settings(BaseSettings):
             or not self.group_help_state_dir.startswith("/")
         ):
             raise ValueError("Group Help requires verified staff, bot, scope and private session")
+        if self.moderation_mtproto_enabled and not self.group_help_state_dir.startswith("/"):
+            raise ValueError("Moderation MTProto requires an absolute private session directory")
         return self
 
     @field_validator("group_help_scope_ids")

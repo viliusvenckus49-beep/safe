@@ -62,3 +62,20 @@ Bot API mismatch, authorization before lookup, absence of SQL transactions durin
 lookup, and absence of global identity/SCAM mutations. Request doubles do not
 prove live MTProto account connectivity. The verification figures above describe
 the earlier cache-only revision; extension results are reported separately.
+
+## Username lookup without staff integration
+
+Set `MODERATION_MTPROTO_ENABLED=true` with `GROUP_HELP_ENABLED=false` to use an
+already authenticated private user session only for local moderation username
+lookup. `GROUP_HELP_STATE_DIR` still names the private API configuration/session
+directory. No staff group, staff bot ID, managed staff scope or staff membership
+is required in this mode. The existing full staff mode remains separate and takes
+precedence if explicitly enabled. Both modes are off by default.
+
+Identity-only startup verifies the authenticated user account and restores the
+shared durable FloodWait budget, without staff requests, activation or ban-outbox
+requeue. Its transport permits only `ResolveUsernameRequest` after startup.
+Background staff jobs and public identity/SCAM resolution retain their existing
+`GROUP_HELP_ENABLED` authorization gate. The new flag enables only local moderation
+lookup; numeric target confirmation and all local rights checks still apply.
+Production settings and sessions are not changed by this patch.
