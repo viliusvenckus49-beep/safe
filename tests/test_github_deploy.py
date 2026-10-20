@@ -55,7 +55,11 @@ def test_failure_restores_previous_image_and_stays_failed():
 @pytest.mark.parametrize("revision", range(9, 17))
 def test_only_reviewed_release_migrations_are_allowed(revision):
     root = Path(__file__).parents[1]
-    current = module.migration_snapshot(root)
+    current = {
+        name: value
+        for name, value in module.migration_snapshot(root).items()
+        if int(name[:4]) <= 16
+    }
     previous = {name: value for name, value in current.items() if int(name[:4]) <= revision}
     assert module.compatible_migrations(current, previous)
     assert module.compatible_migrations(current, current)
@@ -66,7 +70,11 @@ def test_only_reviewed_release_migrations_are_allowed(revision):
 @pytest.mark.parametrize("revision", range(10, 17))
 @pytest.mark.parametrize("change", ["modified", "removed", "renamed"])
 def test_reviewed_migrations_cannot_be_modified_removed_or_renamed(revision, change):
-    current = module.migration_snapshot(Path(__file__).parents[1])
+    current = {
+        name: value
+        for name, value in module.migration_snapshot(Path(__file__).parents[1]).items()
+        if int(name[:4]) <= 16
+    }
     name = next(name for name in current if name.startswith(f"{revision:04d}_"))
     candidate = dict(current)
     if change == "modified":
@@ -84,5 +92,8 @@ def test_reviewed_migrations_cannot_be_modified_removed_or_renamed(revision, cha
 def test_unreviewed_next_migration_is_rejected_from_actual_production_base():
     current = module.migration_snapshot(Path(__file__).parents[1])
     previous = {name: value for name, value in current.items() if int(name[:4]) <= 10}
+    # The actual new warning migration also remains outside production approval.
+    assert any(name.startswith("0017_") for name in current)
+    assert not module.compatible_migrations(current, previous)
     candidate = {**current, "0017_unreviewed.py": b"# not part of the reviewed release"}
     assert not module.compatible_migrations(candidate, previous)
