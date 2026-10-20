@@ -376,3 +376,54 @@ async def test_native_recipient_and_topic_are_preserved_without_dm(actor):
     assert kwargs["ephemeral_message_parameters"].model_dump(exclude_none=True) == {
         "receiver_user_id": actor
     }
+
+
+@pytest.mark.parametrize("command", ["ban", "mute"])
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_disabled_permanent_duration_is_distinct_from_disabled_module(
+    username_journey, database, settings, command, lang
+):
+    from sqlalchemy import update
+
+    from app.models import GroupModerationSettings
+
+    journey, native = username_journey
+    async with database() as session:
+        await session.execute(
+            update(GroupModerationSettings)
+            .where(GroupModerationSettings.chat_id == CHAT)
+            .values(**{"allow_permanent_" + command + "s": False})
+        )
+        await session.commit()
+    with use_language(lang):
+        # Explicit fixture language instead of relying on a process context across middleware.
+        async with database() as session:
+            await Service(settings, session).set_language(42, lang)
+        await journey.send("/" + command + " 51", actor=42, chat=CHAT)
+        result = assert_private(journey, "/" + command, "duration_required")
+        assert "/" + command + " @username 30m" in str(Text(result.text))
+        assert t("lm.diagnostic.module_disabled.title") not in result.text
+    assert native.calls == []
+    await no_sanctions(database)
+
+
+@pytest.mark.parametrize("command", ["ban", "mute"])
+async def test_disabled_module_does_not_claim_duration_is_the_only_problem(
+    username_journey, database, command
+):
+    from sqlalchemy import update
+
+    from app.models import GroupModerationSettings
+
+    journey, native = username_journey
+    async with database() as session:
+        await session.execute(
+            update(GroupModerationSettings)
+            .where(GroupModerationSettings.chat_id == CHAT)
+            .values(**{command + "s_enabled": False})
+        )
+        await session.commit()
+    await journey.send("/" + command + " 51 30m", actor=42, chat=CHAT)
+    assert_private(journey, "/" + command, "module_disabled")
+    assert native.calls == []
+    await no_sanctions(database)

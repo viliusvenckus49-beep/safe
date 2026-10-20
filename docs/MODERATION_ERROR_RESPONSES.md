@@ -70,3 +70,15 @@ same token stopped. Do not recreate its database or repeat login/migrations.
 
 No production deployment, migration, restart, or database change is part of this
 patch. Production promotion remains subject to separate approval.
+
+## Display names and policy guidance
+
+Receipts, private previews, pending/failed results and history share a read-only
+numeric-ID display lookup. Prefer a live username, then a verified display name
+or known identity, with numeric ID as fallback. HTML values are escaped. Direct
+actions retain a transient display snapshot before BAN/KICK removes the target.
+Display failures never authorize or retry actions or update global identity data.
+
+Permanent BAN/MUTE rejection now asks for a duration with the actual command and
+a 30m example. A disabled module has a separate localized message. Existing
+permission checks, duration defaults and permanent-action policy are unchanged.

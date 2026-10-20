@@ -299,6 +299,10 @@ for _lang, _labels in NOTICE.items():
 # Command diagnostics use native HTML ephemeral messages, with private fallback.
 DIAGNOSTICS = {
     "lt": {
+        "module_disabled.title": "Moderavimo modulis išjungtas",
+        "module_disabled.body": "Šioje grupėje ši moderavimo funkcija <b>neįjungta</b>. Patikrinkite grupės moderavimo nustatymus.",
+        "duration_required.title": "Nurodykite trukmę",
+        "duration_required.body": "<b>Neribota trukmė</b> šioje grupėje neįjungta. Nurodykite trukmę, pavyzdžiui: <b>{command} @username 30m</b>. Leidžiamos trukmės: <b>30m, 1h, 1d, 7d, 30d</b>.",
         "target_missing.title": "Naudotojas nerastas",
         "target_missing.body": "Norėdami naudoti komandą <b>{command}</b>, nurodykite <b>naudotojo vardą (@username)</b>, <b>Telegram ID</b> arba paminėkite naudotoją.\n\nTaip pat galite <b>atsakyti į jo žinutę</b>.",
         "not_in_group.title": "Naudotojas nėra grupės narys",
@@ -318,6 +322,10 @@ DIAGNOSTICS = {
         "open_private": "Atidarykite <b>privatų pokalbį su botu</b>, kad gautumėte privatų atsakymą į komandą <b>{command}</b>. Privačiame meniu pasirinkite grupę per /moderation ir pakartokite komandą.",
     },
     "en": {
+        "module_disabled.title": "Moderation module disabled",
+        "module_disabled.body": "This moderation function is <b>disabled</b> in this group. Check the group moderation settings.",
+        "duration_required.title": "Specify a duration",
+        "duration_required.body": "<b>Permanent duration</b> is disabled in this group. Specify a duration, for example: <b>{command} @username 30m</b>. Supported durations: <b>30m, 1h, 1d, 7d, 30d</b>.",
         "target_missing.title": "User not found",
         "target_missing.body": "To use <b>{command}</b>, specify a <b>username (@username)</b>, <b>Telegram ID</b> or mention the user.\n\nYou can also <b>reply to their message</b>.",
         "not_in_group.title": "User is not a group member",
@@ -337,6 +345,10 @@ DIAGNOSTICS = {
         "open_private": "Open a <b>private chat with the bot</b> to receive a private reply to <b>{command}</b>. Select the group using /moderation in private, then repeat the command.",
     },
     "ru": {
+        "module_disabled.title": "Модуль модерации выключен",
+        "module_disabled.body": "Эта функция модерации <b>выключена</b> в группе. Проверьте настройки модерации группы.",
+        "duration_required.title": "Укажите срок",
+        "duration_required.body": "<b>Бессрочное действие</b> в группе выключено. Укажите срок, например: <b>{command} @username 30m</b>. Допустимые сроки: <b>30m, 1h, 1d, 7d, 30d</b>.",
         "target_missing.title": "Пользователь не найден",
         "target_missing.body": "Для команды <b>{command}</b> укажите <b>имя пользователя (@username)</b>, <b>Telegram ID</b> или упомяните пользователя.\n\nТакже можно <b>ответить на его сообщение</b>.",
         "not_in_group.title": "Пользователь не состоит в группе",

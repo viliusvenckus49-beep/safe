@@ -28,7 +28,12 @@ from app.bot.moderation_errors import (
     error_message,
     target_read,
 )
-from app.bot.moderation_messages import success_message
+from app.bot.moderation_messages import (
+    identity_fields,
+    identity_labels,
+    observed_users,
+    success_message,
+)
 from app.bot.states import LocalModerationFlow
 from app.bot.validation import actor_id
 from app.errors import DomainError
@@ -153,6 +158,7 @@ async def command_error(
     chat: int | None,
     username: str | None,
     may_have_executed: bool = False,
+    permanent_requested: bool = False,
 ) -> None:
     try:
         actor = actor_id(message)
@@ -160,6 +166,25 @@ async def command_error(
         await deliver_error(message, None, "", command)
         return
     kind = basic_kind(error)
+    if (
+        isinstance(error, DomainError)
+        and (
+            error.code == "group_moderation_disabled"
+            or (error.code == "group_moderation_invalid_duration" and permanent_requested)
+        )
+        and chat is not None
+    ):
+        policy = await service.session.get(GroupModerationSettings, chat)
+        action = command_name(command).split("@", 1)[0][1:]
+        kind = "module_disabled" if error.code == "group_moderation_disabled" else kind
+        if (
+            policy
+            and policy.enabled
+            and action in {"ban", "mute"}
+            and getattr(policy, action + "s_enabled")
+            and not getattr(policy, "allow_permanent_" + action + "s")
+        ):
+            kind = "duration_required"
     target = target_read(error, chat, actor, bound_bot(message).id) if chat is not None else None
     if target is not None and local is not None and chat is not None:
         kind = (
@@ -358,13 +383,21 @@ async def history_panel(
             query.order_by(GroupSanction.id.desc()).offset(offset).limit(6)
         )
     )
+    labels = await identity_labels(
+        service.session,
+        {target, *(row.actor_id for row in rows[:5])},
+        bot=bound_bot(message),
+        chat=chat,
+    )
     text = (
         t("lm.title")
-        + f"\n\n🆔 <code>{target}</code>\n\n"
+        + "\n\n"
+        + identity_fields(target, labels[target])
+        + "\n\n"
         + t("lm.warnings" if warnings else "lm.history")
     )
     for row in rows[:5]:
-        text += f"\n\n<b>#{row.id} · {t('lm.' + row.kind)}</b>\n{utc(row.created_at).strftime('%Y-%m-%d %H:%M UTC')} · {t('lm.state.' + row.status)}\n🆔 <code>{row.actor_id}</code>"
+        text += f"\n\n<b>#{row.id} · {t('lm.' + row.kind)}</b>\n{utc(row.created_at).strftime('%Y-%m-%d %H:%M UTC')} · {t('lm.state.' + row.status)}\n👑 <b>{t('lm.notice.admin')}:</b> {escape(labels[row.actor_id])} · <code>{row.actor_id}</code>"
         if row.reason:
             text += "\n" + t("lm.reason", reason=escape(row.reason[:120]))
         release = await service.session.scalar(
@@ -378,10 +411,13 @@ async def history_panel(
             .limit(1)
         )
         if release:
+            release_labels = await identity_labels(
+                service.session, {release.actor_id}, bot=bound_bot(message), chat=chat
+            )
             text += (
                 "\n"
                 + t("lm.last_release")
-                + f" {t('lm.' + release.kind)} · {utc(release.created_at).strftime('%Y-%m-%d %H:%M UTC')} · <code>{release.actor_id}</code>"
+                + f" {t('lm.' + release.kind)} · {utc(release.created_at).strftime('%Y-%m-%d %H:%M UTC')} · {escape(release_labels[release.actor_id])} · <code>{release.actor_id}</code>"
             )
             if release.reason:
                 text += "\n" + t("lm.reason", reason=escape(release.reason[:120]))
@@ -406,7 +442,11 @@ async def history_panel(
 
 
 async def receipt_text(
-    session: Any, draft: GroupModerationDraft, *, observed: tuple[TelegramUser, ...] = ()
+    session: Any,
+    draft: GroupModerationDraft,
+    *,
+    observed: tuple[TelegramUser, ...] = (),
+    bot: Any = None,
 ) -> tuple[str, bool]:
     row = await session.get(GroupSanction, draft.sanction_id, populate_existing=True)
     if row is None:
@@ -439,10 +479,15 @@ async def receipt_text(
     elif row.status in {"FAILED", "CANCELLED"}:
         key, done = "failed", True
     if key in {"done", "recorded"}:
-        return await success_message(session, draft, row, observed=observed), done
+        return await success_message(session, draft, row, observed=observed, bot=bot), done
+    labels = await identity_labels(
+        session, {draft.telegram_id}, observed=observed, bot=bot, chat=draft.chat_id
+    )
     text = (
         t("lm.title")
-        + f"\n\n<b>{t('lm.' + draft.kind)}</b>\n🆔 <code>{draft.telegram_id}</code>\n\n"
+        + f"\n\n<b>{t('lm.' + draft.kind)}</b>\n"
+        + identity_fields(draft.telegram_id, labels[draft.telegram_id])
+        + "\n\n"
         + t("lm." + key)
     )
     if draft.reason:
@@ -451,18 +496,29 @@ async def receipt_text(
 
 
 async def show_draft(
-    message: Message, service: Service, draft: GroupModerationDraft, *, edit: bool = False
+    message: Message,
+    service: Service,
+    draft: GroupModerationDraft,
+    *,
+    edit: bool = False,
+    observed: tuple[TelegramUser, ...] = (),
 ) -> None:
     if draft.status == "CONFIRMED":
-        text, _ = await receipt_text(service.session, draft)
+        text, _ = await receipt_text(
+            service.session, draft, observed=observed, bot=bound_bot(message)
+        )
     elif draft.status == "CANCELLED":
         text = t("lm.cancelled")
     else:
+        labels = await identity_labels(
+            service.session, {draft.telegram_id}, bot=bound_bot(message), chat=draft.chat_id
+        )
         text = (
             t("lm.title")
             + "\n\n"
             + t("lm.preview")
-            + f"\n\n<b>{t('lm.' + draft.kind)}</b>\n🆔 <code>{draft.telegram_id}</code>"
+            + f"\n\n<b>{t('lm.' + draft.kind)}</b>\n"
+            + identity_fields(draft.telegram_id, labels[draft.telegram_id])
         )
         if draft.kind in {"BAN", "MUTE"}:
             text += "\n" + (
@@ -522,7 +578,7 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
                 if draft.receipt_done:
                     continue
                 with use_language(draft.language):
-                    text, done = await receipt_text(session, draft)
+                    text, done = await receipt_text(session, draft, bot=bot)
                     digest = hashlib.sha256(text.encode()).hexdigest()
                     row = await session.get(GroupSanction, draft.sanction_id)
                     checked_at = row.updated_at
@@ -583,6 +639,7 @@ def register_local_handlers(router: Router) -> None:
     ) -> None:
         local, chat, username = None, None, None
         may_have_executed = False
+        permanent_requested = False
         called = command_name(message.text or "")
         try:
             actor = actor_id(message)
@@ -600,6 +657,7 @@ def register_local_handlers(router: Router) -> None:
             target, until, reason = await parse_target_input(
                 local, int(chat), actor, args[0] if args else "", message.reply_to_message, kind
             )
+            permanent_requested = kind in {"BAN", "MUTE"} and until is None
             if kind == "WARNINGS":
                 panel = (
                     message
@@ -628,6 +686,9 @@ def register_local_handlers(router: Router) -> None:
             )
             # Explicit textual commands are the administrator's direct instruction.
             # Menu-selected actions instead require a durable confirmation below.
+            verified_people = await observed_users(
+                {target, actor}, bot=bound_bot(message), chat=int(chat)
+            )
             may_have_executed = True
             sanction = await local.confirm(draft.id, actor)
             await LocalModerationExecutor(session_factory, bound_bot(message)).process(
@@ -642,7 +703,9 @@ def register_local_handlers(router: Router) -> None:
                 )
                 if person is not None
             )
-            text, done = await receipt_text(service.session, draft, observed=people)
+            text, done = await receipt_text(
+                service.session, draft, observed=people + verified_people, bot=bound_bot(message)
+            )
             if draft.panel_message_id:
                 try:
                     await bound_bot(message).edit_message_text(
@@ -671,12 +734,14 @@ def register_local_handlers(router: Router) -> None:
                 chat=chat,
                 username=username,
                 may_have_executed=may_have_executed,
+                permanent_requested=permanent_requested,
             )
 
     @router.message(LocalModerationFlow.target, F.text, ~F.text.startswith("/"))
     async def local_input(message: Message, state: FSMContext, service: Service) -> None:
         local, chat, username = None, None, None
         called = "/moderation"
+        permanent_requested = False
         try:
             if message.chat.type != "private":
                 raise DomainError("group_moderation_forbidden")
@@ -689,6 +754,7 @@ def register_local_handlers(router: Router) -> None:
             target, until, reason = await parse_target_input(
                 local, chat, actor_id(message), message.text or "", None, kind
             )
+            permanent_requested = kind in {"BAN", "MUTE"} and until is None
             panel = message.model_copy(
                 update={"message_id": data.get("lm_panel", message.message_id)}
             ).as_(bound_bot(message))
@@ -719,7 +785,14 @@ def register_local_handlers(router: Router) -> None:
         ) as error:
             await service.session.rollback()
             await command_error(
-                message, service, error, command=called, local=local, chat=chat, username=username
+                message,
+                service,
+                error,
+                command=called,
+                local=local,
+                chat=chat,
+                username=username,
+                permanent_requested=permanent_requested,
             )
 
     @router.callback_query(LocalAction.filter())
@@ -823,6 +896,9 @@ def register_local_handlers(router: Router) -> None:
                 await display(message, t("lm.cancelled"), None, edit=True)
             elif action in {"confirm", "refresh"}:
                 assert draft is not None
+                verified_people = await observed_users(
+                    {draft.telegram_id, actor}, bot=callback.bot, chat=draft.chat_id
+                )
                 if action == "confirm":
                     sanction = await local.confirm(value, actor)
                     await display(message, t("lm.queued"), None, edit=True)
@@ -832,7 +908,7 @@ def register_local_handlers(router: Router) -> None:
                 await service.session.refresh(draft)
                 if draft.status != "CONFIRMED":
                     raise DomainError("group_moderation_invalid_draft")
-                await show_draft(message, service, draft, edit=True)
+                await show_draft(message, service, draft, edit=True, observed=verified_people)
             else:
                 raise DomainError("local_invalid")
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
