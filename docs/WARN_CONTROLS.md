@@ -1,0 +1,103 @@
+# SAFECheck warning escalation and receipt controls
+
+An enabled moderation module supports both permanent and timed BAN/MUTE. Omitting
+a duration means permanent; existing explicit duration tokens remain supported.
+Legacy `allow_permanent_*` columns are retained for compatibility but no longer
+block enabled commands or appear as separate UI switches. Current Telegram rights,
+protected administrators/owners, opt-in modules and time-range checks still apply.
+
+UNMUTE lifts the owned personal restriction using all supported permission flags
+set to true, as required by `restrictChatMember`; group defaults continue to apply.
+Copying group defaults into a personal restriction can leave Telegram reporting
+`restricted` after release and previously blocked subsequent MUTE/BAN/KICK. A
+legacy, permanent member exception exactly matching every current group-default
+flag is accepted as having no additional restriction. Unknown flags, departed
+members, finite deadlines and stricter restrictions remain protected. This repair
+does not clear historical sanctions or grant ownership of a foreign restriction.
+
+## Warning lifecycle
+
+Each distinct `/warn` records one `GroupSanction(kind=WARN)`. Telegram redelivery
+of the same message/request reuses its existing draft and sanction. An intentional
+new message is a new warning. Warnings have no expiry and are scoped to group/user.
+
+| WARN status | Meaning |
+| --- | --- |
+| RECORDED | Active |
+| CANCELLED | Explicitly cleared by an authorized administrator |
+| COMPLETED | Consumed by a confirmed successful automatic MUTE |
+
+On the third active warning, the existing group lock serializes creation of one
+24-hour MUTE and its normal fenced APPLY/RELEASE jobs. A durable escalation links
+the triggering warning, sanction and public receipt. The existing worker performs
+fresh Telegram identity, role, bot permission, policy and ownership checks.
+
+Only a confirmed successful APPLY owned by SAFECheck consumes the active warnings,
+in the same fenced completion transaction. Failed, rejected, protected, ambiguous
+or cancelled attempts retain warnings. FloodWait retries the same job under the
+existing backoff/deadline rules; uncertain writes are never blindly repeated.
+Existing foreign restrictions are not claimed as a successful automatic penalty.
+Other live restrictions or a disabled MUTE policy can prevent escalation; the
+warning receipt reports that warnings remain active. No group is affected by
+another group's warnings. A manual clear can cancel an unsent escalation, but
+cannot pretend to cancel an in-flight or uncertain API request.
+
+The migration does not retroactively issue penalties. Existing RECORDED warnings
+remain active; a new WARN evaluates the threshold under the current policy.
+
+## Public buttons and private errors
+
+WARN receipts expose `× Clear warnings`; active owned BAN/MUTE receipts expose
+UNBAN/UNMUTE. Texts, buttons and history support LT/EN/RU. Unknown display names
+fall back to one Telegram ID field instead of duplicating the ID in two fields.
+
+Callbacks resolve the exact sanction and a stored public receipt. They never
+trust caller-supplied group/user IDs or global SAFECheck administrator status.
+Each action repeats current local authorization. A button copied to another
+chat/message, a protected target, a changed sanction or a stale click fails closed.
+
+Clearing warnings uses a five-minute confirmation token bound to the actual actor,
+origin warning and current active-warning set. Confirmation is sent using a native
+recipient-only ephemeral group message. A changed warning set, expired token,
+revoked rights or repeat confirmation cannot clear additional warnings. Clear and
+consume audits retain original warning reasons, issuance dates and administrators;
+history also shows the state-change administrator and date.
+
+Release buttons enqueue the existing exact-sanction revoke operation. Worker
+fencing, ownership/SCAM checks and a unique release job prevent duplicate effects.
+The original receipt becomes the release result and loses its control. Manual
+release and expiry also retire old public buttons. Private callbacks use Telegram's
+real private alert mechanism; slash-command lookup errors retain native HTML
+ephemeral delivery. Successful moderation results remain public in the group.
+
+Automatic announcement sending claims its durable receipt before calling Telegram.
+Ambiguous delivery is not blindly resent. Explicit FloodWait rejection allows a
+retry after its prescribed delay. API success alone does not prove client display.
+
+## Migration and staging
+
+Revision **0017**, after 0016, adds only `group_warning_escalations` and
+`group_warning_resets`. Existing records and constraints remain intact. Downgrade
+refuses to discard warning-control history. No dependencies are added.
+
+Before any production promotion, use an isolated staging database/session/bot:
+
+1. Stop only that staging bot/worker; preserve its database and session.
+2. Verify candidate source, backup metadata and existing revision; apply 0017 and
+   run Alembic drift checks. Never use production migration permission implicitly.
+3. Start the reviewed candidate with a single poller. Check bot, PostgreSQL, Redis
+   and worker readiness. Limit native moderation tests to a consenting non-admin.
+4. Test permanent and timed BAN/MUTE using username, ID and reply; test UNBAN and
+   UNMUTE buttons, stale clicks, local rights revocation and a second group.
+5. Issue WARN 1 and 2, inspect 1/3 and 2/3, then confirm WARN 3 causes one 24-hour
+   MUTE, resets active count to 0 and retains all history. Test its UNMUTE button.
+6. Test clear confirmation, cancellation, expiry, double clicks and another actor.
+   Fault injection must prove failed/uncertain MUTE retains all warnings.
+7. Confirm public buttons are visible to ordinary members but cannot be used by
+   them, and ephemeral errors/confirmations are invisible to a second member.
+
+Rollback keeps schema 0017 and its history. Stop the new staging runtime, inspect
+all pending/processing/uncertain escalations and finish or reconcile them before
+running an older worker: its code cannot perform the new consume hook. Never
+replay an ambiguous native action or drop the new history tables. Production merge,
+migration, deployment and restarts still require separate explicit approval.

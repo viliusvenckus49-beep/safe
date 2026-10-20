@@ -380,7 +380,7 @@ async def test_native_recipient_and_topic_are_preserved_without_dm(actor):
 
 @pytest.mark.parametrize("command", ["ban", "mute"])
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
-async def test_disabled_permanent_duration_is_distinct_from_disabled_module(
+async def test_legacy_permanent_flags_do_not_block_an_enabled_command(
     username_journey, database, settings, command, lang
 ):
     from sqlalchemy import update
@@ -400,11 +400,12 @@ async def test_disabled_permanent_duration_is_distinct_from_disabled_module(
         async with database() as session:
             await Service(settings, session).set_language(42, lang)
         await journey.send("/" + command + " 51", actor=42, chat=CHAT)
-        result = assert_private(journey, "/" + command, "duration_required")
-        assert "/" + command + " @username 30m" in str(Text(result.text))
+        result = messages(journey, CHAT)[-1]
+        assert result.parse_mode == "HTML"
+        assert t("lm.notice.permanent") in result.text
         assert t("lm.diagnostic.module_disabled.title") not in result.text
-    assert native.calls == []
-    await no_sanctions(database)
+        assert result.reply_markup is not None
+    assert len(native.calls) == 1 and native.calls[0][1].get("until_date") is None
 
 
 @pytest.mark.parametrize("command", ["ban", "mute"])

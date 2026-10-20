@@ -19,7 +19,7 @@ CATALOGS = {
         "lm.UNMUTE": "🔊 Panaikinti nutildymą",
         "lm.WARN": "⚠ Įspėti",
         "lm.KICK": "🚪 Pašalinti",
-        "lm.target": "Įvesk Telegram ID arba @username. BAN / MUTE gali pridėti trukmę: 30m, 1h, 1d, 7d, 30d arba neribotai. Po jos — neprivaloma priežastis.\n\nGrupėje taip pat gali atsakyti į žinutę komanda /ban, /unban, /mute, /unmute, /warn, /kick ar /warnings. @username turi būti patvirtintas pagal dabartinius Telegram duomenis. Nežinomiems vardams reikia prijungtos MTProto paskyros.",
+        "lm.target": "Įvesk Telegram ID arba @username. BAN / MUTE trukmė neprivaloma. Nenurodžius trukmės bausmė neribota. Galimos trukmės: 30m, 1h, 1d, 7d, 30d arba neribotai. Po jos — neprivaloma priežastis.\n\nGrupėje taip pat gali atsakyti į žinutę komanda /ban, /unban, /mute, /unmute, /warn, /kick ar /warnings. @username turi būti patvirtintas pagal dabartinius Telegram duomenis. Nežinomiems vardams reikia prijungtos MTProto paskyros.",
         "lm.confirm": "✓ Patvirtinti",
         "lm.cancel": "× Atšaukti",
         "lm.preview": "<b>Patvirtinti veiksmą?</b>",
@@ -76,7 +76,7 @@ CATALOGS = {
         "lm.UNMUTE": "🔊 Unmute",
         "lm.WARN": "⚠ Warn",
         "lm.KICK": "🚪 Kick",
-        "lm.target": "Enter a Telegram ID or @username. For BAN / MUTE, add 30m, 1h, 1d, 7d, 30d or forever, then an optional reason.\n\nIn a group you can also reply using /ban, /unban, /mute, /unmute, /warn, /kick or /warnings. The @username must be verified against current Telegram data. Unknown names require a connected MTProto account.",
+        "lm.target": "Enter a Telegram ID or @username. For BAN / MUTE, duration is optional; omitting it means permanent. Use 30m, 1h, 1d, 7d, 30d or forever, then an optional reason.\n\nIn a group you can also reply using /ban, /unban, /mute, /unmute, /warn, /kick or /warnings. The @username must be verified against current Telegram data. Unknown names require a connected MTProto account.",
         "lm.confirm": "✓ Confirm",
         "lm.cancel": "× Cancel",
         "lm.preview": "<b>Confirm this action?</b>",
@@ -133,7 +133,7 @@ CATALOGS = {
         "lm.UNMUTE": "🔊 Снять мут",
         "lm.WARN": "⚠ Предупредить",
         "lm.KICK": "🚪 Исключить",
-        "lm.target": "Введите Telegram ID или @username. Для BAN / MUTE добавьте 30m, 1h, 1d, 7d, 30d или навсегда, затем необязательную причину.\n\nВ группе можно ответить на сообщение: /ban, /unban, /mute, /unmute, /warn, /kick или /warnings. @username проверяется по текущим данным Telegram. Для неизвестных имён требуется подключённый аккаунт MTProto.",
+        "lm.target": "Введите Telegram ID или @username. Для BAN / MUTE срок необязателен; без срока санкция бессрочная. Можно указать 30m, 1h, 1d, 7d, 30d или навсегда, затем необязательную причину.\n\nВ группе можно ответить на сообщение: /ban, /unban, /mute, /unmute, /warn, /kick или /warnings. @username проверяется по текущим данным Telegram. Для неизвестных имён требуется подключённый аккаунт MTProto.",
         "lm.confirm": "✓ Подтвердить",
         "lm.cancel": "× Отмена",
         "lm.preview": "<b>Подтвердить действие?</b>",
@@ -240,7 +240,7 @@ for _lang, _values in _STATES.items():
 NOTICE = {
     "lt": {
         "user": "Naudotojas",
-        "id": "ID",
+        "id": "Telegram ID",
         "duration": "Trukmė",
         "reason": "Priežastis",
         "admin": "Administratorius",
@@ -258,7 +258,7 @@ NOTICE = {
     },
     "en": {
         "user": "User",
-        "id": "ID",
+        "id": "Telegram ID",
         "duration": "Duration",
         "reason": "Reason",
         "admin": "Admin",
@@ -276,7 +276,7 @@ NOTICE = {
     },
     "ru": {
         "user": "Пользователь",
-        "id": "ID",
+        "id": "Telegram ID",
         "duration": "Срок",
         "reason": "Причина",
         "admin": "Администратор",
@@ -370,3 +370,92 @@ DIAGNOSTICS = {
 }
 for _lang, _labels in DIAGNOSTICS.items():
     CATALOGS[_lang].update({"lm.diagnostic." + key: value for key, value in _labels.items()})
+
+CONTROLS = {
+    "lt": {
+        "warn_title": "⚠️ NAUDOTOJAS ĮSPĖTAS",
+        "reset": "× Anuliuoti įspėjimus",
+        "unmute": "🔊 UNMUTE",
+        "unban": "✓ UNBAN",
+        "reset_confirm": "<b><u>Anuliuoti įspėjimus?</u></b>\n\nBus anuliuoti visi <b>{count}</b> aktyvūs šio naudotojo įspėjimai šioje grupėje. Istorija išliks.",
+        "yes": "✓ Patvirtinti",
+        "no": "Atšaukti",
+        "cancelled": "Veiksmas atšauktas.",
+        "reset_done": "Aktyvūs įspėjimai anuliuoti. Istorija išsaugota.",
+        "stale": "Mygtukas pasenęs arba veiksmas jau atliktas. Patikrinkite naujausią būseną.",
+        "rights": "Šiam veiksmui reikia aktualių grupės administratoriaus ir boto moderavimo teisių.",
+        "busy": "Sankcija vykdoma arba jos rezultatas neaiškus. Veiksmas nekartojamas; reikalinga patikra.",
+        "warn_active": "Aktyvus",
+        "warn_cancelled": "Įspėjimai anuliuoti. Istorija išsaugota.",
+        "warn_consumed": "Įspėjimai panaudoti automatiniam MUTE. Aktyvūs įspėjimai: 0/3.",
+        "auto_reason": "<b>Automatinis MUTE 24 valandoms už 3 įspėjimus.</b>\nAktyvūs įspėjimai po sėkmingos bausmės: <b>0/3</b>.",
+    },
+    "en": {
+        "warn_title": "⚠️ USER WARNED",
+        "reset": "× Clear warnings",
+        "unmute": "🔊 UNMUTE",
+        "unban": "✓ UNBAN",
+        "reset_confirm": "<b><u>Clear warnings?</u></b>\n\nAll <b>{count}</b> active warnings for this user in this group will be cleared. History will be preserved.",
+        "yes": "✓ Confirm",
+        "no": "Cancel",
+        "cancelled": "Action cancelled.",
+        "reset_done": "Active warnings cleared. History preserved.",
+        "stale": "This button is stale or the action has already completed. Check the latest state.",
+        "rights": "Current group administrator and bot moderation permissions are required.",
+        "busy": "The sanction is in progress or its outcome is uncertain. It will not be repeated; review is required.",
+        "warn_active": "Active",
+        "warn_cancelled": "Warnings cleared. History preserved.",
+        "warn_consumed": "Warnings used for the automatic MUTE. Active warnings: 0/3.",
+        "auto_reason": "<b>Automatic 24-hour MUTE for 3 warnings.</b>\nActive warnings after the successful sanction: <b>0/3</b>.",
+    },
+    "ru": {
+        "warn_title": "⚠️ ПОЛЬЗОВАТЕЛЬ ПРЕДУПРЕЖДЁН",
+        "reset": "× Снять предупреждения",
+        "unmute": "🔊 UNMUTE",
+        "unban": "✓ UNBAN",
+        "reset_confirm": "<b><u>Снять предупреждения?</u></b>\n\nБудут сняты все <b>{count}</b> активных предупреждений пользователя в этой группе. История сохранится.",
+        "yes": "✓ Подтвердить",
+        "no": "Отмена",
+        "cancelled": "Действие отменено.",
+        "reset_done": "Активные предупреждения сняты. История сохранена.",
+        "stale": "Кнопка устарела или действие уже выполнено. Проверьте актуальный статус.",
+        "rights": "Нужны актуальные права администратора группы и права бота на модерацию.",
+        "busy": "Санкция выполняется или её результат неизвестен. Повтора не будет; нужна проверка.",
+        "warn_active": "Активно",
+        "warn_cancelled": "Предупреждения сняты. История сохранена.",
+        "warn_consumed": "Предупреждения использованы для автоматического MUTE. Активных предупреждений: 0/3.",
+        "auto_reason": "<b>Автоматический MUTE на 24 часа за 3 предупреждения.</b>\nАктивных предупреждений после успешной санкции: <b>0/3</b>.",
+    },
+}
+CONTROLS["lt"].update(
+    {
+        "auto_pending": "Pasiekta 3 įspėjimų riba. Automatinis MUTE laukia patvirtinto rezultato; įspėjimai dar aktyvūs.",
+        "auto_failed": "Automatinio MUTE pritaikyti nepavyko. Įspėjimai liko aktyvūs.",
+        "auto_uncertain": "Automatinio MUTE rezultatas neaiškus. Įspėjimai liko aktyvūs; veiksmas nekartojamas automatiškai.",
+        "released": "Ši sankcija panaikinta. Mygtukas nebeaktyvus.",
+        "expired": "Šios sankcijos laikas baigėsi. Mygtukas nebeaktyvus.",
+        "history_clear": "Įspėjimų būseną pakeitė administratorius {admin} · {date}",
+    }
+)
+CONTROLS["en"].update(
+    {
+        "auto_pending": "The 3-warning limit was reached. Automatic MUTE is awaiting a confirmed outcome; warnings remain active.",
+        "auto_failed": "Automatic MUTE could not be applied. Warnings remain active.",
+        "auto_uncertain": "The automatic MUTE outcome is uncertain. Warnings remain active; the action is not automatically repeated.",
+        "released": "This sanction was revoked. The button is inactive.",
+        "expired": "This sanction expired. The button is inactive.",
+        "history_clear": "Warning state changed by administrator {admin} · {date}",
+    }
+)
+CONTROLS["ru"].update(
+    {
+        "auto_pending": "Достигнут лимит в 3 предупреждения. Ожидается результат автоматического MUTE; предупреждения пока активны.",
+        "auto_failed": "Не удалось применить автоматический MUTE. Предупреждения остаются активными.",
+        "auto_uncertain": "Результат автоматического MUTE неизвестен. Предупреждения активны; автоматического повтора не будет.",
+        "released": "Санкция снята. Кнопка неактивна.",
+        "expired": "Срок санкции истёк. Кнопка неактивна.",
+        "history_clear": "Статус предупреждений изменил администратор {admin} · {date}",
+    }
+)
+for _lang, _labels in CONTROLS.items():
+    CATALOGS[_lang].update({"lm.control." + key: value for key, value in _labels.items()})

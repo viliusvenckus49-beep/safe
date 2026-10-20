@@ -346,7 +346,10 @@ async def test_private_ui_confirmation_localization_history_and_no_callback_leak
     async with database() as session:
         assert await session.scalar(select(func.count()).select_from(GroupSanction)) == 0
     await journey.click(LocalAction(action="confirm", value=draft_id).pack(), actor=42)
-    assert "𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗" in journey.text() and "&lt;reason&gt;" in journey.text()
+    assert (
+        CATALOGS[lang]["lm.control.warn_title"] in journey.text()
+        and "&lt;reason&gt;" in journey.text()
+    )
     await journey.click(LocalAction(action="whist", chat=CHAT, value="51:0").pack(), actor=42)
     assert t("lm.warnings", lang) in journey.text()
     assert native.calls == []
@@ -439,7 +442,7 @@ async def test_unban_before_apply_reports_cancelled_without_api(database):
     assert native.calls == []
 
 
-async def test_private_navigation_retires_pending_receipt(local_journey, database):
+async def test_private_navigation_preserves_independent_public_receipt(local_journey, database):
     journey, native = local_journey
     await journey.send("/moderation", actor=42)
     await journey.click(LocalAction(action="action", chat=CHAT, value="BAN").pack(), actor=42)
@@ -454,7 +457,7 @@ async def test_private_navigation_retires_pending_receipt(local_journey, databas
     await journey.click(LocalAction(action="group", chat=CHAT).pack(), actor=42)
     count = len(journey.transport.calls)
     async with database() as session:
-        assert (await session.get(GroupModerationDraft, draft_id)).receipt_done
+        assert not (await session.get(GroupModerationDraft, draft_id)).receipt_done
         await session.execute(
             update(GroupSanctionJob)
             .where(GroupSanctionJob.operation == "APPLY")
@@ -463,4 +466,6 @@ async def test_private_navigation_retires_pending_receipt(local_journey, databas
         await session.commit()
     native.error = None
     await LocalModerationExecutor(database, journey.bot).process()
-    assert not any(isinstance(c, EditMessageText) for c in journey.transport.calls[count:])
+    edits = [c for c in journey.transport.calls[count:] if isinstance(c, EditMessageText)]
+    assert edits and all(c.chat_id == CHAT for c in edits)
+    assert edits[-1].reply_markup is not None

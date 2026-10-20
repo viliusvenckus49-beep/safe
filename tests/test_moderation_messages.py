@@ -60,14 +60,18 @@ def render(kind, **values):
 def test_exact_english_templates(kind):
     with use_language("en"):
         text = render(kind, reason="Spam", duration_seconds=604800, warnings=2)
-    fields = [HEADINGS[kind], "👤 <b>User:</b> @example", "🆔 <b>ID:</b> <code>123456789</code>"]
+    fields = [
+        "<b>⚠️ USER WARNED</b>" if kind == "WARN" else HEADINGS[kind],
+        "👤 <b>User:</b> @example",
+        "🆔 <b>Telegram ID:</b> <code>123456789</code>",
+    ]
     if kind in {"BAN", "MUTE"}:
         fields.append("⏳ <b>Duration:</b> 7 days")
     if kind == "WARN":
-        fields.append("⚠️ <b>Warnings:</b> 2")
+        fields.append("⚠️ <b>Warnings:</b> 2/3")
     fields += ["📋 <b>Reason:</b> Spam", "👑 <b>Admin:</b> @admin", BRAND]
     assert text == "\n\n".join(fields)
-    assert "STATUS" not in text and "━━" not in text and "2/3" not in text
+    assert "STATUS" not in text and "━━" not in text
     parser = SafeHTML()
     parser.feed(text)
     assert parser.stack == []
@@ -112,7 +116,7 @@ def test_localized_receipts(lang, labels, kind):
     if kind in {"BAN", "MUTE"}:
         assert f"<b>{duration}:</b> {permanent}" in text
     if kind == "WARN":
-        assert f"<b>{warnings}:</b> 2" in text and "2/" not in text
+        assert f"<b>{warnings}:</b> 2/3" in text
 
 
 @pytest.mark.parametrize(
@@ -219,7 +223,7 @@ async def test_warning_counter_is_scoped_stable_and_read_only(database):
             text, done = await receipt_text(
                 session, await session.get(GroupModerationDraft, drafts[1].id)
             )
-        assert done and "⚠️ <b>Warnings:</b> 2" in text and "2/3" not in text
+        assert done and "⚠️ <b>Warnings:</b> 2" in text
         assert (
             list((await session.execute(select(GroupSanction.id, GroupSanction.status))).all())
             == before
@@ -276,7 +280,13 @@ async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
     ]
     assert len(notices) == 1
     notice = notices[0]
-    assert notice.reply_markup is None and notice.parse_mode == "HTML"
+    assert notice.parse_mode == "HTML"
+    assert (notice.reply_markup is not None) == (kind in {"BAN", "MUTE", "WARN"})
+    if notice.reply_markup:
+        from app.bot.callbacks import ModerationControl
+
+        data = ModerationControl.unpack(notice.reply_markup.inline_keyboard[0][0].callback_data)
+        assert data.action == ("reset" if kind == "WARN" else "release")
     async with database() as session:
         notice_id = (
             await session.scalar(

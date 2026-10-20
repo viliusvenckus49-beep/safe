@@ -11,7 +11,11 @@ from aiogram.types import ChatPermissions
 from sqlalchemy import func, select, update
 from test_integration_contracts import postgres_contract as postgres_contract
 
-from app.bot.local_moderation import MUTE_PERMISSIONS, LocalModerationExecutor
+from app.bot.local_moderation import (
+    MUTE_PERMISSIONS,
+    UNMUTE_PERMISSIONS,
+    LocalModerationExecutor,
+)
 from app.errors import DomainError
 from app.models import (
     AuditEvent,
@@ -96,9 +100,15 @@ class NativeBot:
             raise self.error
         if self.api_false:
             return False
+        if all(
+            value is True for value in kwargs["permissions"].model_dump(exclude_none=True).values()
+        ):
+            self.members[kwargs["chat_id"], kwargs["user_id"]] = self.peer(kwargs["user_id"])
+            return True
         self.members[kwargs["chat_id"], kwargs["user_id"]] = self.peer(
             kwargs["user_id"],
             "restricted",
+            is_member=True,
             until_date=kwargs.get("until_date"),
             **kwargs["permissions"].model_dump(exclude_none=True),
         )
@@ -385,7 +395,7 @@ async def test_revocation_never_unbans_external_or_scam_restrictions(database, s
             )
 
 
-async def test_mute_release_uses_current_group_defaults_and_independent_permissions(database):
+async def test_mute_release_lifts_personal_permissions_without_changing_group_defaults(database):
     bot = NativeBot()
     await setup_groups(database, bot)
     sanction = await submit(database, bot, kind="MUTE")
@@ -398,8 +408,85 @@ async def test_mute_release_uses_current_group_defaults_and_independent_permissi
         can_send_messages=True, can_send_photos=False, can_send_videos=False
     )
     await worker.process()
-    assert bot.calls[-1][1]["permissions"] == bot.defaults
+    assert bot.calls[-1][1]["permissions"] == UNMUTE_PERMISSIONS
     assert bot.calls[-1][1]["use_independent_chat_permissions"] is True
+    assert bot.members[CHAT, 51].status == "member"
+    assert bot.defaults.can_send_photos is False
+
+
+@pytest.mark.parametrize("next_kind", ["MUTE", "BAN", "KICK"])
+@pytest.mark.parametrize("permanent", [False, True])
+async def test_mute_unmute_allows_another_native_action(database, next_kind, permanent):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    async with database() as session:
+        await GroupModerationService(session, bot).configure(
+            CHAT, 42, enabled=True, bans_enabled=True, mutes_enabled=True, kicks_enabled=True
+        )
+        service = GroupModerationService(session, bot)
+        first = await service.submit(
+            CHAT,
+            42,
+            51,
+            "MUTE",
+            until_date=None if permanent else now() + timedelta(hours=1),
+            reason="",
+            key="cycle-first",
+        )
+    worker = LocalModerationExecutor(database, bot)
+    await worker.process(sanction_id=first.id)
+    async with database() as session:
+        await GroupModerationService(session, bot).revoke(CHAT, 42, first.id, key="cycle-release")
+    await worker.process(sanction_id=first.id)
+    assert bot.members[CHAT, 51].status == "member"
+    async with database() as session:
+        second = await GroupModerationService(session, bot).submit(
+            CHAT,
+            42,
+            51,
+            next_kind,
+            until_date=None if permanent or next_kind == "KICK" else now() + timedelta(hours=1),
+            reason="",
+            key="cycle-next",
+        )
+    await worker.process(sanction_id=second.id)
+    async with database() as session:
+        applied = await session.scalar(
+            select(GroupSanctionJob).where(
+                GroupSanctionJob.sanction_id == second.id, GroupSanctionJob.operation == "APPLY"
+            )
+        )
+        assert applied.status == "SUCCEEDED" and applied.result == "APPLIED"
+    assert bot.calls[2][0] == ("restrict" if next_kind == "MUTE" else "ban")
+
+
+@pytest.mark.parametrize("variant", ["defaults", "stricter", "timed", "unknown", "departed"])
+async def test_default_shaped_legacy_unmute_is_distinguished_from_foreign_restriction(
+    database, variant
+):
+    bot = NativeBot()
+    await setup_groups(database, bot)
+    flags = {
+        key: getattr(bot.defaults, key) is True
+        for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
+    }
+    if variant == "stricter":
+        flags["can_send_messages"] = False
+    if variant == "unknown":
+        flags.pop("can_send_photos")
+    bot.members[CHAT, 51] = bot.peer(
+        51,
+        "restricted",
+        is_member=variant != "departed",
+        until_date=now() + timedelta(hours=1) if variant == "timed" else None,
+        **flags,
+    )
+    sanction = await submit(database, bot, kind="MUTE")
+    await LocalModerationExecutor(database, bot).process(sanction_id=sanction.id)
+    async with database() as session:
+        row = await session.get(GroupSanction, sanction.id)
+        assert row.status == ("ACTIVE" if variant == "defaults" else "CANCELLED")
+    assert len(bot.calls) == (1 if variant == "defaults" else 0)
 
 
 async def concurrency_contract(sessions):
@@ -561,20 +648,13 @@ async def test_expiry_uses_remaining_wire_duration_after_authorization(
     )
 
 
-async def test_permanent_bans_require_explicit_group_permission(database):
+@pytest.mark.parametrize("kind", ["BAN", "MUTE"])
+async def test_omitted_duration_is_permanent_without_legacy_permission_flags(database, kind):
     bot = NativeBot()
     await setup_groups(database, bot)
     async with database() as session:
-        service = GroupModerationService(session, bot)
-        with pytest.raises(DomainError, match="invalid_duration"):
-            await service.submit(
-                CHAT, 42, 51, "BAN", until_date=None, reason="Rule", key="permanent-01"
-            )
-        await service.configure(
-            CHAT, 42, enabled=True, bans_enabled=True, allow_permanent_bans=True
-        )
-        await service.submit(
-            CHAT, 42, 51, "BAN", until_date=None, reason="Rule", key="permanent-01"
+        await GroupModerationService(session, bot).submit(
+            CHAT, 42, 51, kind, until_date=None, reason="Rule", key="permanent-01"
         )
     await LocalModerationExecutor(database, bot).process()
     assert bot.calls[0][1]["until_date"] is None

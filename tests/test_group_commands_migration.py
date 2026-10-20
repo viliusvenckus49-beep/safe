@@ -91,7 +91,17 @@ async def test_postgres_0012_preserves_first_stage_sanctions_and_jobs(postgres_c
         with Operations.context(MigrationContext.configure(connection)):
             function()
 
+    # The contract starts from actual 0011, so remove the empty new 0017
+    # child tables before exercising historical 0012 DDL.
+    warning_spec = importlib.util.spec_from_file_location(
+        "migration_0017_contract",
+        ROOT / "migrations/versions/0017_warning_escalations_and_controls.py",
+    )
+    assert warning_spec is not None and warning_spec.loader is not None
+    warning_migration = importlib.util.module_from_spec(warning_spec)
+    warning_spec.loader.exec_module(warning_migration)
     async with engine.begin() as connection:
+        await connection.run_sync(lambda c: run(c, warning_migration.downgrade))
         await connection.run_sync(lambda c: run(c, migration.downgrade))
         for sql in SEED + LOCAL_SEED:
             await connection.execute(text(sql))
