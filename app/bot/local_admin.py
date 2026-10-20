@@ -138,7 +138,9 @@ def error_text(error: Exception) -> str:
 async def access(
     service: Service, bot: Any, chat: int, actor: int, *, configure: bool = False
 ) -> GroupModerationService:
-    local = GroupModerationService(service.session, bot)
+    local = GroupModerationService(
+        service.session, bot, use_mtproto_lookup=service.settings.group_help_enabled
+    )
     await local._check_group(chat)
     await local.authorization.actor(chat, actor, configure=configure)
     return local

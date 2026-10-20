@@ -12,16 +12,22 @@ a reply to a user message, or `@username`. Examples:
 
 ## Identity and authorization
 
-The Bot API cannot resolve arbitrary private-user usernames. A username must
-already map to exactly one numeric user ID observed by SAFECheck. The selected
-group must be approved/enabled and the actor must currently have local Telegram
-moderation rights. `getChatMember(chat_id, numeric_id)` must then confirm both the
-same numeric ID and the same current username. Matching is ASCII/case-insensitive;
-unknown, ambiguous, renamed, malformed or unverified identities fail closed.
+The Bot API cannot resolve arbitrary private-user usernames. When the existing
+MTProto integration is explicitly enabled and its relay is active, moderation
+reuses `lookup_identity(refresh=True)` to resolve a public username to a numeric
+ID. No new account connection or session copy is created. The lookup runs without
+a SQL transaction and uses the relay's shared timeout/FloodWait safeguards.
+Without a usable relay result, exactly one previously observed numeric identity
+is required. Both paths require current local administrator rights and an
+approved/enabled group, then fresh `getChatMember` confirmation of the same numeric
+ID and username. Unknown, ambiguous, renamed or unverified identities fail closed.
 
-Ask an unknown user to write in the group, or use a numeric ID / reply. No public
-username-to-ID guess, placeholder identity, historical-name match or MTProto
-connection is introduced. The resolver does not rewrite identity or SCAM records.
+This path deliberately does not call the global identity-observation service:
+resolving a moderation target must not create identity records or trigger SCAM
+linking/global sanctions. A VPS login helper alone does not prove that the bot's
+relay is enabled or authenticated. Isolated staging has MTProto disabled and does
+not import the production account session. Use numeric IDs/replies until the
+actual account integration is verified.
 
 All downstream authorization, protected bot/admin checks, module opt-in, sanction
 limits, audit and confirmation checks remain unchanged. Drafts, execution and
@@ -49,3 +55,10 @@ and existing stage-1/stage-2 moderation tests), including real PostgreSQL
 transactions. Ruff check/format passed; mypy passed for93 application files;
 Python compilation passed. Native Telegram verification of this patch and final
 GitHub CI are separate acceptance steps, not implied by request-double tests.
+
+The optional MTProto extension adds regressions for unseen/recycled usernames,
+disabled/disconnected relays, timeout and transport failure, invalid identities,
+Bot API mismatch, authorization before lookup, absence of SQL transactions during
+lookup, and absence of global identity/SCAM mutations. Request doubles do not
+prove live MTProto account connectivity. The verification figures above describe
+the earlier cache-only revision; extension results are reported separately.

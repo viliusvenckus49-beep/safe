@@ -1,5 +1,6 @@
 """Local, opt-in group restrictions. Public commands/UI are intentionally not installed yet."""
 
+import asyncio
 import re
 from collections.abc import Collection
 from datetime import UTC, datetime
@@ -133,9 +134,10 @@ def validate_policy(
 
 
 class GroupModerationService:
-    def __init__(self, session: AsyncSession, bot: Any):
+    def __init__(self, session: AsyncSession, bot: Any, *, use_mtproto_lookup: bool = False):
         self.session, self.bot = session, bot
         self.authorization = GroupAuthorizer(bot)
+        self.use_mtproto_lookup = use_mtproto_lookup
 
     async def _check_group(self, chat_id: int) -> None:
         try:
@@ -146,10 +148,11 @@ class GroupModerationService:
             raise
 
     async def resolve_username(self, chat_id: int, actor_id: int, username: str) -> int:
-        """Pin a known username only after a live, numeric Telegram identity check.
+        """Pin a username only after a live, numeric Telegram identity check.
 
-        Cached names alone never authorize a sanction. Bot API cannot resolve an
-        arbitrary private user's username, so unknown/ambiguous names fail closed.
+        Reuse an explicitly enabled MTProto relay, otherwise a unique known ID.
+        Cached names alone never authorize a sanction; both paths need Bot API
+        confirmation. Unresolved/ambiguous names fail closed.
         This lookup does not create users or modify global identity/SCAM records.
         """
         if not isinstance(username, str) or not re.fullmatch(
@@ -159,18 +162,40 @@ class GroupModerationService:
         await self._check_group(chat_id)
         await self.authorization.actor(chat_id, actor_id)
         normalized = username[1:].lower()
-        candidates = list(
-            await self.session.scalars(
-                select(User.telegram_id)
-                .where(User.telegram_id.is_not(None), func.lower(User.username) == normalized)
-                .limit(2)
-            )
-        )
-        if len(candidates) != 1:
-            raise DomainError("group_moderation_username_unknown")
-        target_id = candidates[0]
+        target_id: int | None = None
+        if self.use_mtproto_lookup:
+            from app.mtproto_relay import active_relay
+
+            relay = active_relay()
+            if relay is not None:
+                observed = None
+                try:
+                    observed = (
+                        await asyncio.wait_for(relay.lookup_identity(normalized, refresh=True), 6)
+                    ).user
+                except (TimeoutError, OSError):
+                    pass  # A known ID still needs fresh Bot API verification below.
+                if observed is not None:
+                    numeric_id(getattr(observed, "id", 0))
+                    current = getattr(observed, "username", None)
+                    if (
+                        getattr(observed, "deleted", False)
+                        or not isinstance(current, str)
+                        or current.lower() != normalized
+                    ):
+                        raise DomainError("group_moderation_username_changed")
+                    target_id = observed.id
         if target_id is None:
-            raise DomainError("group_moderation_username_unknown")
+            candidates = list(
+                await self.session.scalars(
+                    select(User.telegram_id)
+                    .where(User.telegram_id.is_not(None), func.lower(User.username) == normalized)
+                    .limit(2)
+                )
+            )
+            if len(candidates) != 1 or candidates[0] is None:
+                raise DomainError("group_moderation_username_unknown")
+            target_id = candidates[0]
         numeric_id(target_id)
         member = await self.authorization.member(chat_id, target_id)
         current = getattr(member.user, "username", None)
