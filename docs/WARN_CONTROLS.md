@@ -47,6 +47,20 @@ remain active; a new WARN evaluates the threshold under the current policy.
 
 ## Public buttons and private errors
 
+After a confirmed manual release, the original BAN/MUTE receipt becomes
+USER • UNBANNED / USER • UNMUTED, using the releasing administrator. The old
+duration, reason and generic "sanction revoked" footer are omitted; the release
+button is removed. A text /unban or /unmute also sends a new public confirmation
+immediately, regardless of elapsed time. A release button updates its original
+receipt. Rejected, changed, foreign or uncertain releases never claim success.
+
+An explicitly cleared WARN receipt becomes USER • UNWARNED using the audited
+clearing administrator; its history button remains. One durable public UNWARNED
+summary is queued per confirmed reset of previously public warnings, including
+an all-warning reset; existing warning messages are also refreshed. A repeated
+confirmation cannot create another reset/summary. Consumed automatic warnings
+retain their existing consumed state rather than pretending they were UNWARNed.
+
 WARN receipts expose `× UNWARN` and target-specific `📋 HISTORY`; active owned
 BAN/MUTE receipts expose UNBAN/UNMUTE. WARN CONTROL privately lists active warning
 IDs, dates, reasons and issuers, and can confirm one warning or all warnings.

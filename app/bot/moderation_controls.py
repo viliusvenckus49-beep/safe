@@ -121,6 +121,40 @@ async def public_receipt(
         draft.receipt_checked_at = row.updated_at if row else now()
         await session.commit()
         return
+    if draft.kind in {"UNBAN", "UNMUTE"}:
+        from app.models import GroupSanctionJob
+
+        confirmed = await session.scalar(
+            select(GroupSanctionJob.id).where(
+                GroupSanctionJob.sanction_id == draft.sanction_id,
+                GroupSanctionJob.operation == "RELEASE",
+                GroupSanctionJob.status == "SUCCEEDED",
+                GroupSanctionJob.result == "RELEASED",
+            )
+        )
+        if confirmed is not None:
+            origin = await session.scalar(
+                select(GroupModerationDraft)
+                .where(
+                    GroupModerationDraft.sanction_id == draft.sanction_id,
+                    GroupModerationDraft.kind == ("BAN" if draft.kind == "UNBAN" else "MUTE"),
+                    GroupModerationDraft.status == "CONFIRMED",
+                    GroupModerationDraft.panel_chat_id == draft.chat_id,
+                    GroupModerationDraft.panel_message_id.is_not(None),
+                    or_(
+                        GroupModerationDraft.receipt_visibility == "PUBLIC",
+                        GroupModerationDraft.receipt_visibility.is_(None),
+                    ),
+                )
+                .order_by(GroupModerationDraft.created_at)
+                .limit(1)
+            )
+            if origin is not None and not draft.original_command:
+                draft.panel_chat_id, draft.panel_message_id = (
+                    origin.panel_chat_id,
+                    origin.panel_message_id,
+                )
+                draft.receipt_visibility = "PUBLIC"
     markup = await receipt_markup(session, draft)
     if (
         draft.panel_chat_id == draft.chat_id
@@ -296,12 +330,9 @@ def register_control_handlers(router: Router) -> None:
                     row.chat_id, actor, row.id, key="local:" + release.id, draft_id=release.id
                 )
                 draft.receipt_done = True
-                release.panel_chat_id, release.panel_message_id = (
-                    row.chat_id,
-                    draft.panel_message_id,
-                )
-                release.receipt_visibility = "PUBLIC"
-                draft.panel_chat_id, draft.panel_message_id = None, None
+                # Track pending/error feedback privately; borrow the original
+                # public receipt only after a confirmed successful RELEASE.
+                release.receipt_visibility = "PRIVATE"
                 await service.session.commit()
                 await callback.answer()
                 from app.bot.local_moderation import LocalModerationExecutor

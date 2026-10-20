@@ -25,6 +25,14 @@
 
 ## Covered behavior
 
+Subsequent reversal-receipt refinement: **346 targeted tests passed**, four
+PostgreSQL-only cases skipped because this UI verification run used disposable
+SQLite databases. New tests cover command acknowledgement plus original edit,
+button original edit, actual reversing administrator, LT/EN/RU labels, confirmed
+WARN reset summary/history, and rejected/timeout releases without false success
+or removal of the old public message. These are stateful Telegram API doubles,
+not a live Telegram result. No new schema migration is required.
+
 Real dispatcher + SQL paths test public WARN -> private management -> exact WARN
 confirmation -> audited cancellation; all-warning reset and stale confirmations;
 user/group isolation; actual current actor/bot rights; protected targets; 3 WARN

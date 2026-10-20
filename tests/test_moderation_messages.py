@@ -263,7 +263,7 @@ async def test_release_uses_releasing_admin_and_stable_duration(database, settin
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", HEADINGS)
+@pytest.mark.parametrize("kind", [kind for kind in HEADINGS if kind != "UNWARN"])
 async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
     local_journey, database, settings, kind
 ):
@@ -276,10 +276,14 @@ async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
     notices = [
         c
         for c in journey.transport.calls
-        if isinstance(c, SendMessage) and HEADINGS[kind] in (c.text or "")
+        if isinstance(c, (SendMessage, EditMessageText)) and HEADINGS[kind] in (c.text or "")
     ]
-    assert len(notices) == 1
-    notice = notices[0]
+    if kind in {"UNBAN", "UNMUTE"}:
+        assert len([c for c in notices if isinstance(c, SendMessage)]) == 1
+        assert any(isinstance(c, EditMessageText) for c in notices)
+    else:
+        assert len(notices) == 1
+    notice = notices[-1]
     assert notice.parse_mode == "HTML"
     assert (notice.reply_markup is not None) == (kind in {"BAN", "MUTE", "WARN"})
     if notice.reply_markup:
@@ -405,7 +409,7 @@ async def test_cancel_and_rejected_confirmations_do_not_add_receipt_buttons(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", HEADINGS)
+@pytest.mark.parametrize("kind", [kind for kind in HEADINGS if kind != "UNWARN"])
 async def test_numeric_receipts_use_live_username_without_global_user_write(
     local_journey, database, kind
 ):
@@ -423,7 +427,7 @@ async def test_numeric_receipts_use_live_username_without_global_user_write(
     notice = [
         call
         for call in journey.transport.calls
-        if isinstance(call, SendMessage) and HEADINGS[kind] in call.text
+        if isinstance(call, (SendMessage, EditMessageText)) and HEADINGS[kind] in call.text
     ][-1]
     assert "@redsafeads" in notice.text and "<code>51</code>" in notice.text
     async with database() as session:

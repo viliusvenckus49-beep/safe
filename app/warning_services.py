@@ -3,7 +3,7 @@
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import DomainError
@@ -338,6 +338,44 @@ async def reset_warnings(local: GroupModerationService, token: str, actor: int) 
             warning_ids=ids,
             confirmation=token,
         )
+        public_origin = await local.session.scalar(
+            select(GroupModerationDraft)
+            .where(
+                GroupModerationDraft.sanction_id.in_(ids),
+                GroupModerationDraft.kind == "WARN",
+                GroupModerationDraft.status == "CONFIRMED",
+                GroupModerationDraft.panel_chat_id == origin.chat_id,
+                GroupModerationDraft.panel_message_id.is_not(None),
+                or_(
+                    GroupModerationDraft.receipt_visibility == "PUBLIC",
+                    GroupModerationDraft.receipt_visibility.is_(None),
+                ),
+            )
+            .order_by(GroupModerationDraft.created_at.desc())
+            .limit(1)
+        )
+        if public_origin is not None:
+            from app.i18n import language
+
+            # One durable summary for the confirmed reset, not one new message
+            # per warning. The original warning receipts are updated as usual.
+            local.session.add(
+                GroupModerationDraft(
+                    id=uuid4().hex,
+                    chat_id=origin.chat_id,
+                    actor_id=actor,
+                    telegram_id=origin.telegram_id,
+                    kind="WARN",
+                    reason="",
+                    status="CONFIRMED",
+                    expires_at=now(),
+                    sanction_id=ids[0],
+                    request_key="warn-clear:" + token,
+                    original_command="/unwarn",
+                    language=language.get(),
+                    receipt_visibility="PRIVATE",
+                )
+            )
         await local.session.commit()
         return origin
     except Exception:

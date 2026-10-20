@@ -11,7 +11,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.i18n import language, t
-from app.models import GroupModerationDraft, GroupSanction, GroupWarningEscalation, User
+from app.models import (
+    AuditEvent,
+    GroupModerationDraft,
+    GroupSanction,
+    GroupSanctionJob,
+    GroupWarningEscalation,
+    User,
+)
 from app.moderation_services import utc
 
 BRAND = "🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™"
@@ -22,6 +29,7 @@ HEADINGS = {
     "KICK": "🚪 𝗨𝗦𝗘𝗥 • 𝗞𝗜𝗖𝗞𝗘𝗗",
     "UNBAN": "🔓 𝗨𝗦𝗘𝗥 • 𝗨𝗡𝗕𝗔𝗡𝗡𝗘𝗗",
     "UNMUTE": "🔊 𝗨𝗦𝗘𝗥 • 𝗨𝗡𝗠𝗨𝗧𝗘𝗗",
+    "UNWARN": "✅ 𝗨𝗦𝗘𝗥 • 𝗨𝗡𝗪𝗔𝗥𝗡𝗘𝗗",
 }
 
 
@@ -175,6 +183,51 @@ async def success_message(
     observed: tuple[TelegramUser, ...] = (),
     bot: Any = None,
 ) -> str:
+    # Render the completed reversal in the original public receipt, using the
+    # administrator who actually reversed it, not the original sanction issuer.
+    reversed_kind, reversed_actor = None, None
+    if draft.kind in {"BAN", "MUTE"} and sanction.status == "REVOKED":
+        release = await session.scalar(
+            select(GroupSanctionJob).where(
+                GroupSanctionJob.sanction_id == sanction.id,
+                GroupSanctionJob.operation == "RELEASE",
+                GroupSanctionJob.status == "SUCCEEDED",
+                GroupSanctionJob.result == "RELEASED",
+                GroupSanctionJob.actor_id.is_not(None),
+            )
+        )
+        if release is not None:
+            reversed_kind = "UNBAN" if draft.kind == "BAN" else "UNMUTE"
+            reversed_actor = release.actor_id
+    elif draft.kind == "WARN" and sanction.status == "CANCELLED":
+        events = await session.scalars(
+            select(AuditEvent)
+            .where(
+                AuditEvent.action == "group_moderation_warnings_cancelled",
+                AuditEvent.details["chat_id"].as_integer() == sanction.chat_id,
+                AuditEvent.details["user_id"].as_integer() == sanction.telegram_id,
+            )
+            .order_by(AuditEvent.id.desc())
+        )
+        event = next(
+            (event for event in events if sanction.id in event.details.get("warning_ids", [])), None
+        )
+        if event is not None:
+            reversed_kind, reversed_actor = "UNWARN", event.actor_id
+    if reversed_kind is not None and reversed_actor is not None:
+        labels = await identity_labels(
+            session,
+            {draft.telegram_id, reversed_actor},
+            observed=observed,
+            bot=bot,
+            chat=draft.chat_id,
+        )
+        return format_success(
+            reversed_kind,
+            draft.telegram_id,
+            user=labels[draft.telegram_id],
+            admin=labels[reversed_actor],
+        )
     labels = await identity_labels(
         session, {draft.telegram_id, draft.actor_id}, observed=observed, bot=bot, chat=draft.chat_id
     )
