@@ -243,6 +243,18 @@ async def success_message(
         text += "\n\n" + t(
             "lm.control.released" if sanction.status == "REVOKED" else "lm.control.expired"
         )
+    if draft.kind == "MUTE" and sanction.status == "COMPLETED":
+        replacement = await session.scalar(
+            select(GroupSanction)
+            .where(
+                GroupSanction.replaces_sanction_id == sanction.id,
+                GroupSanction.owned.is_(True),
+            )
+            .order_by(GroupSanction.id.desc())
+            .limit(1)
+        )
+        if replacement is not None:
+            text += "\n\n" + t("lm.control.replaced", kind=replacement.kind)
     automatic = (
         await session.scalar(
             select(GroupWarningEscalation.id).where(

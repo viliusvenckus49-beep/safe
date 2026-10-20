@@ -392,15 +392,36 @@ class GroupModerationService:
             )
             validate_policy(policy, group, kind, until_date)
             assert policy is not None
-            active = await self.session.scalar(
-                select(GroupSanction.id).where(
-                    GroupSanction.chat_id == chat_id,
-                    GroupSanction.telegram_id == target_id,
-                    GroupSanction.status.in_(LIVE),
+            active = list(
+                await self.session.scalars(
+                    select(GroupSanction).where(
+                        GroupSanction.chat_id == chat_id,
+                        GroupSanction.telegram_id == target_id,
+                        GroupSanction.status.in_(LIVE),
+                    )
                 )
             )
-            if active is not None and kind != "WARN":
-                raise DomainError("group_moderation_conflict")
+            predecessor = None
+            if active and kind != "WARN":
+                if (
+                    len(active) != 1
+                    or kind not in {"BAN", "KICK"}
+                    or active[0].kind != "MUTE"
+                    or active[0].status != "ACTIVE"
+                    or not active[0].owned
+                ):
+                    raise DomainError("group_moderation_conflict")
+                predecessor = active[0]
+                in_flight = await self.session.scalar(
+                    select(GroupSanctionJob.id)
+                    .where(
+                        GroupSanctionJob.sanction_id == predecessor.id,
+                        GroupSanctionJob.status.in_({"PROCESSING", "UNCERTAIN"}),
+                    )
+                    .limit(1)
+                )
+                if in_flight is not None:
+                    raise DomainError("group_moderation_busy")
             sanction = GroupSanction(
                 chat_id=chat_id,
                 telegram_id=target_id,
@@ -412,6 +433,7 @@ class GroupModerationService:
                 request_key=key,
                 status="RECORDED" if kind == "WARN" else "PENDING",
                 owned=False,
+                replaces_sanction_id=predecessor.id if predecessor else None,
             )
             self.session.add(sanction)
             await self.session.flush()
@@ -509,6 +531,8 @@ class GroupModerationService:
                     return sanction
             if sanction.status in {"UNCERTAIN", "REVOKING"}:
                 raise DomainError("group_moderation_uncertain")
+            if sanction.status not in {"PENDING", "ACTIVE"}:
+                raise DomainError("group_moderation_stale_control")
             processing = await self.session.scalar(
                 select(GroupSanctionJob.id)
                 .where(
@@ -519,6 +543,20 @@ class GroupModerationService:
             )
             if processing is not None:
                 raise DomainError("group_moderation_busy")
+            replacing = await self.session.scalar(
+                select(GroupSanction.status)
+                .where(
+                    GroupSanction.replaces_sanction_id == sanction.id,
+                    GroupSanction.status.in_(LIVE),
+                )
+                .limit(1)
+            )
+            if replacing is not None:
+                raise DomainError(
+                    "group_moderation_uncertain"
+                    if replacing == "UNCERTAIN"
+                    else "group_moderation_busy"
+                )
             sanction.revoke_key, sanction.updated_at = key, now()
             if draft is not None:
                 draft.status, draft.sanction_id = "CONFIRMED", sanction.id

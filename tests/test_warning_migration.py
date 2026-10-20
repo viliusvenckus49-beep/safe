@@ -51,15 +51,21 @@ def test_sqlite_warning_upgrade_preserves_existing_rows_and_refuses_data_loss(tm
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('alembic_version','sqlite_sequence')"
             )
         ]
+        columns = {
+            name: [r[1] for r in connection.execute(f'PRAGMA table_info("{name}")')]
+            for name in tables
+        }
         before = {
-            name: connection.execute('SELECT * FROM "' + name + '"').fetchall() for name in tables
+            name: connection.execute(f'SELECT {",".join(columns[name])} FROM "{name}"').fetchall()
+            for name in tables
         }
     run("upgrade", "head")
     run("upgrade", "head")
     run("check")
     with sqlite3.connect(path) as connection:
         assert before == {
-            name: connection.execute('SELECT * FROM "' + name + '"').fetchall() for name in tables
+            name: connection.execute(f'SELECT {",".join(columns[name])} FROM "{name}"').fetchall()
+            for name in tables
         }
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         connection.execute(

@@ -82,35 +82,42 @@ async def diagnose_state(local: Any, chat: int, actor: int, target: int, command
         await local.authorization.bot_rights(chat)
         member = await local.authorization.member(chat, target)
         requested = command_name(command).split("@")[0]
-        if requested in {"/mute", "/ban", "/kick"}:
-            if member.status == "kicked":
-                return "already_banned"
-            if (
-                member.status == "restricted"
-                and getattr(member, "can_send_messages", None) is False
-            ):
-                return "already_muted"
-            if member.status == "restricted":
-                return "restriction"
-            from app.models import GroupSanctionJob
+        from sqlalchemy import or_
 
-            outstanding = await local.session.scalar(
+        from app.models import GroupSanctionJob
+
+        outstanding = list(
+            await local.session.scalars(
                 select(GroupSanctionJob.status)
                 .join(GroupSanction, GroupSanction.id == GroupSanctionJob.sanction_id)
                 .where(
                     GroupSanction.chat_id == chat,
                     GroupSanction.telegram_id == target,
                     GroupSanctionJob.status.in_({"PENDING", "PROCESSING", "UNCERTAIN"}),
+                    or_(
+                        GroupSanctionJob.operation == "APPLY",
+                        GroupSanctionJob.status.in_({"PROCESSING", "UNCERTAIN"}),
+                        GroupSanctionJob.available_at <= now(),
+                    ),
                 )
-                .limit(1)
             )
-            return (
-                "uncertain"
-                if outstanding == "UNCERTAIN"
-                else "busy"
-                if outstanding
-                else "check_unavailable"
-            )
+        )
+        if "UNCERTAIN" in outstanding:
+            return "uncertain"
+        if outstanding:
+            return "busy"
+        if requested in {"/mute", "/ban", "/kick"}:
+            if member.status == "kicked":
+                return "already_banned"
+            if (
+                requested == "/mute"
+                and member.status == "restricted"
+                and getattr(member, "can_send_messages", None) is False
+            ):
+                return "already_muted"
+            if member.status == "restricted":
+                return "restriction"
+            return "check_unavailable"
         if requested in {"/unmute", "/unban"}:
             expected = "restricted" if requested == "/unmute" else "kicked"
             if member.status == expected:

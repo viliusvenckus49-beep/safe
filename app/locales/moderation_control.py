@@ -2,6 +2,7 @@
 
 CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
     "lt": {
+        "replaced": "<b>MUTE užbaigtas: pritaikytas {kind}.</b> Ankstesnis UNMUTE nebegalioja.",
         "warn_title": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
         "unwarn": "× UNWARN",
         "history": "📋 ISTORIJA",
@@ -86,6 +87,7 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
         ),
     },
     "en": {
+        "replaced": "<b>MUTE ended: {kind} applied.</b> The previous UNMUTE control is no longer valid.",
         "warn_title": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
         "unwarn": "× UNWARN",
         "history": "📋 HISTORY",
@@ -170,6 +172,7 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
         ),
     },
     "ru": {
+        "replaced": "<b>MUTE завершён: применён {kind}.</b> Прежняя кнопка UNMUTE больше не действует.",
         "warn_title": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
         "unwarn": "× UNWARN",
         "history": "📋 ИСТОРИЯ",
