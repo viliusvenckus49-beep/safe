@@ -406,3 +406,108 @@ async def test_auto_mute_rechecks_protected_admin_and_preserves_warns(database):
     async with database() as session:
         event = await session.scalar(select(GroupWarningEscalation))
         assert event.state in {"FAILED", "CANCELLED"}
+
+
+@pytest.mark.parametrize("flood_wait", [False, True])
+async def test_announcement_queue_skips_published_rows_and_respects_flood_wait(
+    database, monkeypatch, flood_wait
+):
+    from uuid import uuid4
+
+    from app.bot import moderation_controls as controls
+
+    bot = NativeBot()
+    await enabled(database, bot)
+    last_id = None
+    async with database() as session:
+        for index in range(11):
+            warning = GroupSanction(
+                chat_id=CHAT,
+                telegram_id=200 + index,
+                actor_id=42,
+                kind="WARN",
+                reason="",
+                status="COMPLETED",
+                policy_version=1,
+                request_key="outbox-warning-" + str(index),
+            )
+            mute = GroupSanction(
+                chat_id=CHAT,
+                telegram_id=200 + index,
+                actor_id=42,
+                kind="MUTE",
+                reason="3 WARN",
+                status="ACTIVE",
+                owned=True,
+                until_date=now() + timedelta(days=1),
+                policy_version=1,
+                request_key="outbox-mute-" + str(index),
+            )
+            session.add_all([warning, mute])
+            await session.flush()
+            trigger = GroupModerationDraft(
+                id=uuid4().hex,
+                chat_id=CHAT,
+                telegram_id=200 + index,
+                actor_id=42,
+                kind="WARN",
+                reason="",
+                status="CONFIRMED",
+                sanction_id=warning.id,
+                request_key="outbox-trigger-" + str(index),
+                expires_at=now(),
+                panel_chat_id=CHAT,
+                panel_message_id=100 + index,
+            )
+            announcement = GroupModerationDraft(
+                id=uuid4().hex,
+                chat_id=CHAT,
+                telegram_id=200 + index,
+                actor_id=42,
+                kind="MUTE",
+                reason="3 WARN",
+                status="CONFIRMED",
+                sanction_id=mute.id,
+                request_key="outbox-public-" + str(index),
+                expires_at=now(),
+                panel_chat_id=CHAT if index < 10 else None,
+                panel_message_id=200 + index if index < 10 else None,
+            )
+            session.add_all([trigger, announcement])
+            await session.flush()
+            session.add(
+                GroupWarningEscalation(
+                    chat_id=CHAT,
+                    telegram_id=200 + index,
+                    trigger_id=warning.id,
+                    sanction_id=mute.id,
+                    draft_id=announcement.id,
+                    state="SUCCEEDED",
+                )
+            )
+            last_id = announcement.id
+        await session.commit()
+    calls = []
+
+    async def publish(session, bot, draft, **kwargs):
+        calls.append(draft.id)
+        if flood_wait:
+            raise TelegramRetryAfter(
+                method=SendMessage(chat_id=CHAT, text="test"), message="FloodWait", retry_after=30
+            )
+        draft.panel_chat_id, draft.panel_message_id = CHAT, 999
+        await session.commit()
+
+    monkeypatch.setattr(controls, "public_receipt", publish)
+    await controls.publish_warning_announcements(database, bot)
+    await controls.publish_warning_announcements(database, bot)
+    assert calls == [last_id]
+    async with database() as session:
+        last = await session.get(GroupModerationDraft, last_id)
+        if flood_wait:
+            assert (
+                last.receipt_checked_at is None
+                and last.receipt_available_at.replace(tzinfo=UTC) > now()
+            )
+        else:
+            assert last.panel_message_id == 999
