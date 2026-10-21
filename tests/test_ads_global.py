@@ -129,7 +129,7 @@ async def test_shared_campaign_independent_intervals_and_pause(database, setting
 
 async def test_bulk_pause_resume_duplicate_confirm_and_removed_tombstone(database, settings, clock):
     cid, sid, bot = await setup(database, settings, clock)
-    await assign(database, settings, cid, bot, mode="FUTURE")
+    await assign(database, settings, cid, bot, mode="EXISTING")
     await action(database, settings, cid, bot, "START")
     await AdsPublisher(bot, settings, database).tick()
     oid = await action(database, settings, cid, bot, "PAUSE")
@@ -150,7 +150,7 @@ async def test_bulk_pause_resume_duplicate_confirm_and_removed_tombstone(databas
     assert len(await rows(database, cid)) == 3
 
 
-@pytest.mark.parametrize("mode", ["SINGLE", "SELECTED", "EXISTING", "FUTURE"])
+@pytest.mark.parametrize("mode", ["SINGLE", "SELECTED", "EXISTING"])
 async def test_assignment_modes_and_future_groups_require_explicit_policy(
     database, settings, clock, mode
 ):
@@ -166,20 +166,13 @@ async def test_assignment_modes_and_future_groups_require_explicit_policy(
         await service.reconcile(bot)
     schedules = await rows(database, cid)
     future = next((r for r in schedules if r.chat_id == -400), None)
-    assert (future is not None) == (mode == "FUTURE")
+    assert future is None
     assert not any(r.chat_id == -500 for r in schedules)
-    if future:
-        assert future.status == "DRAFT"
-        await action(database, settings, cid, bot, "FUTURE_ON")
-        async with database() as session:
-            session.add(
-                ManagedGroup(chat_id=-600, title="Authorized future", approved=True, enabled=True)
+    async with database() as session:
+        with pytest.raises(DomainError):
+            await GlobalAdsService(settings, session).selection(
+                900, cid, "FUTURE", "forbidden-future"
             )
-            await session.commit()
-        clock[0] += timedelta(seconds=31)
-        async with database() as session:
-            await GlobalAdsService(settings, session).reconcile(bot)
-        assert next(r for r in await rows(database, cid) if r.chat_id == -600).status == "ACTIVE"
 
 
 async def test_defaults_do_not_overwrite_existing_and_explicit_apply_preserves_overrides(
@@ -498,7 +491,7 @@ async def test_same_chat_rate_gate_is_shared_between_campaigns_after_restart(
 
 async def test_expired_future_policy_never_adds_new_groups(database, settings, clock):
     cid, _, bot = await setup(database, settings, clock)
-    await assign(database, settings, cid, bot, mode="FUTURE")
+    await assign(database, settings, cid, bot, mode="EXISTING")
     async with database() as session:
         service = GlobalAdsService(settings, session)
         policy = await service.policy(900, cid)

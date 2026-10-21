@@ -22,7 +22,15 @@ SPEC.loader.exec_module(MIGRATION)
 
 
 def remove_customer_schema(connection):
+    # Tests of older DDL must first remove the new dependent invitation table.
     with Operations.context(MigrationContext.configure(connection)):
+        if "ad_client_invitations" in inspect(connection).get_table_names():
+            spec = importlib.util.spec_from_file_location(
+                "ads20", ROOT / "migrations/versions/0020_unified_auto_ads.py"
+            )
+            migration = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(migration)
+            migration.downgrade()
         MIGRATION.downgrade()
 
 

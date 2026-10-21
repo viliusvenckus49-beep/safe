@@ -209,6 +209,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     router.message.outer_middleware(middleware)
     router.callback_query.outer_middleware(middleware)
     register_local_handlers(router)
+    from app.bot.auto_ads import register_auto_ads_handlers
+
+    register_auto_ads_handlers(router)
     register_customer_handlers(router)
     register_ads_handlers(router)
     register_publication_handlers(router)
@@ -217,6 +220,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext, service: Service) -> None:
         parts = (message.text or "").split(maxsplit=1)
+        if len(parts) == 2 and parts[1].startswith(("ai_", "ae_")):
+            from app.bot.auto_ads import open_link as open_auto_ad
+
+            await open_auto_ad(message, state, service, parts[1])
+            return
         if len(parts) == 2 and parts[1].startswith("ad_"):
             await open_link(message, state, service, parts[1])
             return

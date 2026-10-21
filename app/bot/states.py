@@ -68,3 +68,7 @@ class GlobalAdsFlow(StatesGroup):
 
 class AdCustomerFlow(StatesGroup):
     input = State()
+
+
+class AutoAdsFlow(StatesGroup):
+    input = State()

@@ -52,7 +52,7 @@ async def smoke():
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await connection.execute(text("CREATE TABLE alembic_version(version_num VARCHAR(32))"))
-        await connection.execute(text("INSERT INTO alembic_version VALUES ('0019')"))
+        await connection.execute(text("INSERT INTO alembic_version VALUES ('0020')"))
     await engine.dispose()
     transport = []
 

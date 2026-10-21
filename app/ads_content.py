@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from aiogram.types import Message, MessageEntity
 
+from app.ads_html import has_html, parse_html
 from app.errors import DomainError
 
 EMPTY = {"text": "", "entities": [], "media": [], "buttons": []}
@@ -112,6 +113,13 @@ def text_from_message(message: Message) -> dict:
     if text is None or units(text) > 4096:
         raise DomainError("ads_text")
     values = message.entities if message.text is not None else message.caption_entities
+    automatic = {"url", "mention", "hashtag", "cashtag", "email", "phone_number", "bot_command"}
+    if not values or (has_html(text) and all(v.type in automatic for v in values)):
+        parsed = parse_html(text)
+        return {
+            "text": parsed["text"],
+            "entities": entities_for(parsed["text"], parsed["entities"]),
+        }
     return {
         "text": text,
         "entities": entities_for(
@@ -121,10 +129,11 @@ def text_from_message(message: Message) -> dict:
 
 
 def media_from_message(message: Message) -> dict:
-    obj = message.photo[-1] if message.photo else message.video
-    if obj is None:
-        raise DomainError("ads_media")
-    return {"kind": "photo" if message.photo else "video", "file_id": obj.file_id}
+    for kind in ("photo", "video", "animation", "document"):
+        obj = getattr(message, kind, None)
+        if obj:
+            return {"kind": kind, "file_id": (obj[-1] if kind == "photo" else obj).file_id}
+    raise DomainError("ads_media")
 
 
 def parse_buttons(text: str, entities: list[dict] | None = None) -> list[list[dict]]:
@@ -204,11 +213,13 @@ def validate_content(content: dict) -> dict:
         for item in media:
             if (
                 set(item) != {"kind", "file_id"}
-                or item["kind"] not in {"photo", "video"}
+                or item["kind"] not in {"photo", "video", "animation", "document"}
                 or not isinstance(item["file_id"], str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,512}", item["file_id"])
             ):
                 raise ValueError()
+        if len(media) > 1 and any(item["kind"] not in {"photo", "video"} for item in media):
+            raise ValueError()
         if sum(map(len, buttons)) > 50:
             raise ValueError()
         for row in buttons:

@@ -184,7 +184,7 @@ async def test_shared_editor_auto_approves_immutable_versions(database, settings
             {"text": "x", "entities": [{"type": "bold", "offset": 10, "length": 3}]},
             "ads_entity",
         ),
-        ("MEDIA", [{"kind": "document", "file_id": "bad"}], "ads_content"),
+        ("MEDIA", [{"kind": "audio", "file_id": "bad"}], "ads_content"),
         (
             "BUTTONS",
             [

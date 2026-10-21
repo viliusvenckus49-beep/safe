@@ -27,7 +27,7 @@ from app.bot.states import AdCustomerFlow
 from app.bot.validation import actor_id
 from app.errors import DomainError
 from app.i18n import t
-from app.models import AdPublicationAttempt, AdSchedule, now
+from app.models import AdPublicationAttempt, AdSchedule
 from app.moderation_services import utc
 from app.services import Service
 
@@ -42,8 +42,8 @@ def back(cid: int):
 
 async def customer_list(message, ads, actor, *, page=0, edit=True):
     campaigns = await ads.campaigns(actor, page)
-    # Internal administrative names are never exposed to a customer.
-    rows = [[(f"📢 #{c.id}", customer_cb("campaign", c.id))] for c in campaigns[:8]]
+    # Explicitly assigned clients may see the name of their own advertisement.
+    rows = [[(c.internal_name[:64], customer_cb("campaign", c.id))] for c in campaigns[:8]]
     if page:
         rows.append([(t("ads.back"), customer_cb("list", value=str(page - 1)))])
     if len(campaigns) > 8:
@@ -61,44 +61,9 @@ async def customer_list(message, ads, actor, *, page=0, edit=True):
 
 
 async def customer_panel(message, ads, actor, cid, *, edit=True):
-    campaign, _ = await ads.current(actor, cid)
-    grant = await ads.grants.check(actor, cid)
-    editable = campaign.status == "DRAFT" and (
-        not grant.editing_until or utc(grant.editing_until) > now()
-    )
-    rows = []
-    if editable:
-        rows += [
-            [
-                (t("ac.text"), customer_cb("edit", cid, "TEXT")),
-                (t("ac.media"), customer_cb("edit", cid, "MEDIA")),
-            ],
-            [
-                (t("ac.buttons"), customer_cb("edit", cid, "BUTTONS")),
-                (t("ads.preview"), customer_cb("preview", cid, "FULL")),
-            ],
-        ]
-    else:
-        rows.append([(t("ads.preview"), customer_cb("preview", cid, "FULL"))])
-    rows += [
-        [
-            (t("ap.stats"), customer_cb("stats", cid)),
-            (t("ads.history"), customer_cb("history", cid)),
-        ],
-        [(t("ac.back"), customer_cb("list"))],
-    ]
-    text = (
-        t("ac.title")
-        + "\n\n"
-        + t(
-            "ac.content",
-            id=cid,
-            version=campaign.version,
-            state=t("ac.readonly") if not editable else "",
-        )
-    )
-    await ads.session.commit()
-    await display(message, text, keyboard(rows), edit=edit)
+    from app.bot.auto_ads import client_panel
+
+    await client_panel(message, ads, actor, cid, edit=edit)
 
 
 async def customer_stats(message, ads, actor, cid):

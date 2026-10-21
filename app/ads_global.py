@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.ads_locks import ads_transaction
 from app.ads_publication import PublicationService, publication_rights
-from app.ads_schedule import INTERVALS, VILNIUS, slot
+from app.ads_schedule import INTERVALS, VILNIUS
 from app.ads_services import AdsService
 from app.errors import DomainError
 from app.group_services import GroupService
@@ -25,7 +25,7 @@ from app.models import (
 )
 from app.moderation_services import utc
 
-MODES = {"SINGLE", "SELECTED", "EXISTING", "FUTURE"}
+MODES = {"SINGLE", "SELECTED", "EXISTING"}
 ACTIONS = {
     "START",
     "PAUSE",
@@ -34,7 +34,6 @@ ACTIONS = {
     "DEFAULTS",
     "INHERIT",
     "CHANGE",
-    "FUTURE_ON",
     "FUTURE_OFF",
 }
 
@@ -781,119 +780,9 @@ class GlobalAdsService:
                 self.ads.audit(op.actor_id, "global_done", op.campaign_id, operation_id=oid)
 
     async def reconcile(self, bot, *, groups_per_policy=32, on_progress=None):
-        ids = list(
-            await self.session.scalars(
-                select(AdAssignmentPolicy.campaign_id)
-                .where(
-                    AdAssignmentPolicy.mode == "FUTURE",
-                    or_(
-                        AdAssignmentPolicy.reconcile_at.is_(None),
-                        AdAssignmentPolicy.reconcile_at <= now(),
-                    ),
-                )
-                .order_by(AdAssignmentPolicy.reconcile_at.asc().nulls_first())
-                .limit(4)
-            )
-        )
-        await self.session.commit()
-        for cid in ids:
-            async with ads_transaction(
-                self.session, cid, policy=True, skip_locked=True
-            ) as acquired:
-                if not acquired:
-                    continue
-                policy = await self.session.get(AdAssignmentPolicy, cid, populate_existing=True)
-                if policy.mode != "FUTURE" or (
-                    policy.reconcile_at and utc(policy.reconcile_at) > now()
-                ):
-                    continue
-                try:
-                    await self.ads.get(policy.authorized_by, cid)
-                except DomainError:
-                    policy.auto_activate = False
-                    policy.reconcile_at = now() + timedelta(minutes=5)
-                    continue
-                if policy.end_at and utc(policy.end_at) <= now():
-                    policy.auto_activate = False
-                    policy.reconcile_at = now() + timedelta(minutes=5)
-                    continue
-                stmt = self.eligible_groups()
-                if policy.scan_after is not None:
-                    stmt = stmt.where(ManagedGroup.chat_id > policy.scan_after)
-                groups = list(
-                    await self.session.scalars(
-                        stmt.order_by(ManagedGroup.chat_id).limit(groups_per_policy)
-                    )
-                )
-                chats = [g.chat_id for g in groups]
-                actor, version = policy.authorized_by, policy.version
-                policy.scan_after = chats[-1] if len(chats) == groups_per_policy else None
-                policy.reconcile_at = now() + timedelta(
-                    seconds=1 if policy.scan_after is not None else 30
-                )
-            for chat in chats:
-                # Existing rows, including exclusions, are authoritative and never reset.
-                exists = await self.session.scalar(
-                    select(AdSchedule.id).where(
-                        AdSchedule.campaign_id == cid, AdSchedule.chat_id == chat
-                    )
-                )
-                await self.session.commit()
-                if on_progress:
-                    on_progress()
-                if exists:
-                    continue
-                try:
-                    await publication_rights(bot, chat, actor)
-                    async with ads_transaction(self.session, cid, policy=True):
-                        policy = await self.policy(actor, cid)
-                        if (
-                            policy.version != version
-                            or policy.mode != "FUTURE"
-                            or (policy.end_at and utc(policy.end_at) <= now())
-                        ):
-                            continue
-                        pub = PublicationService(self.settings, self.session)
-                        await pub.group(chat)
-                        if await self.session.scalar(
-                            select(AdSchedule.id).where(
-                                AdSchedule.campaign_id == cid, AdSchedule.chat_id == chat
-                            )
-                        ):
-                            continue
-                        row = AdSchedule(
-                            campaign_id=cid,
-                            chat_id=chat,
-                            authorized_by=actor,
-                            override_fields=[],
-                            excluded=False,
-                        )
-                        copy_defaults(row, policy)
-                        if policy.auto_activate and row.start_at:
-                            await pub.previewed(await self.ads.get(actor, cid))
-                            following = slot(
-                                row.start_at, policy.interval_seconds, now(), inclusive=True
-                            )
-                            if not row.end_at or following < utc(row.end_at):
-                                row.status, row.next_run_at = "ACTIVE", following
-                        self.session.add(row)
-                        await self.session.flush()
-                        self.ads.audit(
-                            actor,
-                            "future_assigned",
-                            cid,
-                            chat_id=chat,
-                            schedule_id=row.id,
-                            active=row.status == "ACTIVE",
-                            policy_version=version,
-                        )
-                except Exception as error:
-                    from app.bot.ads_publisher import diagnostic
-
-                    await self.session.rollback()
-                    async with ads_transaction(self.session, cid, policy=True):
-                        policy = await self.session.get(AdAssignmentPolicy, cid)
-                        policy.last_error = str(chat) + ": " + diagnostic(error)
+        # AUTO ADS audiences are explicit snapshots. Keep the worker hook for
+        # compatibility; no newly discovered group may inherit an existing ad.
+        return
 
     async def statistics(self, actor, cid=None):
         await self.ads.authorize(actor)

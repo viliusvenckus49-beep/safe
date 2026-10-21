@@ -1,7 +1,6 @@
 """Private native AUTO ADS editor. Stage 3.1 never publishes to a group."""
 
 from hashlib import sha256
-from html import escape
 from typing import Any
 from urllib.parse import urlencode
 
@@ -30,15 +29,12 @@ from app.ads_content import (
 from app.ads_customers import CustomerAdsService
 from app.ads_services import AdsService
 from app.bot.callbacks import (
-    AdPublication,
     AdsAction,
     AdsPreview,
     CustomerAd,
-    CustomerAdmin,
-    GlobalAd,
     PublishedAd,
 )
-from app.bot.keyboards import action, keyboard
+from app.bot.keyboards import keyboard
 from app.bot.local_admin import display
 from app.bot.states import AdsFlow
 from app.bot.validation import actor_id
@@ -118,17 +114,9 @@ async def root(message: Message, ads: AdsService, actor: int, *, edit: bool = Tr
 
         await customer_list(message, ads, actor, edit=edit)
         return
-    await ads.authorize(actor)
-    drafts = await ads.unfinished(actor)
-    rows = [
-        [(t("ads.new"), cb("new")), ("🌐 Global ADS", GlobalAd(action="root").pack())],
-        [(t("ads.list"), cb("list")), (t("ap.stats"), GlobalAd(action="stats").pack())],
-        [(t("g.settings"), GlobalAd(action="settings").pack()), (t("ads.back"), action("admin"))],
-    ]
-    if drafts:
-        rows.append([(t("ads.drafts"), cb("drafts"))])
-    await ads.session.commit()
-    await display(message, t("g.main") + "\n\n" + t("ads.draft_note"), keyboard(rows), edit=edit)
+    from app.bot.auto_ads import root as unified_root
+
+    await unified_root(message, ads, actor, edit=edit)
 
 
 async def campaign_panel(
@@ -139,37 +127,9 @@ async def campaign_panel(
 
         await customer_panel(message, ads, actor, campaign_id, edit=edit)
         return
-    campaign, _ = await ads.current(actor, campaign_id)
-    rows = [
-        [
-            (t("ads." + field.lower()), cb("edit", campaign.id, field)),
-            (t("ads.preview"), cb("preview", campaign.id, field)),
-        ]
-        for field in ("TEXT", "MEDIA", "BUTTONS")
-    ]
-    rows += [
-        [(t("ac.manage"), CustomerAdmin(action="panel", campaign=campaign.id).pack())],
-        [(t("ac.links"), CustomerAdmin(action="links", campaign=campaign.id).pack())],
-        [(t("ap.manage"), AdPublication(action="panel", campaign=campaign.id).pack())],
-        [("🌐 Global ADS", GlobalAd(action="campaign", campaign=campaign.id).pack())],
-        [(t("ads.full"), cb("preview", campaign.id, "FULL"))],
-        [(t("ads.history"), cb("history", campaign.id))],
-        [(t("ads.delete"), cb("delete", campaign.id, str(campaign.version)))],
-        [(t("ads.back"), cb("list"))],
-    ]
-    text = (
-        t("ads.title")
-        + "\n\n"
-        + t(
-            "ads.campaign",
-            name=escape(campaign.internal_name),
-            id=campaign.id,
-            version=campaign.version,
-            note=t("ads.draft_note"),
-        )
-    )
-    await ads.session.commit()
-    await display(message, text, keyboard(rows), edit=edit)
+    from app.bot.auto_ads import panel
+
+    await panel(message, ads, actor, campaign_id, edit=edit)
 
 
 async def draft_panel(
@@ -280,10 +240,8 @@ async def send_preview(
             "parse_mode": None,
             "reply_markup": markup,
         }
-        if item["kind"] == "photo":
-            await bot.send_photo(photo=item["file_id"], **values)
-        else:
-            await bot.send_video(video=item["file_id"], **values)
+        kind = item["kind"]
+        await getattr(bot, "send_" + kind)(**{kind: item["file_id"]}, **values)
     else:
         album: list[Any] = []
         for index, item in enumerate(media):

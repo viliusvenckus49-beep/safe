@@ -108,3 +108,10 @@ class ModerationControl(CallbackData, prefix="mc3", sep="|"):
     action: str
     sanction: int
     token: str = ""
+
+
+class AutoAd(CallbackData, prefix="ua"):
+    action: str
+    ad: int = 0
+    version: int = 0
+    value: str = ""

@@ -149,7 +149,7 @@ def test_unicode_formatting_is_not_converted_to_html_or_fancy_text():
     [
         {"groups": [-100]},
         {"text": "x" * 4097},
-        {"media": [{"kind": "document", "file_id": "abc"}]},
+        {"media": [{"kind": "audio", "file_id": "abc"}]},
         {"media": [{"kind": "photo", "file_id": "https://example.com"}]},
         {"media": [{"kind": "video", "file_id": "file_id"}] * 11},
         {"text": "x" * 1025, "media": [{"kind": "photo", "file_id": "abc"}]},

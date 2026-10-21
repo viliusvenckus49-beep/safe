@@ -685,7 +685,7 @@ class AdPublicationPart(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     attempt_id: Mapped[int] = mapped_column(ForeignKey("ad_publication_attempts.id"))
     position: Mapped[int] = mapped_column()
-    kind: Mapped[str] = mapped_column(String(8))
+    kind: Mapped[str] = mapped_column(String(9))
     status: Mapped[str] = mapped_column(String(12), default="PENDING")
     message_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
     tries: Mapped[int] = mapped_column(default=0, server_default="0")
@@ -694,7 +694,8 @@ class AdPublicationPart(Base):
         UniqueConstraint("attempt_id", "position", name="uq_ad_publication_part"),
         CheckConstraint("position >= 0 AND tries >= 0", name="ck_ad_part_numbers"),
         CheckConstraint(
-            "kind IN ('TEXT','PHOTO','VIDEO','ALBUM','BUTTONS')", name="ck_ad_part_kind"
+            "kind IN ('TEXT','PHOTO','VIDEO','ANIMATION','DOCUMENT','ALBUM','BUTTONS')",
+            name="ck_ad_part_kind",
         ),
         CheckConstraint(
             "status IN ('PENDING','SENDING','SENT','FAILED','DEFERRED','UNCERTAIN','CANCELLED')",
@@ -883,6 +884,44 @@ class AdCustomerLink(Base):
         Index(
             "uq_ad_active_link",
             "grant_id",
+            unique=True,
+            sqlite_where=text("status = 'ACTIVE'"),
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+    )
+
+
+class AdClientInvitation(Base):
+    """Expiring bearer invitation. Store only its digest, never the raw deep-link token."""
+
+    __tablename__ = "ad_client_invitations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("ad_campaigns.id"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    status: Mapped[str] = mapped_column(String(8), default="ACTIVE")
+    expected_grant: Mapped[str] = mapped_column(String(48))
+    expected_customer_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_by: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_by: Mapped[int | None] = mapped_column(BigInteger)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    grant_id: Mapped[int | None] = mapped_column(ForeignKey("ad_customer_grants.id"))
+    __table_args__ = (
+        CheckConstraint("status IN ('ACTIVE','USED','REVOKED')", name="ck_ad_invite_status"),
+        CheckConstraint("length(token_hash) = 64 AND created_by > 0", name="ck_ad_invite_hash"),
+        CheckConstraint("expires_at > created_at", name="ck_ad_invite_expiry"),
+        CheckConstraint(
+            "expected_customer_id IS NULL OR expected_customer_id > 0", name="ck_ad_invite_customer"
+        ),
+        CheckConstraint(
+            "(status = 'USED' AND consumed_by IS NOT NULL AND consumed_by > 0 AND consumed_at IS NOT NULL AND grant_id IS NOT NULL) "
+            "OR (status <> 'USED' AND consumed_by IS NULL AND consumed_at IS NULL AND grant_id IS NULL)",
+            name="ck_ad_invite_consumption",
+        ),
+        Index(
+            "uq_ad_active_invite",
+            "campaign_id",
             unique=True,
             sqlite_where=text("status = 'ACTIVE'"),
             postgresql_where=text("status = 'ACTIVE'"),
