@@ -7,7 +7,7 @@ from typing import Any
 
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import User as TelegramUser
-from sqlalchemy import func, select
+from sqlalchemy import BigInteger, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.i18n import language, t
@@ -206,8 +206,8 @@ async def success_message(
             select(AuditEvent)
             .where(
                 AuditEvent.action == "group_moderation_warnings_cancelled",
-                AuditEvent.details["chat_id"].as_integer() == sanction.chat_id,
-                AuditEvent.details["user_id"].as_integer() == sanction.telegram_id,
+                cast(AuditEvent.details["chat_id"].as_string(), BigInteger) == sanction.chat_id,
+                cast(AuditEvent.details["user_id"].as_string(), BigInteger) == sanction.telegram_id,
             )
             .order_by(AuditEvent.id.desc())
         )
