@@ -91,3 +91,24 @@ menu transitions, media/file IDs, public slot delivery, edited content at the
 next slot and real rights/rate limits. No real Telegram acceptance or VPS
 rollout is claimed. Payment/STATUSAS integration remains dependent on identifying
 the actual entitlement source; manual validity is not a payment record.
+
+## Opt-in existing-sandbox live operator (2026-10-21)
+
+`tools/auto_ads_live_test.py` packages the pinned candidate for the existing
+RedTrustBot sandbox, with read-only identity/work checks, private pg_dump backup,
+restore-and-migrate rehearsal, original-row hash verification, narrow transport
+scope and no automatic activation. See `AUTO_ADS_LIVE_TEST.md` for operator and
+Telegram acceptance instructions. Preparing this artifact did not access the
+user's VPS or a real Telegram token.
+
+* Live-operator + selected-ad UI/service/migration suite with real task-owned
+  PostgreSQL/Redis: **94 passed** (includes 39 operator checks; counts overlap).
+* Separate full legacy sandbox source extraction/upgrade: exact candidate hashes,
+  preserved private session/context, repeat no-op and tampered-source refusal pass.
+* Separate real Docker PostgreSQL pg_dump → private restore → migration rehearsal
+  → 0019-to-0020 staging upgrade passes with original-row verification. The
+  non-root migration process can read candidate code even if the operator's
+  original checkout used private directory/file modes; the SQL backup stays 0600
+  under a 0700 backup directory.
+* Ruff lint/format, mypy and whitespace checks pass after adding the operator.
+  No VPS deployment or live Telegram observation occurred in these checks.

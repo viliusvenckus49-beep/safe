@@ -18,6 +18,7 @@ Changes relative to `0206827ac06cdf926010df4893ff0eaa12c82e31` (PR #44).
 - `app/locales/ads.py`
 - `app/locales/auto_ads.py`
 - `app/models.py`
+- `docs/AUTO_ADS_LIVE_TEST.md`
 - `docs/AUTO_ADS_UNIFIED.md`
 - `docs/AUTO_ADS_UNIFIED_AUDIT.md`
 - `docs/AUTO_ADS_UNIFIED_FILES.md`
@@ -32,11 +33,13 @@ Changes relative to `0206827ac06cdf926010df4893ff0eaa12c82e31` (PR #44).
 - `tests/test_ads_global_final_audit.py`
 - `tests/test_ads_global_ui.py`
 - `tests/test_ads_publication_ui.py`
+- `tests/test_auto_ads_live_operator.py`
 - `tests/test_auto_ads_migration.py`
 - `tests/test_auto_ads_ui.py`
 - `tests/test_auto_ads_unified.py`
 - `tests/test_group_moderation_migration.py`
 - `tests/test_stage35_runtime.py`
+- `tools/auto_ads_live_test.py`
 
 No new runtime dependency; no change to payment, SCAM, TRUSTED, reputation or
 moderation implementation. The legacy moderation migration test only adds the new
