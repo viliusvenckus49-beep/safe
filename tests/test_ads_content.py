@@ -182,3 +182,115 @@ def test_locale_keys_are_complete_without_future_feature_promises():
     assert keys and all(
         {k for k in CATALOGS[lang] if k.startswith("ads.")} == keys for lang in ("en", "ru")
     )
+
+
+def rich_emoji_text(count=100):
+    text = "😀" * count
+    entities = [
+        {
+            "type": "custom_emoji",
+            "offset": index * 2,
+            "length": 2,
+            "custom_emoji_id": str(531234567890 + index),
+        }
+        for index in range(count)
+    ]
+    return text, entities
+
+
+def test_custom_emoji_and_formatting_have_separate_budgets():
+    text, entities = rich_emoji_text()
+    entities += [
+        {"type": kind, "offset": 0, "length": units(text)}
+        for kind in ("bold", "italic", "underline")
+    ]
+    checked = validate_content({**deepcopy(EMPTY), "text": text, "entities": entities})
+    assert checked["entities"] == entities
+    assert checked["text"] == text
+
+
+@pytest.mark.parametrize("caption", [False, True])
+@pytest.mark.parametrize("forwarded", [False, True])
+def test_native_and_forwarded_emoji_text_or_caption_preserve_all_entities(caption, forwarded):
+    from datetime import UTC, datetime
+
+    from aiogram.types import Chat, Message, MessageOriginUser, User
+
+    from app.ads_content import text_from_message
+
+    text, entities = rich_emoji_text()
+    entities.append({"type": "bold", "offset": 0, "length": units(text)})
+    values = {
+        "caption" if caption else "text": text,
+        "caption_entities" if caption else "entities": entities,
+    }
+    if forwarded:
+        values["forward_origin"] = MessageOriginUser(
+            date=datetime.now(UTC), sender_user=User(id=42, is_bot=False, first_name="Test")
+        )
+    message = Message(
+        message_id=1, date=datetime.now(UTC), chat=Chat(id=900, type="private"), **values
+    )
+    assert text_from_message(message) == {"text": text, "entities": entities}
+
+
+@pytest.mark.parametrize(
+    "kind,expected", [("custom_emoji", "ads_emoji_count"), ("bold", "ads_format_count")]
+)
+def test_known_count_limits_are_not_reported_as_malformed_metadata(kind, expected):
+    text, entities = rich_emoji_text(101)
+    if kind == "bold":
+        entities = [{"type": "bold", "offset": index * 2, "length": 2} for index in range(101)]
+    with pytest.raises(DomainError) as caught:
+        entities_for(text, entities)
+    assert caught.value.code == expected
+
+
+def test_automatic_mentions_do_not_consume_format_or_emoji_budget():
+    prefix, entities = rich_emoji_text()
+    entities.append({"type": "bold", "offset": 0, "length": units(prefix)})
+    suffix = " @Example" * 101
+    for index in range(101):
+        entities.append({"type": "mention", "offset": units(prefix) + 1 + index * 9, "length": 8})
+    assert entities_for(prefix + suffix, entities) == entities
+
+
+def test_excessive_entity_vector_is_bounded_without_stripping_data():
+    from app.ads_content import MAX_ENTITY_ENTRIES
+
+    with pytest.raises(DomainError) as caught:
+        entities_for(
+            "abc", [{"type": "mention", "offset": 0, "length": 2}] * (MAX_ENTITY_ENTRIES + 1)
+        )
+    assert caught.value.code == "ads_entity_count"
+
+
+def test_nesting_validation_retains_previous_crossing_rules_for_unsorted_entities():
+    import random
+
+    rng = random.Random(791)
+    for _ in range(500):
+        spans = [(rng.randrange(25), rng.randrange(1, 12)) for _ in range(rng.randrange(1, 20))]
+        entities = [{"type": "bold", "offset": start, "length": length} for start, length in spans]
+        crossing = any(a < b < a + alen < b + blen for a, alen in spans for b, blen in spans)
+        if crossing:
+            with pytest.raises(DomainError) as caught:
+                entities_for("x" * 40, entities)
+            assert caught.value.code == "ads_entity"
+        else:
+            assert entities_for("x" * 40, entities) == entities
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+@pytest.mark.parametrize("code", ["ads_emoji_count", "ads_format_count", "ads_entity_count"])
+def test_entity_count_diagnostics_are_localized_and_distinct_from_invalid_metadata(lang, code):
+    from app.bot.ads import failure
+    from app.i18n import language, t
+
+    token = language.set(lang)
+    try:
+        value = failure(DomainError(code))
+        assert value == t(code.replace("ads_", "ads."))
+        assert value != t("ads.entity") and value != t("ads.error")
+    finally:
+        language.reset(token)

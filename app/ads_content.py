@@ -11,6 +11,20 @@ from app.ads_html import has_html, parse_html
 from app.errors import DomainError
 
 EMPTY = {"text": "", "entities": [], "media": [], "buttons": []}
+# Telegram counts custom emoji separately from user-authored formatting. The
+# custom emoji limit follows the published message_animated_emoji_max value.
+MAX_CUSTOM_EMOJIS = 100
+MAX_FORMAT_ENTITIES = 100
+MAX_ENTITY_ENTRIES = 4096  # Bounded validation work, including automatic entities.
+AUTOMATIC_ENTITIES = {
+    "url",
+    "mention",
+    "hashtag",
+    "cashtag",
+    "email",
+    "phone_number",
+    "bot_command",
+}
 ENTITY_TYPES = {
     "bold",
     "italic",
@@ -74,8 +88,9 @@ def emoji_id(value: str) -> str:
 def entities_for(text: str, values: list[dict]) -> list[dict]:
     raw = text.encode("utf-16-le")
     result = []
-    if len(values) > 100:
-        raise DomainError("ads_entity")
+    if len(values) > MAX_ENTITY_ENTRIES:
+        raise DomainError("ads_entity_count")
+    custom_count = format_count = 0
     for value in values:
         try:
             item = MessageEntity.model_validate(value)
@@ -92,6 +107,13 @@ def entities_for(text: str, values: list[dict]) -> list[dict]:
                 url(item.url or "")
             if item.type == "custom_emoji":
                 emoji_id(item.custom_emoji_id or "")
+                custom_count += 1
+            elif item.type not in AUTOMATIC_ENTITIES:
+                format_count += 1
+            if custom_count > MAX_CUSTOM_EMOJIS:
+                raise DomainError("ads_emoji_count")
+            if format_count > MAX_FORMAT_ENTITIES:
+                raise DomainError("ads_format_count")
             if item.type == "text_mention" and (not item.user or item.user.id <= 0):
                 raise ValueError()
             if item.language and (
@@ -101,10 +123,18 @@ def entities_for(text: str, values: list[dict]) -> list[dict]:
         except (ValueError, UnicodeError, TypeError) as error:
             raise DomainError("ads_entity") from error
         result.append(item.model_dump(mode="json", exclude_none=True))
-    for a in result:
-        for b in result:
-            if a["offset"] < b["offset"] < a["offset"] + a["length"] < b["offset"] + b["length"]:
-                raise DomainError("ads_entity")
+    # Validate nesting in O(n log n), without changing native entity order or
+    # spending quadratic work on large forwarded lists of automatic entities.
+    ends: list[int] = []
+    for start, end in sorted(
+        ((item["offset"], item["offset"] + item["length"]) for item in result),
+        key=lambda span: (span[0], -span[1]),
+    ):
+        while ends and start >= ends[-1]:
+            ends.pop()
+        if ends and end > ends[-1]:
+            raise DomainError("ads_entity")
+        ends.append(end)
     return result
 
 
@@ -113,8 +143,7 @@ def text_from_message(message: Message) -> dict:
     if text is None or units(text) > 4096:
         raise DomainError("ads_text")
     values = message.entities if message.text is not None else message.caption_entities
-    automatic = {"url", "mention", "hashtag", "cashtag", "email", "phone_number", "bot_command"}
-    if not values or (has_html(text) and all(v.type in automatic for v in values)):
+    if not values or (has_html(text) and all(v.type in AUTOMATIC_ENTITIES for v in values)):
         parsed = parse_html(text)
         return {
             "text": parsed["text"],

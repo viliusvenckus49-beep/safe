@@ -308,3 +308,75 @@ async def test_forged_oversized_preview_version_is_rejected_cleanly(journey):
     answers = [c for c in journey.transport.calls if isinstance(c, AnswerCallbackQuery)]
     assert len(answers) == 1 and answers[0].show_alert is True
     assert answers[0].text == t("ads.stale")
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+@pytest.mark.parametrize("forwarded", [False, True])
+@pytest.mark.parametrize("caption", [False, True])
+async def test_rich_custom_emoji_import_preview_and_save_keep_native_metadata(
+    journey, database, settings, lang, forwarded, caption
+):
+    from datetime import UTC, datetime
+
+    from aiogram.types import MessageOriginUser, PhotoSize, User
+    from test_ads_content import rich_emoji_text
+
+    async with database() as session:
+        await Service(settings, session).set_language(900, lang)
+    cid = await new(journey, database)
+    await journey.click(cb("edit", cid, "TEXT"), actor=900)
+    text, raw_entities = rich_emoji_text()
+    raw_entities.append({"type": "bold", "offset": 0, "length": 200})
+    entities = [MessageEntity.model_validate(value) for value in raw_entities]
+    extra = {}
+    if forwarded:
+        extra["forward_origin"] = MessageOriginUser(
+            date=datetime.now(UTC), sender_user=User(id=42, is_bot=False, first_name="Example")
+        )
+    if caption:
+        extra.update(
+            caption=text,
+            caption_entities=entities,
+            photo=[PhotoSize(file_id="example", file_unique_id="example", width=1, height=1)],
+        )
+    else:
+        extra["entities"] = entities
+    await journey.send(None if caption else text, actor=900, **extra)
+    async with database() as session:
+        draft = await session.scalar(select(AdContentDraft))
+        assert draft is not None and draft.content["entities"] == raw_entities
+        did = draft.id
+    await journey.click(cb("draft_preview", cid, did), actor=900)
+    preview = [
+        call
+        for call in journey.transport.calls
+        if isinstance(call, SendMessage) and call.text == text
+    ][-1]
+    assert preview.parse_mode is None
+    assert preview.entities == entities
+    assert preview.chat_id == 900
+    await journey.click(cb("save", cid, did), actor=900)
+    async with database() as session:
+        content = (await AdsService(settings, session).current(900, cid))[1].content
+        assert content["text"] == text and content["entities"] == raw_entities
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_oversized_custom_emoji_list_keeps_saved_content_and_shows_count_error(
+    journey, database, settings, lang
+):
+    from test_ads_content import rich_emoji_text
+
+    async with database() as session:
+        await Service(settings, session).set_language(900, lang)
+    cid = await new(journey, database)
+    async with database() as session:
+        before = (await AdsService(settings, session).current(900, cid))[1].content
+    await journey.click(cb("edit", cid, "TEXT"), actor=900)
+    text, entities = rich_emoji_text(101)
+    await journey.send(text, actor=900, entities=entities)
+    assert t("ads.emoji_count", lang) in journey.text()
+    assert t("ads.entity", lang) not in journey.text()
+    async with database() as session:
+        assert (await AdsService(settings, session).current(900, cid))[1].content == before
+        assert await session.scalar(select(AdContentDraft)) is None

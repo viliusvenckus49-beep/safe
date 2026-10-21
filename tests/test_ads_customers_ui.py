@@ -306,3 +306,30 @@ async def test_real_redis_customer_fsm_restart_and_token_not_persisted(database,
         await first.close()
         await second.close()
         await bot.session.close()
+
+
+async def test_authorized_client_can_save_100_custom_emoji_with_formatting(
+    journey, database, settings
+):
+    from test_ads_content import rich_emoji_text
+
+    cid, _ = await setup(database, settings)
+    token = await link(database, settings, cid)
+    await journey.send("/start ad_" + token, actor=42)
+    await journey.click(customer_cb("edit", cid, "TEXT"), actor=42)
+    text, entities = rich_emoji_text()
+    entities.append({"type": "italic", "offset": 0, "length": 200})
+    await journey.send(text, actor=42, entities=entities)
+    async with database() as session:
+        draft = await session.scalar(select(AdContentDraft))
+        assert draft.actor_id == 42 and draft.content["entities"] == entities
+        did = draft.id
+    await journey.click(customer_cb("draft_preview", cid, did), actor=42)
+    preview = [c for c in journey.transport.calls if isinstance(c, SendMessage) and c.text == text][
+        -1
+    ]
+    assert len(preview.entities) == 101 and preview.parse_mode is None and preview.chat_id == 42
+    await journey.click(customer_cb("save", cid, did), actor=42)
+    async with database() as session:
+        content = (await CustomerAdsService(settings, session).current(42, cid))[1].content
+        assert content["entities"] == entities

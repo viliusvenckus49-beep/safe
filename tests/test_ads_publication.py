@@ -868,3 +868,39 @@ async def test_worker_loop_starts_cancels_and_restarts_without_duplicate(
                 await task
     assert len(bot.calls) == 1
     assert (await snapshot(database, settings))[0][0].status == "SENT"
+
+
+async def test_scheduled_publication_preserves_rich_emoji_entities_without_extra_slot(
+    database, settings, clock
+):
+    from test_ads_content import rich_emoji_text
+
+    cid, sid, bot, _, _ = await configured(database, settings, clock)
+    text, entities = rich_emoji_text()
+    entities.append({"type": "bold", "offset": 0, "length": 200})
+    async with database() as session:
+        ads = AdsService(settings, session)
+        before = await session.get(AdSchedule, sid)
+        planned = before.next_run_at
+        draft = await ads.stage(
+            900,
+            cid,
+            (await ads.get(900, cid)).version,
+            "TEXT",
+            {"text": text, "entities": entities},
+            "rich-custom-emoji",
+        )
+        await ads.mark_previewed(900, draft.id)
+        await ads.save(900, draft.id)
+        assert (await session.get(AdSchedule, sid)).next_run_at == planned
+    worker = AdsPublisher(bot, settings, database)
+    await worker.tick()
+    await worker.tick()
+    group_calls = [args for _, args in bot.calls if args["chat_id"] < 0]
+    assert len(group_calls) == 1
+    assert group_calls[0]["text"] == text and group_calls[0]["parse_mode"] is None
+    assert [
+        e.model_dump(mode="json", exclude_none=True) for e in group_calls[0]["entities"]
+    ] == entities
+    attempts, _, _ = await snapshot(database, settings)
+    assert len(attempts) == 1 and attempts[0].status == "SENT"
