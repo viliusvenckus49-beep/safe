@@ -63,6 +63,13 @@ def unchanged_data_services(before, after):
             raise RuntimeError("Production volume or credential paths differ")
 
 
+def data_fingerprint(row):
+    # Docker constructs Mounts from a map: ordering is not a configuration change.
+    result = {key: row[key] for key in ("Id", "Image", "Config", "HostConfig")}
+    result["Mounts"] = sorted(row["Mounts"], key=lambda mount: mount["Destination"])
+    return result
+
+
 class Release:
     def __init__(self, root, sha):
         if not re.fullmatch(r"[0-9a-f]{40}", sha) or root.name != sha:
@@ -105,11 +112,17 @@ class Release:
         row = self.inspect(name)
         if row.get("State", {}).get("Health", {}).get("Status") != "healthy":
             raise RuntimeError("Production data service is not healthy")
-        return {key: row[key] for key in ("Id", "Image", "Mounts", "Config", "HostConfig")}
+        return data_fingerprint(row)
 
     def preserve_services(self):
         for name, expected in self.fingerprints.items():
-            if self.service_fingerprint(name) != expected:
+            actual = self.service_fingerprint(name)
+            if actual != expected:
+                fields = sorted(key for key in expected if expected[key] != actual[key])
+                print(
+                    "DataServiceGuard=FAIL; Service=" + name + "; Fields=" + ",".join(fields),
+                    flush=True,
+                )
                 raise RuntimeError("Production database/cache container changed")
 
     def sql(self, statement):

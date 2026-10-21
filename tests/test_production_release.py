@@ -26,6 +26,26 @@ release = module("production_release")
 probe = module("production_probe")
 
 
+def test_mount_order_is_not_a_data_service_change_but_mount_content_is():
+    row = {
+        "Id": "id",
+        "Image": "image",
+        "Config": {"Image": "postgres"},
+        "HostConfig": {},
+        "Mounts": [
+            {"Destination": "/data", "Source": "existing-data", "RW": True},
+            {"Destination": "/run/secrets/password", "Source": "existing-secret", "RW": False},
+        ],
+    }
+    reordered = deepcopy(row)
+    reordered["Mounts"].reverse()
+    assert release.data_fingerprint(row) == release.data_fingerprint(reordered)
+    for field in ("Source", "RW"):
+        changed = deepcopy(reordered)
+        changed["Mounts"][0][field] = "changed"
+        assert release.data_fingerprint(row) != release.data_fingerprint(changed)
+
+
 @pytest.mark.parametrize("payload", [b"native-pg-dump-bytes", b""])
 def test_backup_creates_private_file_and_checks_its_digest(tmp_path, payload):
     value = release.Release.__new__(release.Release)
