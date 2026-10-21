@@ -461,3 +461,29 @@ async def test_postgres_preflight_distinguishes_archived_ads_from_live_work(
         blocked,
         postgres=True,
     )
+
+
+def test_emoji_update_retains_exact_previous_auto_ads_source_manifest():
+    base = op.predecessor()
+    previous = "c83b09695e05189252bce94ee0ebe032ec207b2c"
+    assert base.REVIEWED_SOURCE_SHA[previous] == op.PREVIOUS_ADS_SOURCE_SHA[previous]
+    assert (
+        base.REVIEWED_SOURCE_SHA[previous]["app/ads_content.py"]
+        != base.REVIEWED_SOURCE_SHA[op.CODE_HEAD]["app/ads_content.py"]
+    )
+    assert (
+        base.REVIEWED_SOURCE_SHA[previous]["app/models.py"]
+        == base.REVIEWED_SOURCE_SHA[op.CODE_HEAD]["app/models.py"]
+    )
+
+
+def test_previous_auto_ads_runtime_is_verified_without_widening_client_scope(tmp_path):
+    base = op.predecessor()
+    kit = SimpleNamespace(ROOT=tmp_path, RUNTIME=RUNTIME)
+    path = tmp_path / "runtime" / "runtime.py"
+    path.parent.mkdir()
+    path.write_text(op.runtime_for(base, kit, 42))
+    context = {"head": next(iter(op.PREVIOUS_ADS_SOURCE_SHA)), "auto_ads_client_id": 42}
+    assert op.verify_runtime(base, kit, context) == path.read_text()
+    with pytest.raises(RuntimeError, match="Unreviewed"):
+        op.verify_runtime(base, kit, {**context, "auto_ads_client_id": 43})

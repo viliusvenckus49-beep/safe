@@ -3,7 +3,8 @@
 ## Evidence and limits
 
 Application rebuild collection before the live-operator addition: **2,259 test
-cases**. The operator adds **53** cases, making the current collection **2,312**.
+cases**. The operator adds **55** cases and the Custom Emoji correction adds **36**,
+making the current collection **2,350**.
 Test counts below overlap; do not add them.
 
 * Complete SQLite/default run: **2,132 passed, 124 skipped** (before the final
@@ -136,3 +137,31 @@ After the correction, all **113** selected operator/publication checks passed wi
 real task-owned PostgreSQL (Telegram calls still simulated), including all 53
 operator checks. Ruff lint/format and whitespace checks passed. This is not a VPS
 or real Telegram deployment result.
+
+## Rich Custom Emoji correction
+
+`docs/AUTO_ADS_CUSTOM_EMOJI.md` records the exact validation issue and official
+Telegram/TDLib references. The application no longer counts custom emoji, explicit
+formatting and automatic entities toward one combined 100-element limit. All
+native data is preserved; independent count errors are localized. The bot's
+Telegram permission to render custom emoji is still verified by a real preview,
+not assumed from validation. The interval-nesting check now uses a bounded sorted
+pass, with 500 deterministic differential cases against the previous crossing rule.
+
+Initial content/admin/client/publication run: **179 passed, 2 skipped** (real
+PostgreSQL-only cases). Broader selected SQLite AUTO ADS/operator regression:
+**273 passed, 15 skipped** (integration services absent in that run). Test counts
+overlap. Full legacy-source reconstruction through the previous c83b096 AUTO ADS
+sandbox and the a9018d9 emoji candidate confirms exact hashes, preserved context
+and private session, and repeat no-op behavior. The operator accepts the previous
+AUTO ADS revision by its exact original manifest and does not widen its private
+client allowlist. No additional migration is required. All Telegram delivery
+requests in these checks use doubles.
+
+Final full `tests/test_ads*.py tests/test_auto_ads*.py` run with real, task-owned
+PostgreSQL 17.6 and Redis 7.4.5: **514 passed** in 184.77 seconds, no skips. This
+includes all 55 operator cases and the new rich-emoji validation, admin/customer
+FSM, actual migrations, publication, invitation/ACL and Redis regression cases.
+Ruff lint/format, mypy (105 app sources) and whitespace checks pass. No user's VPS,
+production database or real Telegram token was used; outgoing Telegram requests
+remain mocked, so actual native emoji rendering awaits live acceptance.
