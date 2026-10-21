@@ -70,7 +70,7 @@ jobs:
               counts[value[:160]]+=1
           print("RecentDatabaseErrorKinds="+json.dumps(dict(counts),sort_keys=True))
           '
-          sudo -n docker exec safecheck-bot-1 python -c 'import asyncio,json
+          sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio,json
           from sqlalchemy import select,text
           from sqlalchemy.exc import DBAPIError
           from app.config import Settings
