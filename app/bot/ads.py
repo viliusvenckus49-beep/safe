@@ -420,6 +420,23 @@ def register_ads_handlers(router: Router) -> None:
 
             await leave_editor(message, state)
             await state.update_data(ads_customer=customer)
+            if customer and name == "list":
+                from app.bot.ads_customers import customer_list
+
+                page = max(0, min(10000, int(value or 0)))
+                campaigns = await ads.campaigns(actor, page)
+                if not campaigns and page:
+                    page = 0
+                    campaigns = await ads.campaigns(actor, page)
+                if not campaigns:
+                    await service.session.commit()
+                    await callback.answer(t("ac.empty_active"), show_alert=True)
+                    return
+                await callback.answer()
+                acknowledged = True
+                await state.set_state(None)
+                await customer_list(message, ads, actor, page=page, campaigns=campaigns)
+                return
             await callback.answer()
             acknowledged = True
             # Any management navigation closes the previous input context. Only
@@ -435,11 +452,6 @@ def register_ads_handlers(router: Router) -> None:
             elif name == "list":
                 await state.set_state(None)
                 page = max(0, min(10000, int(value or 0)))
-                if customer:
-                    from app.bot.ads_customers import customer_list
-
-                    await customer_list(message, ads, actor, page=page)
-                    return
                 campaigns = await ads.campaigns(actor, page)
                 rows = [[(c.internal_name[:50], make_cb("campaign", c.id))] for c in campaigns[:8]]
                 if page:

@@ -40,8 +40,9 @@ def back(cid: int):
     return keyboard([[(t("ads.back"), cb("panel", cid))]])
 
 
-async def customer_list(message, ads, actor, *, page=0, edit=True):
-    campaigns = await ads.campaigns(actor, page)
+async def customer_list(message, ads, actor, *, page=0, edit=True, campaigns=None):
+    if campaigns is None:
+        campaigns = await ads.campaigns(actor, page)
     # Explicitly assigned clients may see the name of their own advertisement.
     rows = [[(c.internal_name[:64], customer_cb("campaign", c.id))] for c in campaigns[:8]]
     if page:
@@ -51,6 +52,9 @@ async def customer_list(message, ads, actor, *, page=0, edit=True):
     drafts = await ads.unfinished(actor)
     if drafts:
         rows.append([(t("ads.drafts"), customer_cb("drafts"))])
+    from app.bot.keyboards import action
+
+    rows.append([(t("button.back"), action("home"))])
     await ads.session.commit()
     await display(
         message,

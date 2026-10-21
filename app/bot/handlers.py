@@ -14,7 +14,6 @@ from aiogram.types import (
 )
 
 from app import presentation as p
-from app.ads_customers import CustomerAdsService
 from app.bot import keyboards as kb
 from app.bot import redsafe_profile as rp
 from app.bot.administrators import register_administrator_handlers
@@ -152,7 +151,7 @@ async def home_keyboard(service: Service, actor: int, *, private: bool) -> Inlin
         owner=private and service.access.is_owner(actor),
         private=private,
     )
-    if private and await CustomerAdsService(service.settings, service.session).campaigns(actor):
+    if private:
         from app.bot.ads import customer_cb
 
         markup.inline_keyboard.insert(

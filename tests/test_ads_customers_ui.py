@@ -220,7 +220,7 @@ async def test_list_pagination_home_visibility_stats_and_readonly_history(
     await journey.send("/start", actor=42)
     assert t("ac.mine") in repr(journey.transport.calls[-1].reply_markup)
     await journey.send("/start", actor=43)
-    assert t("ac.mine") not in repr(journey.transport.calls[-1].reply_markup)
+    assert t("ac.mine") in repr(journey.transport.calls[-1].reply_markup)
     await journey.send("/myads", actor=42)
     assert t("ads.next") in repr(journey.transport.calls[-1].reply_markup)
     assert "Private" not in journey.text()
@@ -233,6 +233,68 @@ async def test_list_pagination_home_visibility_stats_and_readonly_history(
     await journey.click(customer_cb("history", cid), actor=42)
     assert "v1" in journey.text()
     assert "ac4:restore" not in repr(journey.transport.calls[-1].reply_markup)
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_home_my_ads_empty_is_one_private_alert(journey, database, settings, lang):
+    await setup(database, settings, customer=43)
+    async with database() as session:
+        await Service(settings, session).set_language(42, lang)
+    await journey.send("/start", actor=42)
+    menu = journey.transport.calls[-1].reply_markup
+    button = next(b for row in menu.inline_keyboard for b in row if b.text == t("ac.mine", lang))
+    before = len(journey.transport.calls)
+    await journey.click(button.callback_data, actor=42)
+    calls = journey.transport.calls[before:]
+    assert len(calls) == 1
+    assert isinstance(calls[0], AnswerCallbackQuery)
+    assert calls[0].show_alert is True
+    assert calls[0].text == t("ac.empty_active", lang)
+
+
+async def test_home_my_ads_lists_only_current_client_and_returns_home(journey, database, settings):
+    from app.bot.keyboards import action
+
+    cid, _ = await setup(database, settings)
+    async with database() as session:
+        foreign = await AdsService(settings, session).create(900, "FOREIGN AD", "foreign")
+        await CustomerAccess(settings, session).assign(900, foreign.id, 43, "0.0")
+        await Service(settings, session).set_language(42, "lt")
+    await journey.send("/start", actor=42)
+    before = len(journey.transport.calls)
+    await journey.click(customer_cb("list"), actor=42)
+    calls = journey.transport.calls[before:]
+    panel = next(c for c in calls if isinstance(c, EditMessageText))
+    markup = panel.reply_markup
+    assert "ADMIN_INTERNAL_ONLY" in repr(markup)
+    assert "FOREIGN AD" not in repr(markup)
+    assert customer_cb("campaign", cid) in repr(markup)
+    assert action("home") in repr(markup)
+    assert sum(isinstance(c, AnswerCallbackQuery) for c in calls) == 1
+    await journey.click(customer_cb("campaign", foreign.id), actor=42)
+    assert "FOREIGN AD" not in journey.text()
+    await journey.click(action("home"), actor=42)
+    assert t("ac.mine") in repr(journey.transport.calls[-1].reply_markup)
+
+
+@pytest.mark.parametrize("state", ["revoked", "archived"])
+async def test_my_ads_stale_menu_rechecks_access(journey, database, settings, state):
+    cid, _ = await setup(database, settings)
+    async with database() as session:
+        await Service(settings, session).set_language(42, "lt")
+    await journey.send("/start", actor=42)
+    async with database() as session:
+        if state == "revoked":
+            access = CustomerAccess(settings, session)
+            await access.revoke(900, cid, await stamp(access, cid))
+        else:
+            await AdsService(settings, session).archive(900, cid, 1)
+    before = len(journey.transport.calls)
+    await journey.click(customer_cb("list"), actor=42)
+    calls = journey.transport.calls[before:]
+    assert len(calls) == 1
+    assert isinstance(calls[0], AnswerCallbackQuery)
+    assert calls[0].text == t("ac.empty_active")
 
 
 async def test_admin_scope_is_reset_when_entering_global_creation(journey, database, settings):
