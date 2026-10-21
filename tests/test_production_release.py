@@ -26,6 +26,31 @@ release = module("production_release")
 probe = module("production_probe")
 
 
+@pytest.mark.parametrize("payload", [b"native-pg-dump-bytes", b""])
+def test_backup_creates_private_file_and_checks_its_digest(tmp_path, payload):
+    value = release.Release.__new__(release.Release)
+    value.backup_dir = tmp_path
+    value.ops = module("ops")
+
+    def dump(*args, stdout):
+        assert args[:4] == ("exec", "-T", "postgres", "pg_dump")
+        stdout.write(payload)
+
+    value.original = SimpleNamespace(dc=dump)
+    if not payload:
+        with pytest.raises(RuntimeError, match="Empty production backup"):
+            value.backup("frozen")
+        assert not (tmp_path / "frozen.dump.sha256").exists()
+        return
+    path = value.backup("frozen")
+    assert path.read_bytes() == payload and path.stat().st_mode & 0o777 == 0o600
+    assert Path(str(path) + ".sha256").read_text().strip() == value.ops.digest(path)
+    assert Path(str(path) + ".sha256").stat().st_mode & 0o777 == 0o600
+    with pytest.raises(FileExistsError):
+        value.backup("frozen")
+    assert path.read_bytes() == payload
+
+
 async def test_postgres_probe_detects_a_changed_legacy_user(postgres_contract):
     import asyncpg
 

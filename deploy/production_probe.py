@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import sys
+from pathlib import Path
 
 import asyncpg
 
@@ -96,6 +97,10 @@ async def main():
         from aiogram import Bot
 
         from app.bot.session import telegram_session
+        from app.mtproto_relay import private_configuration
+
+        if settings.group_help_enabled or settings.moderation_mtproto_enabled:
+            private_configuration(Path(settings.group_help_state_dir))
 
         if settings.bot_token.get_secret_value().split(":", 1)[0] == "8986848376":
             raise RuntimeError("Staging identity refused for production")

@@ -207,7 +207,7 @@ class Release:
 
     def backup(self, label):
         path = self.backup_dir / (label + ".dump")
-        with path.open("xb", opener=lambda name, flags: os.open(name, flags, 0o600)) as output:
+        with open(path, "xb", opener=lambda name, flags: os.open(name, flags, 0o600)) as output:
             self.original.dc(
                 "exec",
                 "-T",
@@ -482,9 +482,11 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
+    except Exception as error:
         print(
-            "PRODUCTION_RELEASE=STOPPED; inspect private state; credentials and raw command output withheld",
+            "PRODUCTION_RELEASE=STOPPED; ExceptionType="
+            + type(error).__name__
+            + "; inspect private state; credentials and raw command output withheld",
             file=sys.stderr,
         )
         raise SystemExit(1) from None
