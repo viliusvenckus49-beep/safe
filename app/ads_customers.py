@@ -256,7 +256,11 @@ class CustomerAdsService(AdsService):
             await self.session.scalars(
                 select(AdCampaign)
                 .join(AdCustomerGrant)
-                .where(AdCustomerGrant.customer_id == actor, AdCustomerGrant.status == "ACTIVE")
+                .where(
+                    AdCustomerGrant.customer_id == actor,
+                    AdCustomerGrant.status == "ACTIVE",
+                    AdCampaign.status != "ARCHIVED",
+                )
                 .order_by(AdCampaign.id.desc())
                 .offset(max(0, min(page, 10000)) * 8)
                 .limit(9)

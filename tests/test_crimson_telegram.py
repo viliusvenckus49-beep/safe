@@ -19,7 +19,7 @@ from aiogram.types import User as TelegramUser
 from sqlalchemy import func, select
 from test_telegram import Journey, Transport
 
-from app.bot.callbacks import Action, ScamAdmin
+from app.bot.callbacks import Action, CustomerAd, ScamAdmin
 from app.bot.group_keyboards import GroupAction
 from app.bot.handlers import create_router
 from app.bot.states import RepVoteFlow, ScamAdminFlow
@@ -409,6 +409,7 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
         ["sc|rep|", "sc|info|"],
         [GroupAction(action="subscriptions").pack()],
         ["sc|language|"],
+        [CustomerAd(action="list").pack()],
         ["sc|close|"],
     ]
     if lang == "lt":
@@ -419,6 +420,7 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
             ["ɪᴠᴇʀᴛɪɴᴛɪ", "ɪɴꜰᴏʀᴍᴀᴄɪᴊᴀ"],
             ["ɢʀᴜᴘᴇꜱ ᴀᴛᴋᴜʀɪᴍᴀꜱ"],
             ["ᴋᴀʟʙᴀ"],
+            ["📢 Mano reklamos"],
             ["ᴜᴢᴅᴀʀʏᴛɪ"],
         ]
     for callback in [value for row in rows[:-1] for value in row]:
@@ -426,6 +428,10 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
         await crimson.click(callback)
         calls = crimson.transport.calls[before:]
         assert any(isinstance(call, AnswerCallbackQuery) for call in calls)
+        if callback == CustomerAd(action="list").pack():
+            assert len(calls) == 1
+            assert isinstance(calls[0], AnswerCallbackQuery) and calls[0].show_alert
+            continue
         assert any(isinstance(call, (SendMessage, SendPhoto, EditMessageText)) for call in calls)
         assert all(not call.show_alert for call in calls if isinstance(call, AnswerCallbackQuery))
     await crimson.click("sc|home|")

@@ -15,7 +15,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.types import User as TelegramUser
-from sqlalchemy import or_, select, update
+from sqlalchemy import BigInteger, cast, or_, select, update
 
 from app.bot.callbacks import LocalAction
 from app.bot.keyboards import keyboard
@@ -400,8 +400,8 @@ async def history_panel(
                 AuditEvent.action.in_(
                     ("group_moderation_warnings_cancelled", "group_moderation_warnings_consumed")
                 ),
-                AuditEvent.details["chat_id"].as_integer() == chat,
-                AuditEvent.details["user_id"].as_integer() == target,
+                cast(AuditEvent.details["chat_id"].as_string(), BigInteger) == chat,
+                cast(AuditEvent.details["user_id"].as_string(), BigInteger) == target,
             )
             .order_by(AuditEvent.id.desc())
             .limit(20)

@@ -8,13 +8,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
     ForceReply,
-    InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
 )
 
 from app import presentation as p
-from app.ads_customers import CustomerAdsService
 from app.bot import keyboards as kb
 from app.bot import redsafe_profile as rp
 from app.bot.administrators import register_administrator_handlers
@@ -147,18 +145,11 @@ async def begin_report(message: Message, state: FSMContext, *, edit: bool = Fals
 
 
 async def home_keyboard(service: Service, actor: int, *, private: bool) -> InlineKeyboardMarkup:
-    markup = kb.home(
+    return kb.home(
         admin=private and await service.is_admin(actor),
         owner=private and service.access.is_owner(actor),
         private=private,
     )
-    if private and await CustomerAdsService(service.settings, service.session).campaigns(actor):
-        from app.bot.ads import customer_cb
-
-        markup.inline_keyboard.insert(
-            -1, [InlineKeyboardButton(text=t("ac.mine"), callback_data=customer_cb("list"))]
-        )
-    return markup
 
 
 async def show_runtime_status(
