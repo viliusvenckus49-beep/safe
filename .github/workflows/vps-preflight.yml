@@ -57,6 +57,19 @@ jobs:
                       counts[(event,error)]+=1
           print("RecentRuntimeEvents="+json.dumps([{"event":e,"exception_type":t,"count":c} for (e,t),c in counts.most_common(12)],sort_keys=True))
           '
+          sudo -n docker logs --tail 100 safecheck-postgres-1 2>&1 | python3 -c 'import collections,json,re,sys
+          counts=collections.Counter()
+          for line in sys.stdin:
+              if "ERROR:" not in line:
+                  continue
+              value=line.split("ERROR:",1)[1].strip()
+              value=re.sub(r"'"'"'[^'"'"']*'"'"'", "<redacted>", value)
+              value=re.sub(r'"'"'"[^"\n]*"'"'"', "<identifier>", value)
+              if value.startswith("invalid input syntax"):
+                  value=value.split(":",1)[0]
+              counts[value[:160]]+=1
+          print("RecentDatabaseErrorKinds="+json.dumps(dict(counts),sort_keys=True))
+          '
           df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
