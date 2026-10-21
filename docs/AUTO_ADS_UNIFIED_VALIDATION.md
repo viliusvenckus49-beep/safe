@@ -4,7 +4,7 @@
 
 Application rebuild collection before the live-operator addition: **2,259 test
 cases**. The operator adds **55** cases and the Custom Emoji correction adds **36**,
-making the current collection **2,350**.
+and the native message editor adds **38**, making the current collection **2,388**.
 Test counts below overlap; do not add them.
 
 * Complete SQLite/default run: **2,132 passed, 124 skipped** (before the final
@@ -165,3 +165,26 @@ FSM, actual migrations, publication, invitation/ACL and Redis regression cases.
 Ruff lint/format, mypy (105 app sources) and whitespace checks pass. No user's VPS,
 production database or real Telegram token was used; outgoing Telegram requests
 remain mocked, so actual native emoji rendering awaits live acceptance.
+
+## Immediate message editor
+
+The user explicitly selected immediate save for administrator and client text,
+media and buttons. `docs/AUTO_ADS_MESSAGE_EDITOR.md` describes the updated native
+flow, controller cleanup, optional previews, album completion and failure bounds.
+No additional migration or dependency is added. Legacy drafts keep their preview
+requirement; received content is audited as native input, never marked previewed.
+
+All **38** dedicated controller checks passed with actual task-owned PostgreSQL
+and Redis, including parallel saves and a Redis dispatcher restart. Selected
+legacy/new UI/service regressions initially passed **112** cases with **8**
+integration skips; counts overlap. Shared Telegram doubles now return the correct
+list of Messages for sendMediaGroup, making private preview cleanup testable.
+Ruff lint/format, mypy (106 app sources) and whitespace checks pass.
+
+Final full ADS/AUTO ADS + shared Telegram router + stage-3.5 runtime regression
+with real, task-owned PostgreSQL 17.6 and Redis 7.4.5: **634 passed** in 205.39s,
+no skips. Thirteen warnings concern the pre-existing Alembic path_separator
+configuration deprecation; no migration/test failure occurred. All 38 native
+controller checks are included. Bot API calls are mocked; phone rendering,
+Telegram cleanup permissions and real native delivery still need live acceptance.
+No production or user's VPS operations were performed by these checks.

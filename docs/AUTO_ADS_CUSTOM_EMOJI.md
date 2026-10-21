@@ -19,7 +19,9 @@ URLs, IDs and crossing spans still fail validation.
 Known count errors have distinct LT/EN/RU messages (`ads_emoji_count`,
 `ads_format_count`, `ads_entity_count`), separate from malformed metadata. Exceeding
 a count leaves saved content untouched. Existing ACL/grants, immutable content
-versions, preview-before-save and publication timing are unchanged. No migration
+versions and publication timing are unchanged. Legacy drafts retain their preview
+requirement; the subsequent native immediate editor follows the user's explicit
+request to save received input without an extra Preview/Save step. No migration
 is needed beyond the already reviewed AUTO ADS schema 0020.
 
 ## Verification sources and delivery limits

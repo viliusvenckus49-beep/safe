@@ -2,12 +2,14 @@
 
 This is an opt-in **test deployment**, authorized separately from production.
 PR #45 remains unmerged. `tools/auto_ads_live_test.py` targets application revision
-`a9018d95a4374da08faeb31a81b6361aef83465f`, including schema 0020. It is a
+`2534b76934434abb1e840e93bfdb5e3871e418da`, including schema 0020. It is a
 standalone Python standard-library operator bundle so an iPhone operator does not
 need to paste source files, clone repositories or install development dependencies.
-The previous c83b096 AUTO ADS sandbox is accepted by its exact original hashes;
+The previous c83b096 and a9018d9 AUTO ADS sandboxes are accepted by their exact original hashes;
 its existing private runtime/client boundary is verified before replacement.
-This candidate includes the rich Custom Emoji entity-budget correction.
+This candidate includes the rich Custom Emoji correction and immediate message
+editing with one bottom-of-chat controller for administrator and client text,
+media and buttons. No additional database migration is needed.
 Its embedded, hashed predecessor is the reviewed WARN CONTROLS staging operator;
 only its verification/bootstrap helpers are used, never its old `main()`.
 
@@ -74,7 +76,7 @@ test bot. PostgreSQL, Redis and the session are neither replaced nor cleared.
 Successful output ends with:
 
 ```text
-AUTO_ADS_STAGING=HEALTHY; Schema=0020; HEAD=a9018d95a4374da08faeb31a81b6361aef83465f
+AUTO_ADS_STAGING=HEALTHY; Schema=0020; HEAD=2534b76934434abb1e840e93bfdb5e3871e418da
 DBPreserved=True; RedisPreserved=True; SessionPreserved=True; ProductionBaselineUnchanged=True
 ```
 

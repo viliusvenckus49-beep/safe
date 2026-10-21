@@ -13,7 +13,10 @@ URL button add/edit/remove/order/rows, nine intervals, explicit group selection,
 client assignment/revocation/editing deadline, client links, delivery validity,
 statistics, change history, actual private preview, activation/pause and confirmed
 soft deletion. Pending content edits are recoverable per ad. Content fields use
-the existing preview-before-save flow and immutable revision store. Saving a
+the immutable revision store. The current native message editor saves validated
+received text/media/buttons immediately, as explicitly requested; Preview is
+optional. Legacy draft/restore controls retain preview-before-save. See
+`AUTO_ADS_MESSAGE_EDITOR.md` for the bottom-of-chat controller lifecycle. Saving a
 draft does not activate publishing.
 
 An explicitly assigned client sees the internal name of **their own** ad, as
