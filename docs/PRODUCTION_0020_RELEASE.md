@@ -14,6 +14,21 @@ checks before SSH. It uploads the exact Git archive and invokes the dedicated
 `deploy/production_release.py`, leaving the older 0016-only deploy route unchanged.
 No token or database archive leaves the VPS.
 
+The workflow can also consume a completed successful **full CI push run** from
+this same repository and release branch. `deploy/verified_ci.py` checks status,
+conclusion, event, workflow path, both repository identities, branch and exact
+40-character source SHA. The deployment then checks out and archives that exact
+attested source, not the orchestration workflow's newer commit. Failed, cancelled,
+unfinished, forked or mismatched runs fail closed. Without such evidence the
+workflow runs its own full quality job, with a 30-minute capacity allowance.
+
+Source `ea4bedc164281e2e1dbd807f6101c74e0ba9f1ef` passed full CI run
+39661844191: 2,449 tests, 17 existing warnings, 616.67 seconds, plus Ruff/mypy,
+compilation, migration/drift, Docker build, packaged workers/polling and an
+independent backup/restore in an isolated Compose project. The separate deploy
+quality run hit its former 15-minute limit at 79% without test failures; it did
+not execute its deployment job. CI reuse retains all completed checks.
+
 The release verifies the current production project, unchanged data services,
 credential paths and volumes, pinned migration files 0010–0020, available disk and
 memory, known writers and unfinished/uncertain native work. A read-only GetMe
