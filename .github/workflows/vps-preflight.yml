@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: safecheck-vps
+  group: safecheck-vps-readonly-diagnostics
   cancel-in-progress: false
 jobs:
   inspect:
@@ -38,6 +38,8 @@ jobs:
           sudo -n docker inspect safecheck-bot-1 --format 'Root={{index .Config.Labels "com.docker.compose.project.working_dir"}}'
           sudo -n docker inspect safecheck-bot-1 --format 'Compose={{index .Config.Labels "com.docker.compose.project.config_files"}}'
           sudo -n test -f /etc/safecheck/compose.env && echo ComposeEnvironment=present
+          sudo -n docker exec safecheck-bot-1 python -c 'import json; from app.health import snapshot; print("RuntimeHeartbeat="+json.dumps(snapshot(),sort_keys=True))'
+          sudo -n docker inspect safecheck-bot-1 --format 'RestartCount={{.RestartCount}} Status={{.State.Status}}'
           sudo -n docker inspect safecheck-postgres-1 --format 'PostgresHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
