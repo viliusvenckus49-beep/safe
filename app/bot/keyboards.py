@@ -10,6 +10,7 @@ from app.bot.callbacks import (
     AdminHelp,
     AdminRepStep,
     AdsAction,
+    CustomerAd,
     Language,
     Moderation,
     ReportStep,
@@ -46,6 +47,8 @@ def home(admin: bool = False, *, private: bool = True, owner: bool = False) -> I
     rows.append([(t("button.language"), action("language"))])
     if admin and private:
         rows.append([(t("button.admin"), action("admin"))])
+    if private:
+        rows.append([(t("ac.mine"), CustomerAd(action="list").pack())])
     rows.append([(t("button.close"), action("close"))])
     return keyboard(rows)
 
