@@ -44,6 +44,19 @@ jobs:
           sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
+          sudo -n docker logs --tail 300 safecheck-bot-1 2>&1 | python3 -c 'import collections,json,re,sys
+          counts=collections.Counter()
+          for line in sys.stdin:
+              try:
+                  data=json.loads(line)
+              except (ValueError,TypeError):
+                  continue
+              if isinstance(data,dict):
+                  event=str(data.get("event","")); error=str(data.get("exception_type",data.get("error_type","")))
+                  if re.fullmatch(r"[A-Za-z0-9_]{1,100}",event) and re.fullmatch(r"[A-Za-z0-9_]{0,80}",error):
+                      counts[(event,error)]+=1
+          print("RecentRuntimeEvents="+json.dumps([{"event":e,"exception_type":t,"count":c} for (e,t),c in counts.most_common(12)],sort_keys=True))
+          '
           df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
