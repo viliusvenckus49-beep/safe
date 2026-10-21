@@ -70,6 +70,30 @@ jobs:
               counts[value[:160]]+=1
           print("RecentDatabaseErrorKinds="+json.dumps(dict(counts),sort_keys=True))
           '
+          sudo -n docker exec safecheck-bot-1 python -c 'import asyncio,json
+          from sqlalchemy import select,text
+          from sqlalchemy.exc import DBAPIError
+          from app.config import Settings
+          from app.db import create_database
+          from app.models import AuditEvent
+          async def main():
+              engine,sessions=create_database(Settings().database_url)
+              try:
+                  for field,value in [("chat_id",-1004454398792),("user_id",8896102663)]:
+                      async with sessions() as session:
+                          await session.execute(text("SET TRANSACTION READ ONLY"))
+                          try:
+                              await session.scalar(select(AuditEvent.id).where(AuditEvent.details[field].as_integer()==value).limit(1))
+                              result={"field":field,"result":"PASS"}
+                          except DBAPIError as error:
+                              result={"field":field,"result":"FAIL","type":type(error.orig).__name__,"sqlstate":getattr(error.orig,"sqlstate",None)}
+                          finally:
+                              await session.rollback()
+                          print("ReadOnlyJsonIdCheck="+json.dumps(result,sort_keys=True))
+              finally:
+                  await engine.dispose()
+          asyncio.run(main())
+          '
           df -h /home/ubuntu
           REMOTE
       - name: Remove runner key
