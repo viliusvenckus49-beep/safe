@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 
 from app.ads_locks import ads_transaction
 from app.ads_schedule import INTERVALS, LIVE, local_instant, parts_for, publishable, slot
@@ -28,6 +28,7 @@ from app.models import (
     AdPublicationGate,
     AdPublicationPart,
     AdSchedule,
+    AuditEvent,
     ManagedGroup,
     now,
 )
@@ -243,11 +244,25 @@ class PublicationService:
             raise DomainError("ap_group")
         return row
 
-    async def previewed(self, campaign: AdCampaign) -> AdContentVersion:
+    async def validated_content(self, campaign: AdCampaign) -> AdContentVersion:
+        """Require a saved preview or the exact audited immediate-save transaction."""
         version = await self.session.scalar(
             select(AdContentVersion).where(
                 AdContentVersion.campaign_id == campaign.id,
                 AdContentVersion.revision == campaign.version,
+            )
+        )
+        if version is None:
+            raise DomainError("ap_preview")
+        native_save = exists(
+            select(AuditEvent.id).where(
+                AuditEvent.action == "ads_content_saved",
+                AuditEvent.actor_id == version.actor_id,
+                AuditEvent.details["campaign_id"].as_integer() == campaign.id,
+                AuditEvent.details["revision"].as_integer() == campaign.version,
+                AuditEvent.details["draft_id"].as_string() == AdContentDraft.id,
+                AuditEvent.details["field"].as_string() == AdContentDraft.field,
+                AuditEvent.details["validation"].as_string() == "native_input",
             )
         )
         checked = await self.session.scalar(
@@ -256,11 +271,19 @@ class PublicationService:
                 AdContentDraft.campaign_id == campaign.id,
                 AdContentDraft.saved_revision == campaign.version,
                 AdContentDraft.status == "SAVED",
-                AdContentDraft.previewed.is_(True),
+                or_(
+                    AdContentDraft.previewed.is_(True),
+                    and_(
+                        AdContentDraft.field.in_(("TEXT", "MEDIA", "BUTTONS")),
+                        AdContentDraft.actor_id == version.actor_id,
+                        version.request_key == "draft:" + AdContentDraft.id,
+                        native_save,
+                    ),
+                ),
             )
             .limit(1)
         )
-        if version is None or checked is None:
+        if checked is None:
             raise DomainError("ap_preview")
         publishable(version.content)
         return version
@@ -359,7 +382,7 @@ class PublicationService:
         await self.group(row.chat_id)
         if row.end_at and (utc(row.end_at) <= utc(row.start_at) or utc(row.end_at) <= now()):
             raise DomainError("ap_dates")
-        return row, await self.previewed(campaign)
+        return row, await self.validated_content(campaign)
 
     async def activate(
         self, actor: int, cid: int, expected: int, revision: int, bot: Any
@@ -594,7 +617,7 @@ class PublicationService:
                     continue
                 campaign = await self.session.get(AdCampaign, schedule.campaign_id)
                 try:
-                    content = await self.previewed(campaign)
+                    content = await self.validated_content(campaign)
                 except DomainError as error:
                     schedule.status, schedule.next_run_at = "PAUSED", None
                     schedule.last_error, schedule.alert_pending = error.code, True

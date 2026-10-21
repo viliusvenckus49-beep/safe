@@ -8,6 +8,27 @@ without claiming a Telegram preview occurred: `previewed` remains false and the
 content_saved audit records `validation=native_input`. The legacy draft save and
 restore paths retain their preview requirement. No schema migration is added.
 
+### Activation and scheduled publication
+
+The publication gate now accepts either a saved legacy preview or the exact
+`ads_content_saved` transaction marked `validation=native_input`. The latter must
+match the selected campaign, current revision, saved draft ID, content field,
+actor and immutable version request key. It accepts TEXT/MEDIA/BUTTONS only;
+RESTORE still requires its original preview flow. A preview flag is never invented.
+Previously this gate only accepted `previewed=true`, so immediate saves could
+neither activate nor be selected at an existing schedule's next slot.
+
+Unified activation, retained internal global operations, individual schedules
+and the enqueue worker all use this same check. Existing committed native saves
+are recognized without editing them again or migrating data. Expired dates,
+missing audience, non-publishable content and insufficient rights remain errors.
+Activation and edits do not add an immediate send; an already queued publication
+keeps its original pinned version and the next slot uses the newly saved version.
+
+If a date such as `2004-10-22` is stored as the end of validity, activation must
+still fail as expired. Correct the ad's validity using the actual intended dates;
+the update does not silently rewrite them.
+
 ## Native dialog
 
 * Text / Media / URL button controls open a fresh prompt at the bottom of the DM.

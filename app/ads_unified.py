@@ -331,7 +331,7 @@ class UnifiedAds:
             rows = await self.schedules(cid, locked=True)
             included = [r for r in rows if not r.excluded and r.chat_id is not None]
             if action == "START":
-                await self.pub.previewed(campaign)
+                await self.pub.validated_content(campaign)
                 if not included:
                     raise DomainError("ap_group")
                 sending = await self.session.scalar(

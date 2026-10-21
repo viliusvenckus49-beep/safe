@@ -4,6 +4,7 @@ Changes relative to `0206827ac06cdf926010df4893ff0eaa12c82e31` (PR #44).
 
 - `app/ads_content.py`
 - `app/ads_global.py`
+- `app/ads_publication.py`
 - `app/ads_html.py`
 - `app/ads_invitations.py`
 - `app/ads_unified.py`
@@ -47,6 +48,7 @@ Changes relative to `0206827ac06cdf926010df4893ff0eaa12c82e31` (PR #44).
 - `app/bot/ads_message_editor.py`
 - `docs/AUTO_ADS_MESSAGE_EDITOR.md`
 - `tests/test_ads_message_editor.py`
+- `tests/test_ads_native_activation.py`
 - `tests/test_telegram.py`
 
 No new runtime dependency; no change to payment, SCAM, TRUSTED, reputation or

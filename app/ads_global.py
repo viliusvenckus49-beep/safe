@@ -381,7 +381,7 @@ class GlobalAdsService:
         if action in {"START", "FUTURE_ON"}:
             campaign = await self.ads.get(actor, cid)
             op.content_revision = (
-                await PublicationService(self.settings, self.session).previewed(campaign)
+                await PublicationService(self.settings, self.session).validated_content(campaign)
             ).revision
         targets = (
             []
@@ -523,7 +523,7 @@ class GlobalAdsService:
                     or (policy.end_at and utc(policy.end_at) <= now())
                 ):
                     raise DomainError("ap_incomplete")
-                await PublicationService(self.settings, self.session).previewed(campaign)
+                await PublicationService(self.settings, self.session).validated_content(campaign)
                 policy.auto_activate = True
             if op.action in {"ASSIGN", "FUTURE_ON", "FUTURE_OFF"} or (
                 op.action in {"PAUSE", "STOP"} and not op.payload.get("single")
