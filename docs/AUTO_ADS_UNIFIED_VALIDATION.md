@@ -2,7 +2,9 @@
 
 ## Evidence and limits
 
-Current collection: **2,259 test cases**. Test counts below overlap; do not add them.
+Application rebuild collection before the live-operator addition: **2,259 test
+cases**. The operator adds **39** cases, making the current collection **2,298**.
+Test counts below overlap; do not add them.
 
 * Complete SQLite/default run: **2,132 passed, 124 skipped** (before the final
   three additional tests). Skips explicitly require integration services.
