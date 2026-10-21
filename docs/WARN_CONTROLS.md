@@ -47,18 +47,55 @@ remain active; a new WARN evaluates the threshold under the current policy.
 
 ## Public buttons and private errors
 
-WARN receipts expose `× Clear warnings`; active owned BAN/MUTE receipts expose
-UNBAN/UNMUTE. Texts, buttons and history support LT/EN/RU. Unknown display names
+WARN CONTROL navigation edits the same recipient-only message with native
+`editEphemeralMessageText`, using its `ephemeral_message_id` and receiver, never
+ordinary `message_id=0`. Back cancels its pending confirmation and returns to the
+private menu. Close/confirm/cancel delete that private panel; if deletion fails,
+cleanup attempts to disable its keyboard without reporting a committed WARN
+reset as failed. Private UI delivery failures never trigger a public navigation
+hint. DM fallback uses normal edits only in the administrator's own DM.
+
+Receipt formatting reloads job results with `populate_existing=True`, so an ORM
+object cached as PENDING cannot override a confirmed RELEASED UNMUTE. A private
+queued receipt is removed when the confirmed public result replaces it. Existing
+signed receipt IDs encode ephemeral IDs negatively under PRIVATE visibility;
+normal/public message IDs remain positive. No schema migration is needed. Old
+records storing only ordinary message_id=0 cannot identify an ephemeral message
+for deletion, so those old IDs are never guessed.
+
+After a confirmed manual release, the original BAN/MUTE receipt becomes
+USER • UNBANNED / USER • UNMUTED, using the releasing administrator. The old
+duration, reason and generic "sanction revoked" footer are omitted; the release
+button is removed. A text /unban or /unmute also sends a new public confirmation
+immediately, regardless of elapsed time. A release button updates its original
+receipt. Rejected, changed, foreign or uncertain releases never claim success.
+
+An explicitly cleared WARN receipt becomes USER • UNWARNED using the audited
+clearing administrator; its history button remains. One durable public UNWARNED
+summary is queued per confirmed reset of previously public warnings, including
+an all-warning reset; existing warning messages are also refreshed. A repeated
+confirmation cannot create another reset/summary. Consumed automatic warnings
+retain their existing consumed state rather than pretending they were UNWARNed.
+
+WARN receipts expose `× UNWARN` and target-specific `📋 HISTORY`; active owned
+BAN/MUTE receipts expose UNBAN/UNMUTE. WARN CONTROL privately lists active warning
+IDs, dates, reasons and issuers, and can confirm one warning or all warnings.
+`/unwarn ID` opens this control; `/unwarn ID WARN_ID` selects the exact warning.
+`/warns` aliases `/warnings`. Texts, buttons and history support LT/EN/RU. Unknown display names
 fall back to one Telegram ID field instead of duplicating the ID in two fields.
 
-Callbacks resolve the exact sanction and a stored public receipt. They never
-trust caller-supplied group/user IDs or global SAFECheck administrator status.
-Each action repeats current local authorization. A button copied to another
-chat/message, a protected target, a changed sanction or a stale click fails closed.
+Release callbacks resolve the exact sanction and stored public receipt. WARN
+views derive group/user from a persisted warning and check current group-local
+authority; they never trust caller-supplied group/user IDs or global SAFECheck
+administrator status. Destructive warning confirmations bind the actual actor,
+warning scope and active set. Cross-group, protected-target and stale mutations
+fail closed; authorized read-only history remains available after cancellation
+or consumption.
 
 Clearing warnings uses a five-minute confirmation token bound to the actual actor,
 origin warning and current active-warning set. Confirmation is sent using a native
-recipient-only ephemeral group message. A changed warning set, expired token,
+recipient-only ephemeral group message with explicit-rejection DM fallback. An
+individual selection is persisted; a changed warning set, expired token,
 revoked rights or repeat confirmation cannot clear additional warnings. Clear and
 consume audits retain original warning reasons, issuance dates and administrators;
 history also shows the state-change administrator and date.
@@ -66,9 +103,12 @@ history also shows the state-change administrator and date.
 Release buttons enqueue the existing exact-sanction revoke operation. Worker
 fencing, ownership/SCAM checks and a unique release job prevent duplicate effects.
 The original receipt becomes the release result and loses its control. Manual
-release and expiry also retire old public buttons. Private callbacks use Telegram's
-real private alert mechanism; slash-command lookup errors retain native HTML
-ephemeral delivery. Successful moderation results remain public in the group.
+release and expiry also retire old public buttons. Errors and WARN management use native HTML ephemeral delivery, with safe DM
+fallback after explicit rejection. Small successful confirmation acknowledgements
+use real private Telegram alerts. Pending, failed and unknown native outcomes
+remain private; only confirmed successful moderation results are public. The
+private receipt visibility marker prevents publishing diagnostics during a later
+worker update.
 
 Automatic announcement sending claims its durable receipt before calling Telegram.
 Ambiguous delivery is not blindly resent. Explicit FloodWait rejection allows a
@@ -101,3 +141,6 @@ all pending/processing/uncertain escalations and finish or reconcile them before
 running an older worker: its code cannot perform the new consume hook. Never
 replay an ambiguous native action or drop the new history tables. Production merge,
 migration, deployment and restarts still require separate explicit approval.
+
+Professional extension, source/license analysis and acceptance limits: see
+[MODERATION_REFERENCE_REVIEW.md](MODERATION_REFERENCE_REVIEW.md).

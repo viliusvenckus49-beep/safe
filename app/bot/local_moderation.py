@@ -55,6 +55,39 @@ def matches_group_defaults(member: Any, permissions: Any) -> bool:
     )
 
 
+async def cancel_unused_releases(session: Any, sanction: GroupSanction, actor: int) -> None:
+    """Definitively unowned terminal APPLY paths have nothing to release."""
+    if sanction.owned or sanction.status not in {"FAILED", "CANCELLED"}:
+        return
+    abandoned = list(
+        await session.scalars(
+            select(GroupSanctionJob).where(
+                GroupSanctionJob.sanction_id == sanction.id,
+                GroupSanctionJob.operation == "RELEASE",
+                GroupSanctionJob.status == "PENDING",
+                GroupSanctionJob.attempts == 0,
+                GroupSanctionJob.lease_token.is_(None),
+                GroupSanctionJob.lease_until.is_(None),
+            )
+        )
+    )
+    for pending in abandoned:
+        pending.status, pending.result, pending.updated_at = (
+            "CANCELLED",
+            "NO_CONFIRMED_RESTRICTION",
+            now(),
+        )
+        audit(
+            session,
+            "orphan_release_cancelled",
+            actor,
+            sanction.chat_id,
+            sanction_id=sanction.id,
+            job_id=pending.id,
+            result=pending.result,
+        )
+
+
 class LocalModerationExecutor:
     def __init__(self, sessions: Any, bot: Any):
         self.sessions, self.bot = sessions, bot
@@ -181,6 +214,7 @@ class LocalModerationExecutor:
                             job_id=job.id,
                             result=job.result,
                         )
+                        await cancel_unused_releases(session, sanction, job.actor_id or 0)
                         await session.commit()
                         continue
                 elif sanction.status not in {"ACTIVE", "REVOKING"}:
@@ -199,6 +233,17 @@ class LocalModerationExecutor:
                 ):
                     # Queue availability is not authority to lift an unexpired sanction.
                     job.available_at = sanction.until_date
+                    await session.commit()
+                    continue
+                if job.operation == "RELEASE" and await session.scalar(
+                    select(GroupSanction.id)
+                    .where(
+                        GroupSanction.replaces_sanction_id == sanction.id,
+                        GroupSanction.status.in_({"PENDING", "ACTIVE", "REVOKING", "UNCERTAIN"}),
+                    )
+                    .limit(1)
+                ):
+                    # Never lift a MUTE while a linked BAN/KICK can still take effect.
                     await session.commit()
                     continue
                 token = uuid4().hex
@@ -258,6 +303,8 @@ class LocalModerationExecutor:
                     job_id=job.id,
                     result=result,
                 )
+                if job.operation == "APPLY":
+                    await cancel_unused_releases(session, sanction, job.actor_id or 0)
             await session.commit()
 
     async def execute(self, job_id: int, token: str) -> None:
@@ -339,6 +386,16 @@ class LocalModerationExecutor:
                     await self.authorization.actor(sanction.chat_id, job.actor_id)
                 await self.authorization.bot_rights(sanction.chat_id)
                 member = await self.authorization.target(sanction.chat_id, sanction.telegram_id)
+                if (
+                    job.operation == "APPLY"
+                    and sanction.kind == "KICK"
+                    and (
+                        member.status == "left"
+                        or member.status == "restricted"
+                        and getattr(member, "is_member", None) is False
+                    )
+                ):
+                    raise DomainError("group_moderation_target_not_member")
                 group = await lock_group(session, sanction.chat_id)
                 await session.refresh(job)
                 await session.refresh(sanction)
@@ -383,6 +440,10 @@ class LocalModerationExecutor:
                 result, owned = "APPLIED", sanction.owned
                 if job.operation == "APPLY":
                     if member.status == "kicked":
+                        if sanction.replaces_sanction_id is not None:
+                            # A separate ban appeared after the MUTE snapshot.
+                            # Do not adopt it as the success of this replacement.
+                            raise DomainError("group_moderation_existing_restriction")
                         if sanction.kind != "BAN":
                             raise DomainError("group_moderation_existing_restriction")
                         existing_until = deadline(getattr(member, "until_date", None))
@@ -396,12 +457,36 @@ class LocalModerationExecutor:
                         result, owned = "ALREADY_BANNED", False
                     else:
                         if member.status == "restricted":
-                            chat = await asyncio.wait_for(
-                                self.bot.get_chat(sanction.chat_id), API_TIMEOUT
+                            predecessor = (
+                                await session.get(GroupSanction, sanction.replaces_sanction_id)
+                                if sanction.replaces_sanction_id
+                                else None
                             )
-                            if not matches_group_defaults(
-                                member, getattr(chat, "permissions", None)
-                            ):
+                            owned_mute = (
+                                predecessor is not None
+                                and sanction.kind in {"BAN", "KICK"}
+                                and predecessor.chat_id == sanction.chat_id
+                                and predecessor.telegram_id == sanction.telegram_id
+                                and predecessor.kind == "MUTE"
+                                and predecessor.status == "ACTIVE"
+                                and predecessor.owned
+                                and getattr(member, "is_member", None) is True
+                                and deadline(getattr(member, "until_date", None))
+                                == deadline(predecessor.until_date)
+                                and all(
+                                    getattr(member, key, None) is False
+                                    for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
+                                )
+                            )
+                            defaults_match = False
+                            if not owned_mute:
+                                chat = await asyncio.wait_for(
+                                    self.bot.get_chat(sanction.chat_id), API_TIMEOUT
+                                )
+                                defaults_match = matches_group_defaults(
+                                    member, getattr(chat, "permissions", None)
+                                )
+                            if not owned_mute and not defaults_match:
                                 raise DomainError("group_moderation_existing_restriction")
                         self.check_write_deadline(job, sanction)
                         sent = True
@@ -600,6 +685,49 @@ class LocalModerationExecutor:
                 else state
             )
         sanction.updated_at = now()
+        if (
+            job.operation == "APPLY"
+            and state == "SUCCEEDED"
+            and result == "APPLIED"
+            and sanction.replaces_sanction_id is not None
+        ):
+            predecessor = await session.get(GroupSanction, sanction.replaces_sanction_id)
+            assert predecessor is not None
+            # Only a confirmed native write retires the prior restriction. On
+            # rejection it stays active; on timeout both records remain for review.
+            predecessor.status, predecessor.updated_at = "COMPLETED", now()
+            await session.execute(
+                update(GroupSanctionJob)
+                .where(
+                    GroupSanctionJob.sanction_id == predecessor.id,
+                    GroupSanctionJob.operation == "RELEASE",
+                    GroupSanctionJob.status == "PENDING",
+                    GroupSanctionJob.lease_token.is_(None),
+                    GroupSanctionJob.lease_until.is_(None),
+                )
+                .values(status="CANCELLED", result="REPLACED", updated_at=now())
+            )
+            from app.models import GroupModerationDraft
+
+            await session.execute(
+                update(GroupModerationDraft)
+                .where(
+                    GroupModerationDraft.sanction_id == predecessor.id,
+                )
+                .values(receipt_done=False, receipt_checked_at=None)
+            )
+            audit(
+                session,
+                "sanction_replaced",
+                job.actor_id or 0,
+                sanction.chat_id,
+                user_id=sanction.telegram_id,
+                sanction_id=predecessor.id,
+                replacement_id=sanction.id,
+                replacement_kind=sanction.kind,
+            )
+        if job.operation == "APPLY" and state in {"FAILED", "CANCELLED"}:
+            await cancel_unused_releases(session, sanction, job.actor_id or 0)
         if job.operation == "RELEASE" and state == "SUCCEEDED":
             from app.models import GroupModerationDraft
 

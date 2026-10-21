@@ -44,12 +44,19 @@ def test_sqlite_upgrade_preserves_existing_data_and_safe_downgrade_guard(tmp_pat
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('alembic_version','sqlite_sequence')"
             )
         ]
+        columns = {
+            name: [r[1] for r in connection.execute(f'PRAGMA table_info("{name}")')]
+            for name in tables
+        }
         before = {name: connection.execute(f'SELECT * FROM "{name}"').fetchall() for name in tables}
     migrate("upgrade", "head")
     migrate("check")
     with sqlite3.connect(path) as connection:
         for name in tables:
-            assert connection.execute(f'SELECT * FROM "{name}"').fetchall() == before[name]
+            assert (
+                connection.execute(f'SELECT {",".join(columns[name])} FROM "{name}"').fetchall()
+                == before[name]
+            )
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         connection.execute(
             "INSERT INTO ad_campaigns(internal_name,created_by,updated_by,request_key,created_at,updated_at) VALUES('Keep ad',900,900,'keep-ad',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)"

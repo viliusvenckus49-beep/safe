@@ -189,7 +189,7 @@ async def test_revoked_bot_rights_cannot_be_misreported_as_absent_target(
     await no_sanctions(database)
 
 
-@pytest.mark.parametrize("command", sorted(COMMANDS - {"warnings"}))
+@pytest.mark.parametrize("command", sorted(COMMANDS - {"warnings", "warns"}))
 async def test_invalid_numeric_peer_is_not_a_permissions_error(username_journey, database, command):
     journey, native = username_journey
     original = native.get_chat_member

@@ -199,7 +199,7 @@ try:
                 "tables": len(before),
                 "nonempty_tables": sum(v["rows"] > 0 for v in before.values()),
                 "rows": sum(v["rows"] for v in before.values()),
-                "schema": "0017",
+                "schema": "0019",
                 "sequences_equal": True,
                 "all_table_fingerprints_equal": True,
             }

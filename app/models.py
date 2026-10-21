@@ -377,7 +377,7 @@ class GroupModerationSettings(Base):
 
 
 class GroupSanction(Base):
-    """One live local restriction per group/user; never a SCAM or report judgment."""
+    """Local restrictions; an owned MUTE may be replaced by a linked BAN/KICK."""
 
     __tablename__ = "group_sanctions"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -392,6 +392,9 @@ class GroupSanction(Base):
     policy_version: Mapped[int] = mapped_column()
     request_key: Mapped[str] = mapped_column(String(128), unique=True)
     revoke_key: Mapped[str | None] = mapped_column(String(128), unique=True)
+    replaces_sanction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("group_sanctions.id", name="fk_sanction_replaces"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
@@ -405,6 +408,7 @@ class GroupSanction(Base):
             "uq_group_live_sanction",
             "chat_id",
             "telegram_id",
+            "kind",
             unique=True,
             sqlite_where=text("status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN')"),
             postgresql_where=text("status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN')"),
@@ -460,6 +464,8 @@ class GroupModerationDraft(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     panel_chat_id: Mapped[int | None] = mapped_column(BigInteger)
     panel_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    receipt_visibility: Mapped[str | None] = mapped_column(String(8))
+    original_command: Mapped[str | None] = mapped_column(String(64))
     language: Mapped[str] = mapped_column(String(2), default="lt")
     receipt_hash: Mapped[str | None] = mapped_column(String(64))
     receipt_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -507,6 +513,7 @@ class GroupWarningReset(Base):
     __tablename__ = "group_warning_resets"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     origin_id: Mapped[int] = mapped_column(ForeignKey("group_sanctions.id"))
+    selected_warning_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"))
     actor_id: Mapped[int] = mapped_column(BigInteger)
     max_warning_id: Mapped[int] = mapped_column()
     expected_count: Mapped[int] = mapped_column()

@@ -240,7 +240,7 @@ async def test_username_does_not_bypass_protected_admin_and_bot(username_journey
     native.members[CHAT, target].user.username = "protected_user"
     native.admin(CHAT, 43)
     await journey.send("/warn @protected_user reason", actor=43, chat=CHAT)
-    assert t("lm.error") in journey.text()
+    assert t("lm.diagnostic.protected_target.title") in journey.text()
     assert native.calls == []
     await no_sanctions(database)
 

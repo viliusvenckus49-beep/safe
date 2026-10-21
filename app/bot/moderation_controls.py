@@ -5,12 +5,26 @@ from typing import Any
 
 from aiogram import Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramRetryAfter
-from aiogram.types import CallbackQuery, EphemeralMessageParameters, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    Chat,
+    EphemeralMessageParameters,
+    InlineKeyboardMarkup,
+    Message,
+    User,
+)
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import aliased
 
 from app.bot.callbacks import ModerationControl
 from app.bot.keyboards import keyboard
+from app.bot.private_panels import (
+    acknowledge,
+    dismiss,
+    dismiss_stored,
+    ephemeral_id,
+    private_message_key,
+)
 from app.errors import DomainError
 from app.group_authorization import numeric_id
 from app.i18n import t, use_language
@@ -34,8 +48,11 @@ async def receipt_markup(session: Any, draft: GroupModerationDraft) -> InlineKey
     row = await session.get(GroupSanction, draft.sanction_id, populate_existing=True)
     if row is None or row.chat_id != draft.chat_id or row.telegram_id != draft.telegram_id:
         return None
-    if draft.kind == "WARN" and row.kind == "WARN" and row.status == "RECORDED":
-        return keyboard([[(t("lm.control.reset"), control("reset", row.id))]])
+    if draft.kind == "WARN" and row.kind == "WARN":
+        buttons = [(t("lm.control.history"), control("history", row.id))]
+        if row.status == "RECORDED":
+            buttons.insert(0, (t("lm.control.unwarn"), control("manage", row.id)))
+        return keyboard([buttons])
     if (
         draft.kind == row.kind
         and row.kind in {"BAN", "MUTE"}
@@ -56,15 +73,125 @@ async def receipt_markup(session: Any, draft: GroupModerationDraft) -> InlineKey
 
 
 async def public_receipt(
-    session: Any, bot: Any, draft: GroupModerationDraft, *, observed: tuple = ()
+    session: Any,
+    bot: Any,
+    draft: GroupModerationDraft,
+    *,
+    observed: tuple = (),
+    source_message: Message | None = None,
 ) -> None:
     from app.bot.local_admin import receipt_text
 
     if draft.receipt_available_at is not None and utc(draft.receipt_available_at) > now():
         return
     text, done = await receipt_text(session, draft, observed=observed, bot=bot)
+    from app.bot.moderation_outcomes import diagnostic
+    from app.bot.private_panels import show as show_private
+
+    private_text = await diagnostic(session, bot, draft)
+    if private_text is not None:
+        digest = hashlib.sha256(private_text.encode()).hexdigest()
+        if draft.receipt_hash != digest or draft.receipt_visibility != "PRIVATE":
+            # Retire a legacy public pending/failure panel rather than filling it
+            # with private diagnostic details. Never delete a successful receipt.
+            if (
+                draft.panel_chat_id == draft.chat_id
+                and draft.panel_message_id
+                and draft.receipt_visibility != "PRIVATE"
+            ):
+                try:
+                    await bot.delete_message(draft.chat_id, draft.panel_message_id)
+                except TelegramBadRequest:
+                    pass
+            private_chat = (
+                draft.receipt_visibility == "PRIVATE" and draft.panel_chat_id == draft.actor_id
+            )
+            source = source_message or Message(
+                message_id=0,
+                date=now(),
+                chat=Chat(
+                    id=draft.actor_id if private_chat else draft.chat_id,
+                    type="private" if private_chat else "supergroup",
+                ),
+            ).as_(bot)
+            if (
+                draft.receipt_visibility == "PRIVATE"
+                and draft.panel_chat_id is not None
+                and draft.panel_message_id
+            ):
+                source = Message(
+                    message_id=max(0, draft.panel_message_id),
+                    date=now(),
+                    chat=Chat(
+                        id=draft.panel_chat_id, type="private" if private_chat else "supergroup"
+                    ),
+                    ephemeral_message_id=-draft.panel_message_id
+                    if draft.panel_message_id < 0
+                    else None,
+                    receiver_user=User(id=draft.actor_id, is_bot=False, first_name="Administrator"),
+                ).as_(bot)
+            sent = await show_private(
+                source,
+                draft.actor_id,
+                private_text,
+                None,
+                edit=draft.receipt_visibility == "PRIVATE",
+            )
+            if sent is not None:
+                draft.panel_chat_id, draft.panel_message_id = (
+                    sent.chat.id,
+                    private_message_key(sent),
+                )
+            draft.receipt_visibility = "PRIVATE"
+            draft.receipt_hash = digest
+        draft.receipt_done = done
+        row = await session.get(GroupSanction, draft.sanction_id)
+        draft.receipt_checked_at = row.updated_at if row else now()
+        await session.commit()
+        return
+    if draft.receipt_visibility == "PRIVATE" and draft.panel_chat_id is not None:
+        await dismiss_stored(bot, draft.panel_chat_id, draft.actor_id, draft.panel_message_id)
+        draft.panel_chat_id, draft.panel_message_id = None, None
+    if draft.kind in {"UNBAN", "UNMUTE"}:
+        from app.models import GroupSanctionJob
+
+        confirmed = await session.scalar(
+            select(GroupSanctionJob.id).where(
+                GroupSanctionJob.sanction_id == draft.sanction_id,
+                GroupSanctionJob.operation == "RELEASE",
+                GroupSanctionJob.status == "SUCCEEDED",
+                GroupSanctionJob.result == "RELEASED",
+            )
+        )
+        if confirmed is not None:
+            origin = await session.scalar(
+                select(GroupModerationDraft)
+                .where(
+                    GroupModerationDraft.sanction_id == draft.sanction_id,
+                    GroupModerationDraft.kind == ("BAN" if draft.kind == "UNBAN" else "MUTE"),
+                    GroupModerationDraft.status == "CONFIRMED",
+                    GroupModerationDraft.panel_chat_id == draft.chat_id,
+                    GroupModerationDraft.panel_message_id.is_not(None),
+                    or_(
+                        GroupModerationDraft.receipt_visibility == "PUBLIC",
+                        GroupModerationDraft.receipt_visibility.is_(None),
+                    ),
+                )
+                .order_by(GroupModerationDraft.created_at)
+                .limit(1)
+            )
+            if origin is not None and not draft.original_command:
+                draft.panel_chat_id, draft.panel_message_id = (
+                    origin.panel_chat_id,
+                    origin.panel_message_id,
+                )
+                draft.receipt_visibility = "PUBLIC"
     markup = await receipt_markup(session, draft)
-    if draft.panel_chat_id == draft.chat_id and draft.panel_message_id:
+    if (
+        draft.panel_chat_id == draft.chat_id
+        and draft.panel_message_id
+        and draft.receipt_visibility != "PRIVATE"
+    ):
         try:
             await bot.edit_message_text(
                 chat_id=draft.chat_id,
@@ -80,6 +207,9 @@ async def public_receipt(
         result = await bot.send_message(draft.chat_id, text, parse_mode="HTML", reply_markup=markup)
         draft.panel_chat_id, draft.panel_message_id = draft.chat_id, result.message_id
     draft.receipt_hash, draft.receipt_done = hashlib.sha256(text.encode()).hexdigest(), done
+    draft.receipt_visibility = "PUBLIC"
+    row = await session.get(GroupSanction, draft.sanction_id)
+    draft.receipt_checked_at = row.updated_at if row else now()
     await session.commit()
 
 
@@ -122,11 +252,67 @@ def register_control_handlers(router: Router) -> None:
         bot = callback.bot
         if bot is None:
             return
+        called = "/unwarn" if data.action != "release" else "/moderation"
         try:
             numeric_id(data.sanction)
             if callback.from_user.is_bot:
                 raise DomainError("group_moderation_forbidden")
             actor = callback.from_user.id
+            if data.action in {"manage", "list", "history", "one", "all", "close"}:
+                if not isinstance(callback.message, Message):
+                    raise DomainError("group_moderation_stale_control")
+                origin = await service.session.get(GroupSanction, data.sanction)
+                if origin is None or origin.kind != "WARN":
+                    raise DomainError("group_moderation_stale_control")
+                if callback.message.chat.id not in {origin.chat_id, actor}:
+                    raise DomainError("group_moderation_stale_control")
+                ephemeral_id(callback.message, actor)
+                local = GroupModerationService(service.session, bot)
+                if data.action == "close":
+                    await local._check_group(origin.chat_id)
+                    await local.authorization.actor(origin.chat_id, actor)
+                    await dismiss(callback.message, actor)
+                    await acknowledge(callback, t("lm.control.cancelled"), alert=True)
+                else:
+                    from app.bot.warning_panel import panel
+
+                    if data.action == "manage" and data.token:
+                        from app.moderation_services import lock_group
+
+                        await local._check_group(origin.chat_id)
+                        await local.authorization.actor(origin.chat_id, actor)
+                        await lock_group(service.session, origin.chat_id)
+                        previous = await service.session.get(
+                            GroupWarningReset, data.token, populate_existing=True
+                        )
+                        bound = (
+                            await service.session.get(GroupSanction, previous.origin_id)
+                            if previous
+                            else None
+                        )
+                        if (
+                            previous is None
+                            or previous.actor_id != actor
+                            or bound is None
+                            or bound.chat_id != origin.chat_id
+                            or bound.telegram_id != origin.telegram_id
+                        ):
+                            raise DomainError("group_moderation_stale_control")
+                        if previous.state == "PENDING":
+                            previous.state = "CANCELLED"
+                        await service.session.commit()
+
+                    await panel(
+                        local,
+                        callback.message,
+                        actor,
+                        origin,
+                        action=data.action,
+                        value=data.token,
+                        edit=True,
+                    )
+                    await acknowledge(callback)
+                return
             if data.action in {"yes", "no"}:
                 prompt = await service.session.get(GroupWarningReset, data.token)
                 if (
@@ -137,11 +323,17 @@ def register_control_handlers(router: Router) -> None:
                 ):
                     raise DomainError("group_moderation_stale_control")
                 row = await service.session.get(GroupSanction, prompt.origin_id)
-                if row is None or row.chat_id != callback.message.chat.id:
+                if row is None or callback.message.chat.id not in {row.chat_id, actor}:
                     raise DomainError("group_moderation_stale_control")
+                ephemeral_id(callback.message, actor)
+                if prompt.state != "PENDING" or utc(prompt.expires_at) <= now():
+                    if prompt.state == "CONFIRMED":
+                        await dismiss(callback.message, actor)
+                    await acknowledge(callback, t("lm.diagnostic.stale.title"), alert=True)
+                    return
                 local = GroupModerationService(service.session, bot)
                 if data.action == "no":
-                    from app.moderation_services import lock_group, utc
+                    from app.moderation_services import lock_group
 
                     await local._check_group(row.chat_id)
                     await local.authorization.actor(row.chat_id, actor)
@@ -151,15 +343,19 @@ def register_control_handlers(router: Router) -> None:
                         raise DomainError("group_moderation_stale_control")
                     prompt.state = "CANCELLED"
                     await service.session.commit()
-                    await callback.answer(t("lm.control.cancelled"), show_alert=True)
+                    await dismiss(callback.message, actor)
+                    await acknowledge(callback, t("lm.control.cancelled"), alert=True)
                     return
                 await reset_warnings(local, data.token, actor)
-                await callback.answer(t("lm.control.reset_done"), show_alert=True)
+                await dismiss(callback.message, actor)
+                await acknowledge(callback, t("lm.control.reset_done"), alert=True)
                 from app.bot.local_admin import publish_receipts
 
                 await publish_receipts(session_factory, bot)
                 return
             row, draft = await bound_origin(service.session, callback, data.sanction)
+            if data.action == "release":
+                called = "/unban" if row.kind == "BAN" else "/unmute"
             local = GroupModerationService(service.session, bot)
             if data.action == "reset":
                 prompt = await reset_prompt(local, row, actor)
@@ -199,11 +395,9 @@ def register_control_handlers(router: Router) -> None:
                     row.chat_id, actor, row.id, key="local:" + release.id, draft_id=release.id
                 )
                 draft.receipt_done = True
-                release.panel_chat_id, release.panel_message_id = (
-                    row.chat_id,
-                    draft.panel_message_id,
-                )
-                draft.panel_chat_id, draft.panel_message_id = None, None
+                # Track pending/error feedback privately; borrow the original
+                # public receipt only after a confirmed successful RELEASE.
+                release.receipt_visibility = "PRIVATE"
                 await service.session.commit()
                 await callback.answer()
                 from app.bot.local_moderation import LocalModerationExecutor
@@ -218,17 +412,25 @@ def register_control_handlers(router: Router) -> None:
             return
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
             await service.session.rollback()
-            key = "stale"
-            if isinstance(error, DomainError):
-                key = (
-                    "rights"
-                    if error.code in {"group_moderation_forbidden", "group_moderation_bot_rights"}
-                    else "busy"
-                    if error.code in {"group_moderation_uncertain", "group_moderation_busy"}
-                    else "stale"
-                )
+            from app.bot.moderation_errors import basic_kind, deliver_error, error_message
+
+            key = basic_kind(error) or "check_unavailable"
             try:
-                await callback.answer(t("lm.control." + key), show_alert=True)
+                if isinstance(callback.message, Message):
+                    await deliver_error(
+                        callback.message,
+                        callback.from_user.id,
+                        error_message(
+                            called,
+                            key,
+                            fallback="",
+                        ),
+                        "/moderation",
+                        allow_public_hint=False,
+                    )
+                    await callback.answer()
+                else:
+                    await callback.answer(t("lm.error"), show_alert=True)
             except (TelegramAPIError, TimeoutError, OSError):
                 pass
 

@@ -24,6 +24,7 @@ from app.bot.moderation_errors import (
     basic_kind,
     command_name,
     deliver_error,
+    diagnose_state,
     diagnose_target,
     error_message,
     target_read,
@@ -158,6 +159,7 @@ async def command_error(
     username: str | None,
     may_have_executed: bool = False,
     permanent_requested: bool = False,
+    target_id: int | None = None,
 ) -> None:
     try:
         actor = actor_id(message)
@@ -165,6 +167,19 @@ async def command_error(
         await deliver_error(message, None, "", command)
         return
     kind = basic_kind(error)
+    if (
+        isinstance(error, DomainError)
+        and error.code
+        in {
+            "group_moderation_conflict",
+            "group_moderation_existing_restriction",
+            "group_moderation_not_found",
+        }
+        and local is not None
+        and chat is not None
+        and target_id is not None
+    ):
+        kind = await diagnose_state(local, chat, actor, target_id, command)
     if isinstance(error, DomainError) and error.code == "group_moderation_disabled":
         kind = "module_disabled"
     target = target_read(error, chat, actor, bound_bot(message).id) if chat is not None else None
@@ -472,7 +487,9 @@ async def receipt_text(
         return t("lm.failed"), True
     jobs = list(
         await session.scalars(
-            select(GroupSanctionJob).where(GroupSanctionJob.sanction_id == row.id)
+            select(GroupSanctionJob)
+            .where(GroupSanctionJob.sanction_id == row.id)
+            .execution_options(populate_existing=True)
         )
     )
     release = next((j for j in jobs if j.operation == "RELEASE"), None)
@@ -524,8 +541,22 @@ async def show_draft(
 ) -> None:
     if draft.status == "CONFIRMED":
         from app.bot.moderation_controls import public_receipt
+        from app.bot.moderation_outcomes import diagnostic
 
-        await public_receipt(service.session, bound_bot(message), draft, observed=observed)
+        private_text = await diagnostic(service.session, bound_bot(message), draft)
+        if private_text is not None:
+            # This panel is already a private conversation; update it once.
+            draft.receipt_visibility = "PRIVATE"
+            draft.receipt_hash = hashlib.sha256(private_text.encode()).hexdigest()
+            _, draft.receipt_done = await receipt_text(
+                service.session, draft, bot=bound_bot(message)
+            )
+            await service.session.commit()
+            await display(message, private_text, None, edit=edit)
+            return
+        await public_receipt(
+            service.session, bound_bot(message), draft, observed=observed, source_message=message
+        )
         text, _ = await receipt_text(
             service.session, draft, observed=observed, bot=bound_bot(message)
         )
@@ -573,8 +604,6 @@ async def show_draft(
 
 
 async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
-    from app.bot.moderation_controls import receipt_markup
-
     async with sessions() as session:
         drafts = list(
             await session.scalars(
@@ -582,7 +611,10 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
                 .join(GroupSanction, GroupSanction.id == GroupModerationDraft.sanction_id)
                 .where(
                     GroupModerationDraft.status == "CONFIRMED",
-                    GroupModerationDraft.panel_message_id.is_not(None),
+                    or_(
+                        GroupModerationDraft.panel_message_id.is_not(None),
+                        GroupModerationDraft.receipt_visibility == "PRIVATE",
+                    ),
                     GroupModerationDraft.receipt_done.is_(False),
                     or_(
                         GroupModerationDraft.receipt_available_at.is_(None),
@@ -604,37 +636,14 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
                 if draft.receipt_done:
                     continue
                 with use_language(draft.language):
-                    text, done = await receipt_text(session, draft, bot=bot)
-                    digest = hashlib.sha256(text.encode()).hexdigest()
-                    row = await session.get(GroupSanction, draft.sanction_id)
-                    checked_at = row.updated_at
                     try:
-                        if digest != draft.receipt_hash:
-                            await bot.edit_message_text(
-                                chat_id=draft.panel_chat_id,
-                                message_id=draft.panel_message_id,
-                                text=text,
-                                parse_mode="HTML",
-                                reply_markup=await receipt_markup(session, draft),
-                            )
-                        draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
-                            digest,
-                            done,
-                            checked_at,
-                        )
+                        from app.bot.moderation_controls import public_receipt
+
+                        await public_receipt(session, bot, draft)
                     except TelegramRetryAfter as error:
                         draft.receipt_available_at = now() + timedelta(seconds=error.retry_after)
-                    except TelegramBadRequest as error:
-                        if "message is not modified" in error.message.lower():
-                            draft.receipt_hash, draft.receipt_done, draft.receipt_checked_at = (
-                                digest,
-                                done,
-                                checked_at,
-                            )
-                        else:
-                            draft.receipt_done = (
-                                True  # Never recreate missing receipts or spam a group.
-                            )
+                    except TelegramBadRequest:
+                        draft.receipt_done = True  # Never recreate missing public receipts.
                     except (TelegramAPIError, TimeoutError, OSError):
                         draft.receipt_available_at = now() + timedelta(seconds=30)
                     await session.commit()
@@ -662,20 +671,27 @@ def register_local_handlers(router: Router) -> None:
                 await groups_panel(message, service, actor)
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
             await service.session.rollback()
-            await message.answer(error_text(error))
+            await command_error(
+                message, service, error, command="/moderation", local=None, chat=None, username=None
+            )
 
-    @router.message(Command("ban", "unban", "mute", "unmute", "warn", "kick", "warnings"))
+    @router.message(
+        Command("ban", "unban", "mute", "unmute", "warn", "unwarn", "kick", "warnings", "warns")
+    )
     async def local_command(
         message: Message, state: FSMContext, service: Service, session_factory: Any
     ) -> None:
         local, chat, username = None, None, None
         may_have_executed = False
         permanent_requested = False
+        target = None
         called = command_name(message.text or "")
         try:
             actor = actor_id(message)
             command, *args = (message.text or "").split(maxsplit=1)
             kind = command.split("@", 1)[0][1:].upper()
+            if kind == "WARNS":
+                kind = "WARNINGS"
             data = await state.get_data()
             selected = message.chat.id if message.chat.type != "private" else data.get("lm_chat")
             chat = int(selected) if selected else None
@@ -689,6 +705,23 @@ def register_local_handlers(router: Router) -> None:
                 local, int(chat), actor, args[0] if args else "", message.reply_to_message, kind
             )
             permanent_requested = kind in {"BAN", "MUTE"} and until is None
+            if kind == "UNWARN":
+                from app.bot.warning_panel import panel as warning_panel
+                from app.warning_services import active_warnings
+
+                await local.authorization.target(int(chat), target)
+                origin = await service.session.scalar(
+                    active_warnings(int(chat), target).order_by(GroupSanction.id.desc())
+                )
+                if origin is None:
+                    raise DomainError("group_moderation_no_warnings")
+                if reason:
+                    if not reason.isascii() or not reason.isdigit():
+                        raise DomainError("local_invalid")
+                    await warning_panel(local, message, actor, origin, action="one", value=reason)
+                else:
+                    await warning_panel(local, message, actor, origin)
+                return
             if kind == "WARNINGS":
                 panel = (
                     message
@@ -715,6 +748,8 @@ def register_local_handlers(router: Router) -> None:
                 reason=reason,
                 request=f"local:{message.chat.id}:{message.message_id}:{actor}",
             )
+            draft.original_command = called
+            await service.session.commit()
             # Explicit textual commands are the administrator's direct instruction.
             # Menu-selected actions instead require a durable confirmation below.
             verified_people = await observed_users(
@@ -737,7 +772,11 @@ def register_local_handlers(router: Router) -> None:
             from app.bot.moderation_controls import public_receipt, publish_warning_announcements
 
             await public_receipt(
-                service.session, bound_bot(message), draft, observed=people + verified_people
+                service.session,
+                bound_bot(message),
+                draft,
+                observed=people + verified_people,
+                source_message=message,
             )
             await publish_warning_announcements(session_factory, bound_bot(message))
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
@@ -752,6 +791,7 @@ def register_local_handlers(router: Router) -> None:
                 username=username,
                 may_have_executed=may_have_executed,
                 permanent_requested=permanent_requested,
+                target_id=target,
             )
 
     @router.message(LocalModerationFlow.target, F.text, ~F.text.startswith("/"))
@@ -821,6 +861,10 @@ def register_local_handlers(router: Router) -> None:
         session_factory: Any,
     ) -> None:
         acknowledged = False
+        draft = None
+        called = "/moderation"
+        target_id = None
+        local = None
         chat = callback_data.chat
         try:
             if not isinstance(callback.message, Message) or callback.message.chat.type != "private":
@@ -839,6 +883,8 @@ def register_local_handlers(router: Router) -> None:
                 )
                 if draft is None or draft.actor_id != actor:
                     raise DomainError("group_moderation_invalid_draft")
+                called = "/" + draft.kind.lower()
+                target_id = draft.telegram_id
                 chat = draft.chat_id
             if action != "groups":
                 local = await access(service, callback.bot, chat, actor)
@@ -849,6 +895,7 @@ def register_local_handlers(router: Router) -> None:
                     .where(
                         GroupModerationDraft.panel_chat_id == message.chat.id,
                         GroupModerationDraft.panel_message_id == message.message_id,
+                        GroupModerationDraft.status != "CONFIRMED",
                     )
                     .values(receipt_done=True)
                 )
@@ -866,6 +913,7 @@ def register_local_handlers(router: Router) -> None:
             elif action == "settings":
                 await settings_panel(message, service, actor, chat)
             elif action == "toggle":
+                assert local is not None
                 field, expected = value.split(":", 1)
                 if field not in SWITCHES:
                     raise DomainError("local_invalid")
@@ -911,10 +959,12 @@ def register_local_handlers(router: Router) -> None:
                     offset=max(0, min(10000, int(offset))),
                 )
             elif action == "cancel":
+                assert local is not None
                 draft = await local.cancel_draft(value, actor)
                 await display(message, t("lm.cancelled"), None, edit=True)
             elif action in {"confirm", "refresh"}:
                 assert draft is not None
+                assert local is not None
                 verified_people = await observed_users(
                     {draft.telegram_id, actor}, bot=callback.bot, chat=draft.chat_id
                 )
@@ -932,10 +982,32 @@ def register_local_handlers(router: Router) -> None:
                 raise DomainError("local_invalid")
         except (DomainError, TelegramAPIError, TimeoutError, OSError, ValueError) as error:
             await service.session.rollback()
-            if not acknowledged:
-                await callback.answer(error_text(error), show_alert=True)
-            elif isinstance(callback.message, Message):
-                await display(callback.message, error_text(error), None, edit=True)
+            command = called
+            if isinstance(callback.message, Message):
+                kind = basic_kind(error) or "check_unavailable"
+                if (
+                    isinstance(error, DomainError)
+                    and error.code
+                    in {
+                        "group_moderation_conflict",
+                        "group_moderation_existing_restriction",
+                        "group_moderation_not_found",
+                    }
+                    and local is not None
+                    and target_id is not None
+                ):
+                    kind = await diagnose_state(
+                        local, chat, callback.from_user.id, target_id, command
+                    )
+                text = error_message(command, kind, fallback="")
+                if acknowledged and callback.message.chat.type == "private":
+                    await display(callback.message, text, None, edit=True)
+                else:
+                    await deliver_error(callback.message, callback.from_user.id, text, command)
+                    if not acknowledged:
+                        await callback.answer()
+            elif not acknowledged:
+                await callback.answer(t("lm.error"), show_alert=True)
             structlog.get_logger().info(
                 "local_moderation_ui_rejected",
                 user_id=callback.from_user.id,

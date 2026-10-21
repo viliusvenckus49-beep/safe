@@ -200,13 +200,15 @@ async def test_public_warn_button_private_confirmation_and_double_click(username
         mid = draft.panel_message_id
     before = len(sent(journey))
     await click(journey, data, actor=1, message_id=mid)
-    assert len(sent(journey)) == before
+    assert len(sent(journey)) == before + 1
     assert (
         isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
-        and journey.transport.calls[-1].show_alert
+        and not journey.transport.calls[-1].show_alert
     )
     assert await active(database) == 1
     await click(journey, data, message_id=mid)
+    menu = sent(journey)[-1]
+    await click(journey, menu.reply_markup.inline_keyboard[1][0].callback_data, message_id=0)
     prompt = sent(journey)[-1]
     assert prompt.ephemeral_message_parameters.receiver_user_id == 42
     yes = prompt.reply_markup.inline_keyboard[0][0].callback_data
@@ -218,7 +220,9 @@ async def test_public_warn_button_private_confirmation_and_double_click(username
         for call in journey.transport.calls
         if isinstance(call, EditMessageText) and call.message_id == mid
     ]
-    assert edits and edits[-1].reply_markup is None
+    assert edits and edits[-1].reply_markup.inline_keyboard[0][0].callback_data.startswith(
+        "mc3|history|"
+    )
     await click(journey, yes, message_id=0)
     assert await active(database) == 0 and bot.calls == []
 
@@ -357,13 +361,15 @@ async def test_warn_receipt_confirmation_and_history_are_localized(
     receipt = sent(journey)[-1]
     with use_language(lang):
         assert t("lm.control.warn_title") in receipt.text and "1/3" in receipt.text
-        assert receipt.reply_markup.inline_keyboard[0][0].text == t("lm.control.reset")
+        assert receipt.reply_markup.inline_keyboard[0][0].text == t("lm.control.unwarn")
     # Unknown target identity must not print its ID twice.
     assert receipt.text.count("51") == 1
     async with database() as session:
         draft = await session.scalar(select(GroupModerationDraft))
         mid = draft.panel_message_id
     await click(journey, receipt.reply_markup.inline_keyboard[0][0].callback_data, message_id=mid)
+    menu = sent(journey)[-1]
+    await click(journey, menu.reply_markup.inline_keyboard[1][0].callback_data, message_id=0)
     prompt = sent(journey)[-1]
     assert (
         prompt.parse_mode == "HTML" and prompt.ephemeral_message_parameters.receiver_user_id == 42
@@ -384,6 +390,8 @@ async def test_expired_and_foreign_confirmation_tokens_cannot_clear_warns(
         draft = await session.scalar(select(GroupModerationDraft))
         mid = draft.panel_message_id
     await click(journey, receipt.reply_markup.inline_keyboard[0][0].callback_data, message_id=mid)
+    menu = sent(journey)[-1]
+    await click(journey, menu.reply_markup.inline_keyboard[1][0].callback_data, message_id=0)
     token = sent(journey)[-1].reply_markup.inline_keyboard[0][0].callback_data
     await click(journey, token, actor=1, message_id=0)
     await click(journey, token, chat=OTHER, message_id=0)
