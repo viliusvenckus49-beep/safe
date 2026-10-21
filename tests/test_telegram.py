@@ -12,6 +12,7 @@ from aiogram.methods import (
     DeleteMessage,
     EditMessageText,
     GetMe,
+    SendMediaGroup,
     SendMessage,
     SendPhoto,
     SetMyCommands,
@@ -56,6 +57,15 @@ class Transport(BaseSession):
             return User(id=123456, is_bot=True, first_name="SAFECheck", username="redsafecheckbot")
         if isinstance(method, (AnswerCallbackQuery, DeleteMessage, SetMyCommands)):
             return True
+        if isinstance(method, SendMediaGroup):
+            return [
+                Message(
+                    message_id=100000 + len(self.calls) * 10 + index,
+                    date=datetime.now(UTC),
+                    chat=Chat(id=int(method.chat_id), type="private"),
+                )
+                for index, _ in enumerate(method.media)
+            ]
         return Message(
             message_id=(
                 method.message_id if isinstance(method, EditMessageText) else len(self.calls)
@@ -83,7 +93,7 @@ class Journey:
         )
         await self.dp.feed_update(self.bot, Update(update_id=self.sequence, message=message))
 
-    async def click(self, data, actor=1, chat=None):
+    async def click(self, data, actor=1, chat=None, message_id=100):
         self.sequence += 1
         callback = CallbackQuery(
             id=str(self.sequence),
@@ -91,7 +101,7 @@ class Journey:
             chat_instance="test",
             data=data,
             message=Message(
-                message_id=100,
+                message_id=message_id,
                 date=datetime.now(UTC),
                 chat=Chat(id=chat or actor, type="private" if chat is None else "supergroup"),
             ),

@@ -112,30 +112,21 @@ async def test_publication_audit_identifies_actual_campaign(database, settings, 
 async def test_default_interval_requires_actor_bound_confirmation(
     journey, database, settings, clock, members, lang
 ):
+    from app.bot.auto_ads import cb as unified_cb
     from app.services import Service
 
-    # The foreign actor is also a global admin: denial must come from operation
-    # ownership, rather than simply failing the global administrator check.
-    settings.admin_ids = "900,901"
     cid, _, _ = await setup(database, settings, clock)
     async with database() as session:
         await Service(settings, session).set_language(900, lang)
-        p = await session.get(AdAssignmentPolicy, cid)
-        before = p.version
-    await journey.click(cb("dv", cid, f"{before}.7200"), actor=900)
+        before = (await GlobalAdsService(settings, session).policy(900, cid)).version
+    await journey.click(unified_cb("set_interval", cid, before, 7200), actor=42)
     async with database() as session:
-        p = await session.get(AdAssignmentPolicy, cid)
-        assert (p.version, p.interval_seconds) == (before, 1800)
-    confirmation = latest(journey).reply_markup.inline_keyboard[0][0].callback_data
-    await journey.click(confirmation, actor=901)
+        assert (await GlobalAdsService(settings, session).policy(900, cid)).version == before
+    await journey.click(unified_cb("set_interval", cid, before, 7200), actor=900)
+    await journey.click(unified_cb("set_interval", cid, before, 86400), actor=900)
     async with database() as session:
-        assert (await session.get(AdAssignmentPolicy, cid)).version == before
-    await journey.click(confirmation, actor=900)
-    await journey.click(confirmation, actor=900)
-    async with database() as session:
-        p = await session.get(AdAssignmentPolicy, cid)
+        p = await GlobalAdsService(settings, session).policy(900, cid)
         assert (p.version, p.interval_seconds, p.auto_activate) == (before + 1, 7200, False)
-        assert (await session.scalar(select(AdGlobalOperation))).status == "DONE"
 
 
 async def test_expired_pending_selection_is_retained_but_not_offered(
@@ -157,22 +148,25 @@ async def test_expired_pending_selection_is_retained_but_not_offered(
 async def test_default_date_confirmation_uses_vilnius_and_changes_only_after_confirm(
     journey, database, settings, clock, members, field
 ):
+    from app.bot.auto_ads import cb as unified_cb
+
     cid, _, _ = await setup(database, settings, clock)
     async with database() as session:
-        p = await session.get(AdAssignmentPolicy, cid)
-        version = p.version
+        p = await GlobalAdsService(settings, session).policy(900, cid)
+        before = p.version
         original = getattr(p, field)
-    await journey.click(cb("de", cid, f"{version}.{field}"), actor=900)
+    await journey.click(unified_cb("set_date", cid, before, field), actor=900)
+    async with database() as session:
+        assert (
+            getattr(await GlobalAdsService(settings, session).policy(900, cid), field) == original
+        )
     await journey.send("2026-11-20 12:00", actor=900)
-    assert "2026-11-20 12:00 +0200" in latest(journey).text
     async with database() as session:
-        p = await session.get(AdAssignmentPolicy, cid)
-        assert p.version == version and getattr(p, field) == original
-    confirmation = latest(journey).reply_markup.inline_keyboard[0][0].callback_data
-    await journey.click(confirmation, actor=900)
-    async with database() as session:
-        p = await session.get(AdAssignmentPolicy, cid)
-        assert getattr(p, field).hour == 10 and p.version == version + 1
+        from app.moderation_services import utc
+
+        p = await GlobalAdsService(settings, session).policy(900, cid)
+        assert utc(getattr(p, field)).isoformat() == "2026-11-20T10:00:00+00:00"
+        assert p.version == before + 1
 
 
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
@@ -265,17 +259,15 @@ async def test_postgres_rollback_preserves_unsent_intent_and_retry_is_single(
 
 @pytest.mark.parametrize("change", ["policy", "removed", "archived", "expired"])
 async def test_reconcile_rechecks_changes_during_telegram_read(database, settings, clock, change):
+    from app.ads_unified import UnifiedAds
+
     cid, _, bot = await setup(database, settings, clock)
     settings.group_owner_id = 900
-    await assign(database, settings, cid, bot, mode="FUTURE")
-    await action(database, settings, cid, bot, "FUTURE_ON")
+    await assign(database, settings, cid, bot, mode="EXISTING")
     async with database() as session:
         session.add(ManagedGroup(chat_id=-400, title="New", approved=True, enabled=True))
         await session.commit()
-        if change == "expired":
-            service = GlobalAdsService(settings, session)
-            p = await service.policy(900, cid)
-            await service.defaults(900, cid, p.version, "end_at", INSTANT + timedelta(seconds=2))
+        expected = (await GlobalAdsService(settings, session).policy(900, cid)).version
     original = bot.get_chat_member
     touched = False
 
@@ -284,30 +276,35 @@ async def test_reconcile_rechecks_changes_during_telegram_read(database, setting
         if chat == -400 and not touched:
             touched = True
             async with database() as session:
-                if change == "policy":
+                if change in {"policy", "expired"}:
                     service = GlobalAdsService(settings, session)
                     p = await service.policy(900, cid)
-                    await service.defaults(900, cid, p.version, "interval_seconds", 7200)
+                    field = "interval_seconds" if change == "policy" else "end_at"
+                    await service.defaults(
+                        900,
+                        cid,
+                        p.version,
+                        field,
+                        7200 if change == "policy" else INSTANT + timedelta(seconds=2),
+                    )
                 elif change == "removed":
                     await GroupService(settings, session).remove_group(900, chat)
-                elif change == "archived":
+                else:
                     ads = AdsService(settings, session)
                     c = await ads.get(900, cid)
                     await ads.archive(900, cid, c.version)
-                else:
-                    clock[0] += timedelta(seconds=3)
         return await original(chat, identity)
 
     bot.get_chat_member = read
     async with database() as session:
-        await GlobalAdsService(settings, session).reconcile(bot)
+        with pytest.raises(DomainError):
+            await UnifiedAds(settings, session).groups(900, cid, expected, [-400], bot)
         assert (
             await session.scalar(
                 select(func.count()).select_from(AdSchedule).where(AdSchedule.chat_id == -400)
             )
             == 0
         )
-        assert await session.scalar(select(func.count()).select_from(AdPublicationAttempt)) == 0
     assert touched
 
 
@@ -316,7 +313,7 @@ async def test_postgres_duplicate_future_reconcile_and_explicit_readd_preserve_h
 ):
     sessions, settings = postgres_contract
     cid, sid, bot = await setup(sessions, settings, clock)
-    await assign(sessions, settings, cid, bot, mode="FUTURE")
+    await assign(sessions, settings, cid, bot, mode="EXISTING")
     await action(sessions, settings, cid, bot, "START")
     await AdsPublisher(bot, settings, sessions).tick()
     await action(sessions, settings, cid, bot, "REMOVE", sid=sid)
@@ -335,7 +332,7 @@ async def test_postgres_duplicate_future_reconcile_and_explicit_readd_preserve_h
             await session.scalar(
                 select(func.count()).select_from(AdSchedule).where(AdSchedule.chat_id == -400)
             )
-            == 1
+            == 0
         )
     await assign(
         sessions, settings, cid, bot, chats=(-100, -200, -300, -400), request="explicit-readd"

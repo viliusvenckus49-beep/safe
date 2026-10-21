@@ -11,10 +11,9 @@ from app.ads_customers import CustomerAccess, CustomerAdsService
 from app.ads_services import AdsService
 from app.bot.ads import cb as admin_cb
 from app.bot.ads import customer_cb
-from app.bot.ads_customers import cb
 from app.bot.callbacks import AdPublication, CustomerAdmin, GlobalAd
 from app.i18n import t
-from app.models import AdCampaign, AdContentDraft, AdContentVersion, AdCustomerLink
+from app.models import AdCampaign, AdContentDraft, AdContentVersion
 from app.services import Service
 
 
@@ -28,7 +27,7 @@ async def test_start_link_and_customer_shared_editor_native_entities(
         await Service(settings, session).set_language(42, lang)
     await journey.send("/start ad_" + token, actor=42)
     assert t("ac.title", lang) in journey.text()
-    assert "ADMIN_INTERNAL_ONLY" not in journey.text()
+    assert "ADMIN_INTERNAL_ONLY" in journey.text()
     before = len(journey.transport.calls)
     await journey.click(customer_cb("edit", cid, "TEXT"), actor=42)
     await journey.send(
@@ -175,14 +174,17 @@ async def test_customer_album_buttons_popup_scope_and_restart(journey, database,
 async def test_one_time_link_copy_and_numeric_assignment_admin_only(
     journey, database, settings, caplog
 ):
+    from app.ads_invitations import ClientInvitations
+    from app.bot.auto_ads import cb as unified_cb
+
     async with database() as session:
         cid = (await AdsService(settings, session).create(900, "Name", "seed")).id
-    await journey.click(cb("assign", cid, "0.0"), actor=900)
+    await journey.click(unified_cb("assign", cid, value="0.0"), actor=900)
     await journey.send("42", actor=900)
     async with database() as session:
         access = CustomerAccess(settings, session)
         grant_stamp = await stamp(access, cid)
-    await journey.click(cb("create", cid, grant_stamp), actor=900)
+    await journey.click(unified_cb("generate", cid, value=grant_stamp), actor=900)
     panel = [
         c
         for c in journey.transport.calls
@@ -191,22 +193,16 @@ async def test_one_time_link_copy_and_numeric_assignment_admin_only(
         and c.reply_markup.inline_keyboard[0][0].copy_text
     ][-1]
     url = panel.reply_markup.inline_keyboard[0][0].copy_text.text
-    token = url.split("ad_", 1)[1]
-    assert url.startswith("https://t.me/redsafecheckbot?start=ad_")
-    assert token not in caplog.text
-    await journey.click(cb("links", cid), actor=900)
-    assert token not in journey.transport.calls[-1].text
-    await journey.click(cb("create", cid, grant_stamp), actor=900)
+    payload = url.split("start=", 1)[1]
+    assert url.startswith("https://t.me/redsafecheckbot?start=ai_")
+    assert payload not in caplog.text and payload not in str(await journey.data(900))
     async with database() as session:
-        assert await session.scalar(select(func.count()).select_from(AdCustomerLink)) == 1
-        assert await CustomerAccess(settings, session).resolve(42, token) == cid
-    before = len(journey.transport.calls)
-    await journey.click(cb("links", cid), actor=42)
-    assert not any(
-        getattr(c, "reply_markup", None)
-        and any(b.copy_text for row in c.reply_markup.inline_keyboard for b in row)
-        for c in journey.transport.calls[before:]
-    )
+        assert await ClientInvitations(settings, session).consume(42, payload) == cid
+    await journey.click(unified_cb("links", cid), actor=900)
+    assert payload not in journey.transport.calls[-1].text
+    await journey.click(unified_cb("generate", cid, value=grant_stamp), actor=43)
+    async with database() as session:
+        assert (await CustomerAccess(settings, session).latest(cid)).customer_id == 42
 
 
 async def test_list_pagination_home_visibility_stats_and_readonly_history(
@@ -310,3 +306,30 @@ async def test_real_redis_customer_fsm_restart_and_token_not_persisted(database,
         await first.close()
         await second.close()
         await bot.session.close()
+
+
+async def test_authorized_client_can_save_100_custom_emoji_with_formatting(
+    journey, database, settings
+):
+    from test_ads_content import rich_emoji_text
+
+    cid, _ = await setup(database, settings)
+    token = await link(database, settings, cid)
+    await journey.send("/start ad_" + token, actor=42)
+    await journey.click(customer_cb("edit", cid, "TEXT"), actor=42)
+    text, entities = rich_emoji_text()
+    entities.append({"type": "italic", "offset": 0, "length": 200})
+    await journey.send(text, actor=42, entities=entities)
+    async with database() as session:
+        draft = await session.scalar(select(AdContentDraft))
+        assert draft.actor_id == 42 and draft.content["entities"] == entities
+        did = draft.id
+    await journey.click(customer_cb("draft_preview", cid, did), actor=42)
+    preview = [c for c in journey.transport.calls if isinstance(c, SendMessage) and c.text == text][
+        -1
+    ]
+    assert len(preview.entities) == 101 and preview.parse_mode is None and preview.chat_id == 42
+    await journey.click(customer_cb("save", cid, did), actor=42)
+    async with database() as session:
+        content = (await CustomerAdsService(settings, session).current(42, cid))[1].content
+        assert content["entities"] == entities

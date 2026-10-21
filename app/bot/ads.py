@@ -1,7 +1,6 @@
 """Private native AUTO ADS editor. Stage 3.1 never publishes to a group."""
 
 from hashlib import sha256
-from html import escape
 from typing import Any
 from urllib.parse import urlencode
 
@@ -30,15 +29,12 @@ from app.ads_content import (
 from app.ads_customers import CustomerAdsService
 from app.ads_services import AdsService
 from app.bot.callbacks import (
-    AdPublication,
     AdsAction,
     AdsPreview,
     CustomerAd,
-    CustomerAdmin,
-    GlobalAd,
     PublishedAd,
 )
-from app.bot.keyboards import action, keyboard
+from app.bot.keyboards import keyboard
 from app.bot.local_admin import display
 from app.bot.states import AdsFlow
 from app.bot.validation import actor_id
@@ -89,6 +85,9 @@ def failure(error: Exception) -> str:
                 "name",
                 "content",
                 "entity",
+                "entity_count",
+                "emoji_count",
+                "format_count",
                 "url",
                 "rules",
                 "media_error",
@@ -118,58 +117,21 @@ async def root(message: Message, ads: AdsService, actor: int, *, edit: bool = Tr
 
         await customer_list(message, ads, actor, edit=edit)
         return
-    await ads.authorize(actor)
-    drafts = await ads.unfinished(actor)
-    rows = [
-        [(t("ads.new"), cb("new")), ("🌐 Global ADS", GlobalAd(action="root").pack())],
-        [(t("ads.list"), cb("list")), (t("ap.stats"), GlobalAd(action="stats").pack())],
-        [(t("g.settings"), GlobalAd(action="settings").pack()), (t("ads.back"), action("admin"))],
-    ]
-    if drafts:
-        rows.append([(t("ads.drafts"), cb("drafts"))])
-    await ads.session.commit()
-    await display(message, t("g.main") + "\n\n" + t("ads.draft_note"), keyboard(rows), edit=edit)
+    from app.bot.auto_ads import root as unified_root
+
+    await unified_root(message, ads, actor, edit=edit)
 
 
 async def campaign_panel(
     message: Message, ads: AdsService, actor: int, campaign_id: int, *, edit: bool = True
-) -> None:
+) -> Message:
     if isinstance(ads, CustomerAdsService):
         from app.bot.ads_customers import customer_panel
 
-        await customer_panel(message, ads, actor, campaign_id, edit=edit)
-        return
-    campaign, _ = await ads.current(actor, campaign_id)
-    rows = [
-        [
-            (t("ads." + field.lower()), cb("edit", campaign.id, field)),
-            (t("ads.preview"), cb("preview", campaign.id, field)),
-        ]
-        for field in ("TEXT", "MEDIA", "BUTTONS")
-    ]
-    rows += [
-        [(t("ac.manage"), CustomerAdmin(action="panel", campaign=campaign.id).pack())],
-        [(t("ac.links"), CustomerAdmin(action="links", campaign=campaign.id).pack())],
-        [(t("ap.manage"), AdPublication(action="panel", campaign=campaign.id).pack())],
-        [("🌐 Global ADS", GlobalAd(action="campaign", campaign=campaign.id).pack())],
-        [(t("ads.full"), cb("preview", campaign.id, "FULL"))],
-        [(t("ads.history"), cb("history", campaign.id))],
-        [(t("ads.delete"), cb("delete", campaign.id, str(campaign.version)))],
-        [(t("ads.back"), cb("list"))],
-    ]
-    text = (
-        t("ads.title")
-        + "\n\n"
-        + t(
-            "ads.campaign",
-            name=escape(campaign.internal_name),
-            id=campaign.id,
-            version=campaign.version,
-            note=t("ads.draft_note"),
-        )
-    )
-    await ads.session.commit()
-    await display(message, text, keyboard(rows), edit=edit)
+        return await customer_panel(message, ads, actor, campaign_id, edit=edit)
+    from app.bot.auto_ads import panel
+
+    return await panel(message, ads, actor, campaign_id, edit=edit)
 
 
 async def draft_panel(
@@ -235,7 +197,7 @@ async def send_preview(
     content: dict,
     source: str,
     part: str = "FULL",
-) -> None:
+) -> list[Message]:
     if message.chat.type != "private" or message.chat.id != actor or message.bot is None:
         raise DomainError("forbidden")
     content = validate_content(content)
@@ -249,13 +211,13 @@ async def send_preview(
 
     if part == "BUTTONS":
         await ready()
-        await bot.send_message(
+        sent = await bot.send_message(
             actor,
             t("ads.buttons_preview"),
             reply_markup=preview_keyboard(content, source),
             parse_mode="HTML",
         )
-        return
+        return [sent]
     text = content["text"] if part != "MEDIA" else ""
     entities = (
         [MessageEntity.model_validate(e) for e in content["entities"]] if part != "MEDIA" else []
@@ -264,13 +226,14 @@ async def send_preview(
     markup = preview_keyboard(content, source) if part == "FULL" else None
     await ready()
     if not media:
-        await bot.send_message(
+        sent = await bot.send_message(
             actor,
             text or t("ads.empty_preview"),
             entities=entities,
             parse_mode=None,
             reply_markup=markup,
         )
+        return [sent]
     elif len(media) == 1:
         item = media[0]
         values: dict[str, Any] = {
@@ -280,10 +243,8 @@ async def send_preview(
             "parse_mode": None,
             "reply_markup": markup,
         }
-        if item["kind"] == "photo":
-            await bot.send_photo(photo=item["file_id"], **values)
-        else:
-            await bot.send_video(video=item["file_id"], **values)
+        kind = item["kind"]
+        return [await getattr(bot, "send_" + kind)(**{kind: item["file_id"]}, **values)]
     else:
         album: list[Any] = []
         for index, item in enumerate(media):
@@ -296,12 +257,15 @@ async def send_preview(
                     parse_mode=None,
                 )
             )
-        await bot.send_media_group(actor, media=album)
+        sent_album = await bot.send_media_group(actor, media=album)
         if markup:
             await ready()
-            await bot.send_message(
-                actor, t("ads.album_buttons"), reply_markup=markup, parse_mode="HTML"
+            sent_album.append(
+                await bot.send_message(
+                    actor, t("ads.album_buttons"), reply_markup=markup, parse_mode="HTML"
+                )
             )
+        return sent_album
 
 
 def register_ads_handlers(router: Router) -> None:
@@ -309,6 +273,9 @@ def register_ads_handlers(router: Router) -> None:
     async def open_ads(message: Message, state: FSMContext, service: Service) -> None:
         try:
             ads = await private(service, message, actor_id(message))
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(message, state)
             await state.set_state(None)
             await root(message, ads, actor_id(message), edit=False)
         except (DomainError, TelegramAPIError, ValueError, TimeoutError, OSError) as error:
@@ -449,6 +416,9 @@ def register_ads_handlers(router: Router) -> None:
                 "drafts",
             }:
                 raise DomainError("ac_denied")
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(message, state)
             await state.update_data(ads_customer=customer)
             await callback.answer()
             acknowledged = True

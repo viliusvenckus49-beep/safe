@@ -37,39 +37,39 @@ def members(journey, monkeypatch):
 async def test_schedule_menu_inputs_and_confirm_in_every_language(
     journey, database, settings, clock, members, lang
 ):
+    from app.bot.auto_ads import cb as unified_cb
+
     cid, sid, _, _, _ = await configured(database, settings, clock)
     async with database() as session:
         await Service(settings, session).set_language(900, lang)
-    await journey.click(cb("panel", cid), actor=900)
-    panels = [call for call in journey.transport.calls if isinstance(call, EditMessageText)]
-    assert "&lt;secret&gt;" in panels[-1].text and "&lt;&amp;&gt;" in panels[-1].text
-    assert t("ap.title", lang) in panels[-1].text
-    await journey.click(cb("intervals", cid), actor=900)
-    markup = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1].reply_markup
-    buttons = [b for row in markup.inline_keyboard for b in row]
-    assert len(buttons) == 10
-    await journey.click(buttons[2].callback_data, actor=900)
-    async with database() as session:
-        row = await session.get(AdSchedule, sid)
-        version = row.version
-        assert row.status == "PAUSED" and row.interval_seconds == 7200
-    await journey.click(cb("edit", cid, f"{version}.start_time"), actor=900)
-    await journey.send("13:00", actor=900)
-    async with database() as session:
-        row = await session.get(AdSchedule, sid)
-        assert row.start_at.replace(tzinfo=UTC).hour == 11
-    await journey.click(cb("start", cid), actor=900)
-    confirmation = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
-    assert t("ap.confirm_button", lang) == confirmation.reply_markup.inline_keyboard[0][0].text
-    payload = confirmation.reply_markup.inline_keyboard[0][0].callback_data
-    await journey.click(payload, actor=900)
+    await journey.click(unified_cb("panel", cid), actor=900)
+    panel = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    assert "&lt;secret&gt;" in panel.text
+    await journey.click(unified_cb("interval", cid), actor=900)
+    menu = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    intervals = [
+        b
+        for row in menu.reply_markup.inline_keyboard
+        for b in row
+        if b.callback_data.startswith("ua:set_interval:")
+    ]
+    assert len(intervals) == 9
+    payload = intervals[2].callback_data
     await journey.click(payload, actor=900)
     async with database() as session:
         row = await session.get(AdSchedule, sid)
-        assert row.status == "ACTIVE"
-        version = row.version
-    await journey.click(cb("pause", cid, str(version)), actor=900)
-    assert t("ap.control_note", lang) in journey.text()
+        assert row.interval_seconds == 7200 and row.status == "ACTIVE"
+    await journey.click(unified_cb("panel", cid), actor=900)
+    menu = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
+    pause = next(
+        b.callback_data
+        for r in menu.reply_markup.inline_keyboard
+        for b in r
+        if b.text == t("ua.pause", lang)
+    )
+    await journey.click(pause, actor=900)
+    async with database() as session:
+        assert (await session.get(AdSchedule, sid)).status == "PAUSED"
 
 
 @pytest.mark.parametrize(
@@ -148,7 +148,9 @@ async def test_publication_history_can_reach_older_retained_attempts(
     for _ in range(6):
         await worker.tick()
         clock[0] += timedelta(minutes=30)
-    await journey.click(cb("history", cid), actor=900)
+    from app.bot.auto_ads import cb as unified_cb
+
+    await journey.click(unified_cb("deliveries", cid), actor=900)
     first = [c for c in journey.transport.calls if isinstance(c, EditMessageText)][-1]
     assert "#6 " in first.text and "#1 " not in first.text
     next_button = first.reply_markup.inline_keyboard[0][0]
@@ -160,15 +162,15 @@ async def test_publication_history_can_reach_older_retained_attempts(
 async def test_schedule_navigation_closes_sql_transactions_before_telegram(
     journey, database, settings, clock, members, monkeypatch
 ):
-    import app.bot.ads_schedule as module
+    import app.bot.auto_ads as module
 
     cid, sid, _, _, _ = await configured(database, settings, clock)
     observed = []
     original_private = module.private
     original_request = journey.transport.make_request
 
-    async def private(service, message, actor):
-        result = await original_private(service, message, actor)
+    async def private(service, message, actor, **kwargs):
+        result = await original_private(service, message, actor, **kwargs)
         observed.append(service.session)
         return result
 
@@ -179,6 +181,6 @@ async def test_schedule_navigation_closes_sql_transactions_before_telegram(
 
     monkeypatch.setattr(module, "private", private)
     monkeypatch.setattr(journey.transport, "make_request", request)
-    for action in ["panel", "intervals", "calendar", "groups", "start", "stats", "history"]:
-        await journey.click(cb(action, cid), actor=900)
+    for action in ["panel", "interval", "validity", "groups", "client", "stats", "history"]:
+        await journey.click(module.cb(action, cid), actor=900)
     assert len(observed) == 7

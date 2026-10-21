@@ -9,7 +9,6 @@ from test_ads_publication import clock as clock
 from test_ads_publication_ui import members as members
 from test_telegram import journey as journey
 
-from app.bot.ads_schedule import cb as schedule_cb
 from app.bot.global_ads import base36, cb
 from app.i18n import CATALOGS, t
 from app.models import AdGlobalOperation, AdSchedule
@@ -24,46 +23,36 @@ def latest(journey):
 async def test_global_selection_confirmation_and_individual_controls(
     journey, database, settings, clock, members, lang
 ):
+    from app.bot.auto_ads import cb as unified_cb
+
     cid, _, _ = await setup(database, settings, clock)
     async with database() as session:
         await Service(settings, session).set_language(900, lang)
     await journey.click(cb("root"), actor=900)
-    assert t("g.title", lang) in latest(journey).text
-    await journey.click(cb("campaign", cid), actor=900)
-    assert "&lt;secret&gt;" in latest(journey).text
-    await journey.click(cb("groups", cid), actor=900)
-    await journey.click(cb("mode", cid, "SELECTED"), actor=900)
-    async with database() as session:
-        op = await session.scalar(select(AdGlobalOperation))
-        oid, version = op.id, op.version
-    for chat in [-100, -200]:
-        await journey.click(
-            cb("toggle", cid, ".".join([oid, base36(version), base36(chat), "0"])), actor=900
-        )
-        version += 1
-    assert "☑" in str(latest(journey).reply_markup)
-    await journey.click(cb("ready", cid, oid + "." + base36(version)), actor=900)
-    confirmation = latest(journey).reply_markup.inline_keyboard[0][0].callback_data
-    await journey.click(confirmation, actor=900)
-    await journey.click(confirmation, actor=900)
+    assert "AUTO ADS" in latest(journey).text and "GLOBAL ADS" not in latest(journey).text
+    await journey.click(unified_cb("select_groups", cid), actor=900)
+    state = await journey.data(900)
+    version = state["ua_group_version"]
+    await journey.click(unified_cb("toggle_group", cid, version, "-200.0"), actor=900)
+    await journey.click(unified_cb("apply_groups", cid, version), actor=900)
     async with database() as session:
         schedules = list(
             await session.scalars(select(AdSchedule).where(AdSchedule.campaign_id == cid))
         )
-        assert len(schedules) == 2
-        target = next(r for r in schedules if r.chat_id == -200)
-        sid, version = target.id, target.version
-    await journey.click(schedule_cb("panel", cid, sid=sid), actor=900)
-    assert t("g.remove", lang) in str(latest(journey).reply_markup)
-    await journey.click(schedule_cb("intervals", cid, sid=sid), actor=900)
-    payload = latest(journey).reply_markup.inline_keyboard[1][0].callback_data
+        assert {r.chat_id for r in schedules} == {-100, -200}
+    await journey.click(unified_cb("interval", cid), actor=900)
+    payload = next(
+        b.callback_data
+        for row in latest(journey).reply_markup.inline_keyboard
+        for b in row
+        if b.text == t("ua.hour", lang, n=2)
+    )
     await journey.click(payload, actor=900)
-    assert t("g.defaults_confirm", lang) in latest(journey).text
     async with database() as session:
-        assert (await session.get(AdSchedule, sid)).version == version
-    await journey.click(latest(journey).reply_markup.inline_keyboard[0][0].callback_data, actor=900)
-    async with database() as session:
-        assert (await session.get(AdSchedule, sid)).interval_seconds == 7200
+        schedules = list(
+            await session.scalars(select(AdSchedule).where(AdSchedule.campaign_id == cid))
+        )
+        assert all(r.interval_seconds == 7200 for r in schedules if not r.excluded)
 
 
 @pytest.mark.parametrize(
@@ -134,6 +123,15 @@ async def test_selection_is_recoverable_without_fsm(journey, database, settings,
         op = await service.selection(900, cid, "SELECTED", "recover-ui")
         op = await service.toggle(900, op.id, op.version, -200, bot)
         oid = op.id
-    await journey.click(cb("operations"), actor=900)
     await journey.click(cb("resume", cid, oid), actor=900)
-    assert "☑" in str(latest(journey).reply_markup)
+    assert "CRIMSON SAFECHECK" in latest(journey).text
+    async with database() as session:
+        # Cached selection data is retained, but never silently applied by navigation.
+        op = await session.get(AdGlobalOperation, oid)
+        assert op.status == "SELECTING" and op.payload["selected"] == [-200]
+        assert (
+            len(
+                list(await session.scalars(select(AdSchedule).where(AdSchedule.campaign_id == cid)))
+            )
+            == 1
+        )

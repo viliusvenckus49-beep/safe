@@ -54,14 +54,11 @@ async def send_part(bot: Any, attempt: Any, part: Any, version: Any) -> list[int
         )
     elif part.kind == "BUTTONS":
         result = await bot.send_message(**args, text="↳", reply_markup=markup)
-    elif part.kind in {"PHOTO", "VIDEO"}:
+    elif part.kind in {"PHOTO", "VIDEO", "ANIMATION", "DOCUMENT"}:
         media = content["media"][0]
         args.update(caption=content["text"] or None, caption_entities=entities, reply_markup=markup)
-        result = await (
-            bot.send_photo(**args, photo=media["file_id"])
-            if part.kind == "PHOTO"
-            else bot.send_video(**args, video=media["file_id"])
-        )
+        kind = media["kind"]
+        result = await getattr(bot, "send_" + kind)(**args, **{kind: media["file_id"]})
     else:
         album = []
         for index, media in enumerate(content["media"]):
