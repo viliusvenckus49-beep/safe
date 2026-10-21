@@ -82,7 +82,7 @@ jobs:
           counts_sql="SELECT json_build_object('users',(SELECT count(*) FROM users),'rep_events',(SELECT count(*) FROM reputation_events),'rep_requests',(SELECT count(*) FROM reputation_requests),'adjustments',(SELECT count(*) FROM reputation_adjustments),'scam_records',(SELECT count(*) FROM scam_records),'trusted',(SELECT count(*) FROM trusted_designations),'admins',(SELECT count(*) FROM administrators),'groups',(SELECT count(*) FROM managed_groups),'observed_members',(SELECT count(*) FROM observed_members),'reports',(SELECT count(*) FROM reports));"
           before_counts=$(sudo -n docker exec safecheck-postgres-1 psql -U safecheck -d safecheck -Atc "$counts_sql")
           printf 'DataBefore=%s\n' "$before_counts"
-          sudo -n python3 "$release/deploy/github_deploy.py" "$1" </dev/null
+          sudo -n python3 "$release/deploy/production_release.py" "$1" </dev/null
           sudo -n docker inspect safecheck-bot-1 --format 'RunningImage={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
           after_counts=$(sudo -n docker exec safecheck-postgres-1 psql -U safecheck -d safecheck -Atc "$counts_sql")
