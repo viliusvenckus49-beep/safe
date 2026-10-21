@@ -31,7 +31,12 @@ only its verification/bootstrap helpers are used, never its old `main()`.
   This merely permits its DM at the sandbox transport boundary; application-level
   invitation/grant checks are still required. Without the option, client DM
   acceptance is deliberately unavailable; administrator previews still work.
-* Known active ads must first be paused in the existing test bot. Pending,
+* Known active ads must first be paused in the existing test bot. Archived
+  campaigns can retain historical `ACTIVE` schedule rows: these do not block
+  deployment because the publication worker rejects archived campaigns. The
+  read-only check reports their count as `ArchivedActiveSchedulesIgnored`; it
+  does not alter or remove those rows. Excluded schedules also cannot publish.
+  Pending,
   processing or uncertain publication/moderation work blocks deployment and is
   reported read-only. It is never deleted/replayed to bypass a check.
 

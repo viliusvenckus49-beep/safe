@@ -3,7 +3,7 @@
 ## Evidence and limits
 
 Application rebuild collection before the live-operator addition: **2,259 test
-cases**. The operator adds **39** cases, making the current collection **2,298**.
+cases**. The operator adds **53** cases, making the current collection **2,312**.
 Test counts below overlap; do not add them.
 
 * Complete SQLite/default run: **2,132 passed, 124 skipped** (before the final
@@ -114,3 +114,25 @@ user's VPS or a real Telegram token.
   under a 0700 backup directory.
 * Ruff lint/format, mypy and whitespace checks pass after adding the operator.
   No VPS deployment or live Telegram observation occurred in these checks.
+
+## Archived-ad preflight correction
+
+The legacy content archive function changes `ad_campaigns.status` to ARCHIVED
+without rewriting schedule history. The initial sandbox operator counted all
+ACTIVE schedule rows, although `PublicationService.eligible()` explicitly rejects
+archived campaigns and excluded schedules. This could block deployment after a
+confirmed archive. The corrected read-only query counts ACTIVE schedules only
+for non-archived campaigns that are not excluded; archived ACTIVE rows are counted
+separately for diagnostics. Pending/claimed/sending/deferred/uncertain publications
+and pending/processing/uncertain moderation jobs continue blocking the update,
+including work that references an archived campaign. No database cleanup, state
+rewrite, application change or payload revision is involved.
+
+Fourteen real-SQL regression cases exercise actual legacy archive behavior, live
+ads, paused/excluded schedules and pending/uncertain/deferred archived-ad work,
+on both SQLite and isolated PostgreSQL. The original schedule/history is retained.
+
+After the correction, all **113** selected operator/publication checks passed with
+real task-owned PostgreSQL (Telegram calls still simulated), including all 53
+operator checks. Ruff lint/format and whitespace checks passed. This is not a VPS
+or real Telegram deployment result.

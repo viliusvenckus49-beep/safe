@@ -152,7 +152,12 @@ WORK_SQL = """BEGIN READ ONLY;
 SELECT json_build_object(
  'schema',(SELECT version_num FROM alembic_version),
  'groups',(SELECT count(*) FROM managed_groups WHERE chat_id=-1004454398792),
- 'active_ads',(SELECT count(*) FROM ad_schedules WHERE status='ACTIVE'),
+ 'active_ads',(SELECT count(*) FROM ad_schedules s
+   JOIN ad_campaigns c ON c.id=s.campaign_id
+   WHERE s.status='ACTIVE' AND c.status='DRAFT' AND NOT s.excluded),
+ 'archived_active_schedules',(SELECT count(*) FROM ad_schedules s
+   JOIN ad_campaigns c ON c.id=s.campaign_id
+   WHERE s.status='ACTIVE' AND c.status='ARCHIVED'),
  'publications',(SELECT count(*) FROM ad_publication_attempts
    WHERE status IN ('PENDING','CLAIMED','SENDING','DEFERRED','UNCERTAIN')),
  'ambiguous_sanctions',(SELECT count(*) FROM group_sanctions
@@ -179,7 +184,9 @@ def idle(base, kit, *, require_idle=True):
         )
     print(
         "ReadOnlyWorkCheck=PASS; ConfirmedActiveSanctionsPreserved="
-        + str(value["active_sanctions"]),
+        + str(value["active_sanctions"])
+        + "; ArchivedActiveSchedulesIgnored="
+        + str(value.get("archived_active_schedules", 0)),
         flush=True,
     )
     return value

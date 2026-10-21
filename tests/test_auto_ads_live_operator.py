@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from test_integration_contracts import postgres_contract as postgres_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
@@ -328,3 +329,135 @@ def test_backup_rehearsal_has_readable_code_private_dump_and_scoped_cleanup(
     dropped = [args[-1] for args in commands if "dropdb" in args]
     assert bool(dropped) is success
     assert all(name.startswith("auto_ads_rehearsal_") for name in dropped)
+
+
+PREFLIGHT_ARCHIVE_CASES = [
+    ("DRAFT", "ACTIVE", False, None, True),
+    ("ARCHIVED", "ACTIVE", False, None, False),
+    ("DRAFT", "PAUSED", False, None, False),
+    ("DRAFT", "ACTIVE", True, None, False),
+    ("ARCHIVED", "ACTIVE", False, "PENDING", True),
+    ("ARCHIVED", "ACTIVE", False, "UNCERTAIN", True),
+    ("ARCHIVED", "ACTIVE", False, "DEFERRED", True),
+]
+
+
+async def archived_schedule_preflight(
+    sessions,
+    settings,
+    campaign_status,
+    schedule_status,
+    excluded,
+    publication_status,
+    blocked,
+    *,
+    postgres=False,
+):
+    from sqlalchemy import text
+
+    from app.ads_services import AdsService
+    from app.models import (
+        AdCampaign,
+        AdContentVersion,
+        AdPublicationAttempt,
+        AdSchedule,
+        ManagedGroup,
+        now,
+    )
+
+    async with sessions() as session:
+        campaign = AdCampaign(
+            internal_name="Existing ad", created_by=900, updated_by=900, request_key="keep"
+        )
+        session.add_all([campaign, ManagedGroup(chat_id=-1004454398792, title="Test only")])
+        await session.flush()
+        schedule = AdSchedule(
+            campaign_id=campaign.id,
+            chat_id=-1004454398792,
+            status=schedule_status,
+            interval_seconds=1800,
+            start_at=now(),
+            next_run_at=now(),
+            authorized_by=900,
+            excluded=excluded,
+        )
+        session.add(schedule)
+        await session.flush()
+        cid, sid, version = campaign.id, schedule.id, campaign.version
+        if publication_status:
+            content = AdContentVersion(
+                campaign_id=cid, revision=1, content={}, actor_id=900, request_key="keep-content"
+            )
+            session.add(content)
+            await session.flush()
+            session.add(
+                AdPublicationAttempt(
+                    schedule_id=sid,
+                    content_version_id=content.id,
+                    chat_id=-1004454398792,
+                    schedule_version=1,
+                    due_at=now(),
+                    status=publication_status,
+                )
+            )
+        await session.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32))"))
+        await session.execute(text("INSERT INTO alembic_version VALUES ('0019')"))
+        await session.commit()
+        if campaign_status == "ARCHIVED":
+            # Reproduce the actual old delete/archive flow, rather than inventing
+            # a manually patched database state. It deliberately retains history.
+            await AdsService(settings, session).archive(900, cid, version)
+        query = op.WORK_SQL.removeprefix("BEGIN READ ONLY;").removesuffix(" COMMIT;")
+        if not postgres:
+            query = query.replace("json_build_object(", "json_object(")
+        state = await session.scalar(text(query))
+        if isinstance(state, str):
+            state = json.loads(state)
+        assert state["active_ads"] == int(
+            campaign_status == "DRAFT" and schedule_status == "ACTIVE" and not excluded
+        )
+        assert state["archived_active_schedules"] == int(
+            campaign_status == "ARCHIVED" and schedule_status == "ACTIVE"
+        )
+        base = SimpleNamespace(database_json=lambda *args: state)
+        if blocked:
+            with pytest.raises(RuntimeError, match="no state deleted"):
+                op.idle(base, None)
+        else:
+            assert op.idle(base, None) == state
+        assert (
+            await session.get(AdSchedule, sid, populate_existing=True)
+        ).status == schedule_status
+        assert (
+            await session.get(AdCampaign, cid, populate_existing=True)
+        ).status == campaign_status
+
+
+@pytest.mark.parametrize(
+    "campaign_status,schedule_status,excluded,publication_status,blocked", PREFLIGHT_ARCHIVE_CASES
+)
+async def test_real_sql_preflight_distinguishes_archived_ads_from_live_work(
+    database, settings, campaign_status, schedule_status, excluded, publication_status, blocked
+):
+    await archived_schedule_preflight(
+        database, settings, campaign_status, schedule_status, excluded, publication_status, blocked
+    )
+
+
+@pytest.mark.parametrize(
+    "campaign_status,schedule_status,excluded,publication_status,blocked", PREFLIGHT_ARCHIVE_CASES
+)
+async def test_postgres_preflight_distinguishes_archived_ads_from_live_work(
+    postgres_contract, campaign_status, schedule_status, excluded, publication_status, blocked
+):
+    sessions, settings = postgres_contract
+    await archived_schedule_preflight(
+        sessions,
+        settings,
+        campaign_status,
+        schedule_status,
+        excluded,
+        publication_status,
+        blocked,
+        postgres=True,
+    )
