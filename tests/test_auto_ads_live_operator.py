@@ -42,7 +42,7 @@ def session(*args,**kwargs):
 def test_payload_is_pinned_reviewed_current_runtime_not_new_dependencies():
     base = op.predecessor()
     patches = op.incoming(base)
-    assert len(patches) == 35
+    assert len(patches) == 36
     for name in op.PAYLOAD:
         assert patches[name] == (ROOT / name).read_bytes()
         assert (
@@ -57,6 +57,26 @@ def test_tampered_embedded_operator_refuses_execution(monkeypatch):
     monkeypatch.setattr(op, "LEGACY_SHA", "0" * 64)
     with pytest.raises(RuntimeError, match="hash mismatch"):
         op.predecessor()
+
+
+@pytest.mark.parametrize(
+    ("requested", "context", "expected"),
+    [
+        (None, {}, None),
+        (None, {"auto_ads_client_id": 42}, 42),
+        (43, {"auto_ads_client_id": 42}, 43),
+    ],
+)
+def test_code_update_preserves_existing_client_unless_explicitly_changed(
+    requested, context, expected
+):
+    assert op.client_for(requested, context) == expected
+
+
+@pytest.mark.parametrize("invalid", [True, "42", 0, -42, 8986848376])
+def test_invalid_preserved_private_boundary_refuses_update(invalid):
+    with pytest.raises(RuntimeError, match="human test account"):
+        op.client_for(None, {"auto_ads_client_id": invalid})
 
 
 @pytest.mark.parametrize("name", ["../.env", "/tmp/leak.py", "migrations/evil.py"])

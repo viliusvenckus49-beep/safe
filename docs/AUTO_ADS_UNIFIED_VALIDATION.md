@@ -4,8 +4,42 @@
 
 Application rebuild collection before the live-operator addition: **2,259 test
 cases**. The operator adds **55** cases and the Custom Emoji correction adds **36**,
-and the native message editor adds **38**, making the current collection **2,388**.
+the native message editor adds **38**, native activation adds **22**, and preserved
+test-client boundary coverage adds **8**, making the current collection **2,418**.
 Test counts below overlap; do not add them.
+
+### Immediate-save activation correction
+
+Latest selected run after rebuilding the pinned operator payload:
+
+```sh
+TEST_POSTGRES_URL=postgresql+asyncpg://safecheck@127.0.0.1:19489/safecheck_test \
+TEST_REDIS_URL=redis://127.0.0.1:19490/0 \
+PYTHONPATH=/tmp/safecheck-username-python python3 -m pytest -q \
+  tests/test_ads*.py tests/test_auto_ads*.py tests/test_telegram.py \
+  tests/test_stage35_runtime.py --tb=short
+```
+
+**664 passed, no skips, 13 existing Alembic configuration deprecation warnings,
+206.49 seconds.** Ruff lint and formatting pass; mypy passes all 106 application
+sources. Collection of the complete repository is 2,418 cases; that entire
+collection was not rerun for this correction.
+
+The 22 new activation cases cover native text/media/buttons for administrator and
+client, initial activation and the next scheduled slot, pinned in-flight content,
+duplicate scheduler ticks, PostgreSQL, exact native-save audit evidence, expired
+validity, revoked group approval and administrator/bot rights. Nine deliberately
+mismatched/missing evidence cases must fail closed. Eight additional operator
+cases verify preserving the existing test client and rejecting invalid scope.
+The operator's 36 reviewed runtime files match their embedded SHA-256 pins.
+
+An initial run before refreshing the deployment payload had 655 passes and one
+expected source-pin mismatch against the old package. After rebuilding it, the
+complete selected run above passed without exceptions. No database migration is
+added by this correction. All Telegram calls are simulated; no VPS deployment,
+production database access or real group publication occurred during these tests.
+
+### Earlier rebuild validation
 
 * Complete SQLite/default run: **2,132 passed, 124 skipped** (before the final
   three additional tests). Skips explicitly require integration services.

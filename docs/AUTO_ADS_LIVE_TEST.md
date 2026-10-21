@@ -2,14 +2,15 @@
 
 This is an opt-in **test deployment**, authorized separately from production.
 PR #45 remains unmerged. `tools/auto_ads_live_test.py` targets application revision
-`2534b76934434abb1e840e93bfdb5e3871e418da`, including schema 0020. It is a
+`55557eaf34e5af7fb1b4bd4dd80378225de6598a`, including schema 0020. It is a
 standalone Python standard-library operator bundle so an iPhone operator does not
 need to paste source files, clone repositories or install development dependencies.
-The previous c83b096 and a9018d9 AUTO ADS sandboxes are accepted by their exact original hashes;
+The previous c83b096, a9018d9 and 2534b76 AUTO ADS sandboxes are accepted by their exact original hashes;
 its existing private runtime/client boundary is verified before replacement.
 This candidate includes the rich Custom Emoji correction and immediate message
 editing with one bottom-of-chat controller for administrator and client text,
-media and buttons. No additional database migration is needed.
+media and buttons, including activation and scheduled publication of immediately
+saved content. No additional database migration is needed.
 Its embedded, hashed predecessor is the reviewed WARN CONTROLS staging operator;
 only its verification/bootstrap helpers are used, never its old `main()`.
 
@@ -34,8 +35,11 @@ only its verification/bootstrap helpers are used, never its old `main()`.
   A second/third group acceptance remains untested with this one-group sandbox.
 * Add a consenting client's numeric ID with `--client-id 123456789` when applying.
   This merely permits its DM at the sandbox transport boundary; application-level
-  invitation/grant checks are still required. Without the option, client DM
-  acceptance is deliberately unavailable; administrator previews still work.
+  invitation/grant checks are still required. Without the option, an existing
+  `auto_ads_client_id` is preserved; if none was previously configured, client DM
+  acceptance remains unavailable. A code update never silently removes the
+  already approved client DM. Assigning a different client inside AUTO ADS still
+  does not widen this explicit test transport boundary.
 * Known active ads must first be paused in the existing test bot. Archived
   campaigns can retain historical `ACTIVE` schedule rows: these do not block
   deployment because the publication worker rejects archived campaigns. The
