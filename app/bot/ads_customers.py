@@ -63,7 +63,7 @@ async def customer_list(message, ads, actor, *, page=0, edit=True):
 async def customer_panel(message, ads, actor, cid, *, edit=True):
     from app.bot.auto_ads import client_panel
 
-    await client_panel(message, ads, actor, cid, edit=edit)
+    return await client_panel(message, ads, actor, cid, edit=edit)
 
 
 async def customer_stats(message, ads, actor, cid):
@@ -163,12 +163,15 @@ async def admin_panel(message, access, actor, cid, *, links=False):
 
 async def open_link(message: Message, state: FSMContext, service: Service, parameter: str) -> None:
     """Consume start payload without persisting it in FSM, audit details or logs."""
-    await state.clear()
     try:
         actor = actor_id(message)
         ads = await private(service, message, actor, customer=True)
         assert isinstance(ads, CustomerAdsService)
         cid = await ads.grants.resolve(actor, parameter[3:])
+        from app.bot.ads_message_editor import leave_editor
+
+        await leave_editor(message, state)
+        await state.clear()
         await customer_panel(message, ads, actor, cid, edit=False)
     except (DomainError, TelegramAPIError, ValueError, TimeoutError, OSError):
         await service.session.rollback()
@@ -180,6 +183,9 @@ def register_customer_handlers(router: Router) -> None:
     async def my_ads(message: Message, state: FSMContext, service: Service):
         try:
             ads = await private(service, message, actor_id(message), customer=True)
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(message, state)
             await state.clear()
             await customer_list(message, ads, actor_id(message), edit=False)
         except (DomainError, TelegramAPIError, ValueError, TimeoutError, OSError) as error:

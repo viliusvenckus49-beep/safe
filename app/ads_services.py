@@ -310,8 +310,17 @@ class AdsService:
             draft.previewed = True
 
     async def save(self, actor: int, draft_id: str) -> AdContentVersion:
+        return await self._save(actor, draft_id, received=False)
+
+    async def save_received(self, actor: int, draft_id: str) -> AdContentVersion:
+        """Apply validated native input with fresh ACL/CAS checks, without a preview claim."""
+        return await self._save(actor, draft_id, received=True)
+
+    async def _save(self, actor: int, draft_id: str, *, received: bool) -> AdContentVersion:
         async with self.write(actor):
             draft = await self.draft(actor, draft_id, editable=False)
+            if received and draft.field not in {"TEXT", "MEDIA", "BUTTONS"}:
+                raise DomainError("ads_stale")
             if draft.status == "SAVED":
                 saved = await self.session.scalar(
                     select(AdContentVersion).where(
@@ -322,7 +331,7 @@ class AdsService:
                 assert saved is not None
                 return saved
             draft = await self.draft(actor, draft_id)
-            if draft.status != "READY" or not draft.previewed:
+            if draft.status != "READY" or (not received and not draft.previewed):
                 raise DomainError("ads_preview_required")
             campaign = await self.get(actor, draft.campaign_id)
             content = validate_content(draft.content)
@@ -344,6 +353,7 @@ class AdsService:
                 revision=campaign.version,
                 draft_id=draft.id,
                 field=draft.field,
+                validation="native_input" if received else "previewed",
             )
         return version
 

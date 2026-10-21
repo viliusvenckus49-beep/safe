@@ -43,6 +43,11 @@ Changes relative to `0206827ac06cdf926010df4893ff0eaa12c82e31` (PR #44).
 - `tests/test_group_moderation_migration.py`
 - `tests/test_stage35_runtime.py`
 - `tools/auto_ads_live_test.py`
+- `app/ads_services.py`
+- `app/bot/ads_message_editor.py`
+- `docs/AUTO_ADS_MESSAGE_EDITOR.md`
+- `tests/test_ads_message_editor.py`
+- `tests/test_telegram.py`
 
 No new runtime dependency; no change to payment, SCAM, TRUSTED, reputation or
 moderation implementation. The legacy moderation migration test only adds the new

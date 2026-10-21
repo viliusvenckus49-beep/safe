@@ -72,3 +72,7 @@ class AdCustomerFlow(StatesGroup):
 
 class AutoAdsFlow(StatesGroup):
     input = State()
+
+
+class AdMessageFlow(StatesGroup):
+    input = State()

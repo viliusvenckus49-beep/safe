@@ -2,6 +2,11 @@
 
 COPY = {
     "lt": {
+        "see": "👁 Rodyti",
+        "send_now": "<b>Atsiųsk žinutę, kurią nori nustatyti.</b>",
+        "message_set": "✅ <b>Žinutė nustatyta.</b>\nPakeitimai bus naudojami per kitą suplanuotą siuntimą.",
+        "content_status": "Tekstas {text} · Medija {media} · Mygtukai {buttons}",
+        "preview_failed": "Peržiūros nepavyko parodyti. Išsaugotas reklamos turinys nepakeistas.",
         "title": "📢 AUTO ADS",
         "new": "➕ Nauja reklama",
         "list": "📋 Visos kampanijos",
@@ -56,6 +61,11 @@ COPY = {
         "telegram": "Telegram nepriėmė peržiūros. Turinys neišsaugotas. Patikrink mediją ir Custom Emoji prieinamumą šiam botui.",
     },
     "en": {
+        "see": "👁 See",
+        "send_now": "<b>Send now the message you want to set.</b>",
+        "message_set": "✅ <b>Message set.</b>\nChanges will be used at the next scheduled send.",
+        "content_status": "Text {text} · Media {media} · Buttons {buttons}",
+        "preview_failed": "The preview could not be displayed. Saved ad content is unchanged.",
         "title": "📢 AUTO ADS",
         "new": "➕ New ad",
         "list": "📋 All campaigns",
@@ -110,6 +120,11 @@ COPY = {
         "telegram": "Telegram rejected the preview. Changes were not saved. Check media and Custom Emoji availability for this bot.",
     },
     "ru": {
+        "see": "👁 Просмотр",
+        "send_now": "<b>Отправьте сообщение, которое хотите установить.</b>",
+        "message_set": "✅ <b>Сообщение установлено.</b>\nИзменения будут использованы при следующей плановой отправке.",
+        "content_status": "Текст {text} · Медиа {media} · Кнопки {buttons}",
+        "preview_failed": "Не удалось показать предпросмотр. Сохранённое содержимое рекламы не изменено.",
         "title": "📢 AUTO ADS",
         "new": "➕ Новая реклама",
         "list": "📋 Все кампании",

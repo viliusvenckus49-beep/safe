@@ -200,8 +200,7 @@ async def listing(message, ads, actor, state, *, page=0, status=None, edit=True)
 
 async def panel(message, ads, actor, cid, *, edit=True):
     if isinstance(ads, CustomerAdsService):
-        await client_panel(message, ads, actor, cid, edit=edit)
-        return
+        return await client_panel(message, ads, actor, cid, edit=edit)
     campaign, content, policy, schedules, grant, stats = await manager(ads).details(actor, cid)
     seconds = common(schedules, "interval_seconds", policy.interval_seconds)
     duration = t("ua.mixed") if seconds == "MIXED" else interval(seconds or policy.interval_seconds)
@@ -228,17 +227,29 @@ async def panel(message, ads, actor, cid, *, edit=True):
         )
     )
     cid, version = campaign.id, policy.version
+    content_version = campaign.version
+    text += "\n\n" + t(
+        "ads.content_status",
+        text="✓" if content.content["text"] else "×",
+        media="✓" if content.content["media"] else "×",
+        buttons="✓" if content.content["buttons"] else "×",
+    )
     rows = [
         [
-            (t("ua.text"), content_cb("edit", cid, "TEXT")),
-            (t("ua.media"), content_cb("edit", cid, "MEDIA")),
+            (t("ua.text"), content_cb("qe", cid, f"TEXT.{content_version}")),
+            (t("ads.see"), content_cb("qp", cid, "TEXT")),
         ],
-        [(t("ua.buttons"), cb("buttons", cid)), (t("ua.interval"), cb("interval", cid))],
+        [
+            (t("ua.media"), content_cb("qe", cid, f"MEDIA.{content_version}")),
+            (t("ads.see"), content_cb("qp", cid, "MEDIA")),
+        ],
+        [(t("ua.buttons"), cb("buttons", cid)), (t("ads.see"), content_cb("qp", cid, "BUTTONS"))],
+        [(t("ua.interval"), cb("interval", cid))],
         [(t("ua.groups"), cb("groups", cid)), (t("ua.client"), cb("client", cid))],
         [(t("ua.link"), cb("links", cid)), (t("ua.validity"), cb("validity", cid))],
         [(t("ua.stats"), cb("stats", cid)), (t("ua.history"), cb("history", cid))],
         [
-            (t("ua.preview"), content_cb("preview", cid, "FULL")),
+            (t("ua.preview"), content_cb("qp", cid, "FULL")),
             (
                 t("ua.pause") if live(schedules) else t("ua.resume"),
                 cb("pause" if live(schedules) else "start", cid, version),
@@ -253,11 +264,11 @@ async def panel(message, ads, actor, cid, *, edit=True):
         rows.append([(t("ads.drafts"), cb("drafts", cid))])
     rows += [[(t("ua.delete"), cb("delete", cid, version))], [(t("ua.to_list"), cb("list"))]]
     await ads.session.commit()
-    await display(message, text, keyboard(rows), edit=edit)
+    return await display(message, text, keyboard(rows), edit=edit)
 
 
 async def client_panel(message, ads, actor, cid, *, edit=True):
-    campaign, _ = await ads.current(actor, cid)
+    campaign, content = await ads.current(actor, cid)
     grant = await ads.grants.check(actor, cid)
     editable = campaign.status == "DRAFT" and (
         not grant.editing_until or utc(grant.editing_until) > now()
@@ -266,13 +277,18 @@ async def client_panel(message, ads, actor, cid, *, edit=True):
     if editable:
         rows = [
             [
-                (t("ua.text"), customer_cb("edit", cid, "TEXT")),
-                (t("ua.media"), customer_cb("edit", cid, "MEDIA")),
+                (t("ua.text"), customer_cb("qe", cid, f"TEXT.{campaign.version}")),
+                (t("ads.see"), customer_cb("qp", cid, "TEXT")),
+            ],
+            [
+                (t("ua.media"), customer_cb("qe", cid, f"MEDIA.{campaign.version}")),
+                (t("ads.see"), customer_cb("qp", cid, "MEDIA")),
             ],
             [
                 (t("ua.buttons"), cb("c_buttons", cid)),
-                (t("ua.preview"), customer_cb("preview", cid, "FULL")),
+                (t("ads.see"), customer_cb("qp", cid, "BUTTONS")),
             ],
+            [(t("ua.preview"), customer_cb("qp", cid, "FULL"))],
         ]
         drafts = await ads.unfinished(actor)
         rows += [
@@ -281,7 +297,7 @@ async def client_panel(message, ads, actor, cid, *, edit=True):
             if d.campaign_id == cid
         ][:3]
     else:
-        rows.append([(t("ua.preview"), customer_cb("preview", cid, "FULL"))])
+        rows.append([(t("ua.preview"), customer_cb("qp", cid, "FULL"))])
     rows.append([(t("ua.back"), customer_cb("list"))])
     markup = keyboard(rows)
     if editable and await ClientInvitations(ads.access.settings, ads.session).editor_enabled(grant):
@@ -298,13 +314,20 @@ async def client_panel(message, ads, actor, cid, *, edit=True):
                 ],
             )
     await ads.session.commit()
-    await display(
+    return await display(
         message,
         title(t("ua.client_editor"))
         + "\n\n<b>"
         + escape(campaign.internal_name)
         + "</b>\n\n"
         + t("ua.client_note")
+        + "\n\n"
+        + t(
+            "ads.content_status",
+            text="✓" if content.content["text"] else "×",
+            media="✓" if content.content["media"] else "×",
+            buttons="✓" if content.content["buttons"] else "×",
+        )
         + ("\n\n" + t("ac.readonly") if not editable else ""),
         markup,
         edit=edit,
@@ -330,7 +353,11 @@ async def buttons_panel(message, ads, actor, cid, *, choice=""):
                         [
                             (
                                 button["label"],
-                                cb(prefix + "b_" + choice, cid, campaign.version, index),
+                                (customer_cb if customer else content_cb)(
+                                    "qe" if choice == "edit" else "qk",
+                                    cid,
+                                    f"{choice.upper()}.{campaign.version}.{index}",
+                                ),
                             )
                         ]
                     )
@@ -338,7 +365,12 @@ async def buttons_panel(message, ads, actor, cid, *, choice=""):
         rows.append([(t("ua.back"), cb(prefix + "buttons", cid))])
     else:
         rows = [
-            [(t("ua.button_add"), cb(prefix + "b_add", cid, campaign.version))],
+            [
+                (
+                    t("ua.button_add"),
+                    (customer_cb if customer else content_cb)("qe", cid, f"ADD.{campaign.version}"),
+                )
+            ],
             [
                 (t("ua.button_edit"), cb(prefix + "b_choose", cid, value="edit")),
                 (t("ua.button_remove"), cb(prefix + "b_choose", cid, value="remove")),
@@ -347,10 +379,12 @@ async def buttons_panel(message, ads, actor, cid, *, choice=""):
             [
                 (
                     t("ua.button_bulk"),
-                    (customer_cb if customer else content_cb)("edit", cid, "BUTTONS"),
+                    (customer_cb if customer else content_cb)(
+                        "qe", cid, f"BUTTONS.{campaign.version}"
+                    ),
                 )
             ],
-            [(t("ua.preview"), (customer_cb if customer else content_cb)("preview", cid, "FULL"))],
+            [(t("ua.preview"), (customer_cb if customer else content_cb)("qp", cid, "FULL"))],
             [(t("ua.back"), (customer_cb("campaign", cid) if customer else cb("panel", cid)))],
         ]
         descriptions: list[str] = []
@@ -458,6 +492,9 @@ async def open_link(message, state, service, payload):
             else links.editor(actor, payload)
         )
         ads = CustomerAdsService(service.settings, service.session)
+        from app.bot.ads_message_editor import leave_editor
+
+        await leave_editor(message, state)
         await state.clear()
         await client_panel(message, ads, actor, cid, edit=False)
     except (DomainError, TelegramAPIError, ValueError, TimeoutError, OSError):
@@ -478,6 +515,9 @@ def register_auto_ads_handlers(router: Router):
             if not isinstance(callback.message, Message):
                 raise DomainError("forbidden")
             ads = await private(service, callback.message, callback.from_user.id)
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(callback.message, state)
             await state.set_state(None)
             await service.session.commit()
             await callback.answer()
@@ -638,6 +678,9 @@ def register_auto_ads_handlers(router: Router):
                 raise DomainError("ac_denied")
             ads = await private(service, message, actor, customer=customer)
             management = manager(ads)
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(message, state)
             if cid:
                 await ads.get(actor, cid)
             await state.set_state(None)

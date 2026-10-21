@@ -124,15 +124,14 @@ async def root(message: Message, ads: AdsService, actor: int, *, edit: bool = Tr
 
 async def campaign_panel(
     message: Message, ads: AdsService, actor: int, campaign_id: int, *, edit: bool = True
-) -> None:
+) -> Message:
     if isinstance(ads, CustomerAdsService):
         from app.bot.ads_customers import customer_panel
 
-        await customer_panel(message, ads, actor, campaign_id, edit=edit)
-        return
+        return await customer_panel(message, ads, actor, campaign_id, edit=edit)
     from app.bot.auto_ads import panel
 
-    await panel(message, ads, actor, campaign_id, edit=edit)
+    return await panel(message, ads, actor, campaign_id, edit=edit)
 
 
 async def draft_panel(
@@ -198,7 +197,7 @@ async def send_preview(
     content: dict,
     source: str,
     part: str = "FULL",
-) -> None:
+) -> list[Message]:
     if message.chat.type != "private" or message.chat.id != actor or message.bot is None:
         raise DomainError("forbidden")
     content = validate_content(content)
@@ -212,13 +211,13 @@ async def send_preview(
 
     if part == "BUTTONS":
         await ready()
-        await bot.send_message(
+        sent = await bot.send_message(
             actor,
             t("ads.buttons_preview"),
             reply_markup=preview_keyboard(content, source),
             parse_mode="HTML",
         )
-        return
+        return [sent]
     text = content["text"] if part != "MEDIA" else ""
     entities = (
         [MessageEntity.model_validate(e) for e in content["entities"]] if part != "MEDIA" else []
@@ -227,13 +226,14 @@ async def send_preview(
     markup = preview_keyboard(content, source) if part == "FULL" else None
     await ready()
     if not media:
-        await bot.send_message(
+        sent = await bot.send_message(
             actor,
             text or t("ads.empty_preview"),
             entities=entities,
             parse_mode=None,
             reply_markup=markup,
         )
+        return [sent]
     elif len(media) == 1:
         item = media[0]
         values: dict[str, Any] = {
@@ -244,7 +244,7 @@ async def send_preview(
             "reply_markup": markup,
         }
         kind = item["kind"]
-        await getattr(bot, "send_" + kind)(**{kind: item["file_id"]}, **values)
+        return [await getattr(bot, "send_" + kind)(**{kind: item["file_id"]}, **values)]
     else:
         album: list[Any] = []
         for index, item in enumerate(media):
@@ -257,12 +257,15 @@ async def send_preview(
                     parse_mode=None,
                 )
             )
-        await bot.send_media_group(actor, media=album)
+        sent_album = await bot.send_media_group(actor, media=album)
         if markup:
             await ready()
-            await bot.send_message(
-                actor, t("ads.album_buttons"), reply_markup=markup, parse_mode="HTML"
+            sent_album.append(
+                await bot.send_message(
+                    actor, t("ads.album_buttons"), reply_markup=markup, parse_mode="HTML"
+                )
             )
+        return sent_album
 
 
 def register_ads_handlers(router: Router) -> None:
@@ -270,6 +273,9 @@ def register_ads_handlers(router: Router) -> None:
     async def open_ads(message: Message, state: FSMContext, service: Service) -> None:
         try:
             ads = await private(service, message, actor_id(message))
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(message, state)
             await state.set_state(None)
             await root(message, ads, actor_id(message), edit=False)
         except (DomainError, TelegramAPIError, ValueError, TimeoutError, OSError) as error:
@@ -410,6 +416,9 @@ def register_ads_handlers(router: Router) -> None:
                 "drafts",
             }:
                 raise DomainError("ac_denied")
+            from app.bot.ads_message_editor import leave_editor
+
+            await leave_editor(message, state)
             await state.update_data(ads_customer=customer)
             await callback.answer()
             acknowledged = True
