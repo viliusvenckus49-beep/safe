@@ -188,13 +188,15 @@ async def success_message(
     reversed_kind, reversed_actor = None, None
     if draft.kind in {"BAN", "MUTE"} and sanction.status == "REVOKED":
         release = await session.scalar(
-            select(GroupSanctionJob).where(
+            select(GroupSanctionJob)
+            .where(
                 GroupSanctionJob.sanction_id == sanction.id,
                 GroupSanctionJob.operation == "RELEASE",
                 GroupSanctionJob.status == "SUCCEEDED",
                 GroupSanctionJob.result == "RELEASED",
                 GroupSanctionJob.actor_id.is_not(None),
             )
+            .execution_options(populate_existing=True)
         )
         if release is not None:
             reversed_kind = "UNBAN" if draft.kind == "BAN" else "UNMUTE"

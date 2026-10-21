@@ -487,7 +487,9 @@ async def receipt_text(
         return t("lm.failed"), True
     jobs = list(
         await session.scalars(
-            select(GroupSanctionJob).where(GroupSanctionJob.sanction_id == row.id)
+            select(GroupSanctionJob)
+            .where(GroupSanctionJob.sanction_id == row.id)
+            .execution_options(populate_existing=True)
         )
     )
     release = next((j for j in jobs if j.operation == "RELEASE"), None)

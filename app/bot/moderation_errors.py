@@ -225,12 +225,13 @@ async def deliver_error(
     command: str,
     *,
     reply_markup: InlineKeyboardMarkup | None = None,
+    allow_public_hint: bool = True,
 ) -> Message | None:
     """Use native recipient-only group messages; never publish diagnostic details."""
     bot = message.bot
     if bot is None:
         raise RuntimeError("Message has no bot context")
-    if message.chat.type == "private":
+    if message.chat.type == "private" and message.chat.id == actor and message.chat.id > 0:
         return (
             await message.answer(text, parse_mode="HTML", reply_markup=reply_markup)
             if actor is not None
@@ -263,6 +264,8 @@ async def deliver_error(
             pass
         except (TelegramAPIError, TimeoutError, OSError):
             return None
+    if not allow_public_hint:
+        return None
     # Both private delivery methods were rejected, or no actor was verifiable.
     # Only a generic navigation hint may be public; it contains no target data.
     markup = None

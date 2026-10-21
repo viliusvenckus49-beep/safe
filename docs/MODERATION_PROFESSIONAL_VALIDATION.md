@@ -25,6 +25,22 @@
 
 ## Covered behavior
 
+Native private-panel lifecycle refinement: **354 targeted tests passed**, four
+PostgreSQL-only cases skipped in this SQLite UI run (`47.31s`). Eight new protocol
+tests model Telegram's actual ephemeral `message_id=0`, separate positive
+`ephemeral_message_id`, receiver and native edit/delete methods returning True.
+They verify same-panel navigation and Back, stale confirmation invalidation,
+cleanup rejection without false action failure, no public fallback, no duplicate
+window on edit timeout, recipient isolation, held stale PENDING ORM jobs after
+confirmed UNMUTE, and queued-panel cleanup after success. Ruff (322 files), mypy
+(100 application sources), compileall and diff checks passed. This remains a
+Telegram API simulation; actual client edit/delete delivery is not guaranteed
+by the Bot API, especially for offline users, and requires live staging checks.
+
+API references: [ephemeral text editing](https://core.telegram.org/bots/api#editephemeralmessagetext),
+[keyboard editing](https://core.telegram.org/bots/api#editephemeralmessagereplymarkup),
+[private deletion](https://core.telegram.org/bots/api#deleteephemeralmessage).
+
 Subsequent reversal-receipt refinement: **346 targeted tests passed**, four
 PostgreSQL-only cases skipped because this UI verification run used disposable
 SQLite databases. New tests cover command acknowledgement plus original edit,

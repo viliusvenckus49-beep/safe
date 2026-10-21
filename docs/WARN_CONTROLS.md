@@ -47,6 +47,22 @@ remain active; a new WARN evaluates the threshold under the current policy.
 
 ## Public buttons and private errors
 
+WARN CONTROL navigation edits the same recipient-only message with native
+`editEphemeralMessageText`, using its `ephemeral_message_id` and receiver, never
+ordinary `message_id=0`. Back cancels its pending confirmation and returns to the
+private menu. Close/confirm/cancel delete that private panel; if deletion fails,
+cleanup attempts to disable its keyboard without reporting a committed WARN
+reset as failed. Private UI delivery failures never trigger a public navigation
+hint. DM fallback uses normal edits only in the administrator's own DM.
+
+Receipt formatting reloads job results with `populate_existing=True`, so an ORM
+object cached as PENDING cannot override a confirmed RELEASED UNMUTE. A private
+queued receipt is removed when the confirmed public result replaces it. Existing
+signed receipt IDs encode ephemeral IDs negatively under PRIVATE visibility;
+normal/public message IDs remain positive. No schema migration is needed. Old
+records storing only ordinary message_id=0 cannot identify an ephemeral message
+for deletion, so those old IDs are never guessed.
+
 After a confirmed manual release, the original BAN/MUTE receipt becomes
 USER • UNBANNED / USER • UNMUTED, using the releasing administrator. The old
 duration, reason and generic "sanction revoked" footer are omitted; the release

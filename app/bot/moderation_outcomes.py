@@ -19,7 +19,9 @@ async def diagnostic(session: Any, bot: Any, draft: GroupModerationDraft) -> str
             return None
         jobs = list(
             await session.scalars(
-                select(GroupSanctionJob).where(GroupSanctionJob.sanction_id == row.id)
+                select(GroupSanctionJob)
+                .where(GroupSanctionJob.sanction_id == row.id)
+                .execution_options(populate_existing=True)
             )
         )
         release = draft.kind in {"UNBAN", "UNMUTE"} or row.kind == "KICK"

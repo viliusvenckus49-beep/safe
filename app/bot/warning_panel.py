@@ -7,7 +7,6 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from app.bot.keyboards import keyboard
-from app.bot.moderation_errors import deliver_error
 from app.bot.moderation_messages import identity_fields, identity_labels
 from app.errors import DomainError
 from app.i18n import t
@@ -24,6 +23,7 @@ async def panel(
     *,
     action: str = "manage",
     value: str = "",
+    edit: bool = False,
 ) -> None:
     from app.bot.moderation_controls import control
 
@@ -119,12 +119,14 @@ async def panel(
                 (t("lm.control.yes"), control("yes", prompt.origin_id, prompt.id)),
                 (t("lm.control.no"), control("no", prompt.origin_id, prompt.id)),
             ],
-            back,
+            [(t("lm.back"), control("manage", origin.id, prompt.id))],
         ]
     else:
         raise DomainError("group_moderation_stale_control")
     text += "\n\n🛡 𝑪𝑹𝑰𝑴𝑺𝑶𝑵 𝑺𝑨𝑭𝑬𝑪𝑯𝑬𝑪𝑲™"
-    await deliver_error(message, actor, text, "/unwarn", reply_markup=keyboard(buttons))
+    from app.bot.private_panels import show
+
+    await show(message, actor, text, keyboard(buttons), edit=edit)
 
 
 def details(row: Any, administrator: str) -> str:
