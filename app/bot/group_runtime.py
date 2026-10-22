@@ -207,6 +207,9 @@ async def process_group_jobs(bot: Bot, settings: Settings, sessions: Any) -> int
             )
             log.info("group_recovery_result", user_id=delivery.telegram_id, result=result)
             processed += 1
+    from app.bot.checks_runtime import process_checks
+
+    processed += await process_checks(sessions, bot)
     processed += await LocalModerationExecutor(sessions, bot).process()
     processed += await process_scam_announcements(bot, settings, sessions)
     return processed

@@ -62,6 +62,13 @@ class WarningSettings(CallbackData, prefix="ws", sep="|"):
     version: int = 0
 
 
+class CheckSettings(CallbackData, prefix="ck", sep="|"):
+    action: str
+    chat: int = 0
+    value: str = ""
+    version: int = 0
+
+
 class AdsAction(CallbackData, prefix="ad3"):
     action: str
     campaign: int = 0

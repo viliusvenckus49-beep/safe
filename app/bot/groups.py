@@ -80,6 +80,15 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
             record = await service.core.repo.active_scam(known.id) if known is not None else None
             record_id = record.id if record is not None else None
             await session.commit()
+        if event.bot is not None:
+            from app.bot.checks_runtime import inspect_join
+
+            try:
+                await inspect_join(event, sessions)
+            except Exception as error:
+                structlog.get_logger().warning(
+                    "checks_join_deferred", exception_type=type(error).__name__
+                )
         if record_id is not None and event.bot is not None:
             try:
                 await process_scam_bans(event.bot, settings, sessions, record_id)

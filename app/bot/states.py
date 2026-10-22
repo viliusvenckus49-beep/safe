@@ -54,6 +54,10 @@ class LocalModerationFlow(StatesGroup):
     target = State()
 
 
+class CheckSettingsFlow(StatesGroup):
+    terms = State()
+
+
 class AdsFlow(StatesGroup):
     input = State()
 

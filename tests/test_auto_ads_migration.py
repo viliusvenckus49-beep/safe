@@ -60,7 +60,7 @@ def test_0020_preserves_legacy_content_customers_and_snapshot_audience(tmp_path)
             "ads_audience_snapshot_migrated",
         )
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("0021",)
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone() == ("0022",)
         connection.execute(
             "INSERT INTO ad_client_invitations(campaign_id,token_hash,status,expected_grant,created_by,created_at,expires_at) VALUES(1,?, 'ACTIVE','0.0',900,CURRENT_TIMESTAMP,datetime('now','+1 day'))",
             ("a" * 64,),

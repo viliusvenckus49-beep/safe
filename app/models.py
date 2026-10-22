@@ -388,6 +388,58 @@ class GroupModerationSettings(Base):
     )
 
 
+class GroupCheckSettings(Base):
+    __tablename__ = "group_check_settings"
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
+    version: Mapped[int] = mapped_column(default=1, server_default="1")
+    actions: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    check_on_join: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    delete_messages: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    notify_result: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
+    mute_seconds: Mapped[int] = mapped_column(default=86400, server_default="86400")
+    spam_terms: Mapped[list[str]] = mapped_column(JSON, default=list)
+    language: Mapped[str] = mapped_column(String(2), default="lt", server_default="lt")
+    updated_by: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        CheckConstraint("version>0", name="ck_check_version"),
+        CheckConstraint("mute_seconds BETWEEN 300 AND 2592000", name="ck_check_duration"),
+        CheckConstraint("language IN ('lt','en','ru')", name="ck_check_language"),
+    )
+
+
+class GroupCheckMember(Base):
+    __tablename__ = "group_check_members"
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    episodes: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+
+
+class GroupCheckEvent(Base):
+    """Durable rule episodes and fenced, non-replayed advice/deletion deliveries."""
+
+    __tablename__ = "group_check_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger)
+    display_name: Mapped[str] = mapped_column(String(256), default="")
+    rule: Mapped[str] = mapped_column(String(16))
+    action: Mapped[str] = mapped_column(String(8))
+    version: Mapped[int] = mapped_column(Integer)
+    request_key: Mapped[str] = mapped_column(String(64), unique=True)
+    state: Mapped[str] = mapped_column(String(16), default="PENDING", index=True)
+    sanction_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"))
+    message_id: Mapped[int | None] = mapped_column(BigInteger)
+    notice_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    result: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 class GroupSanction(Base):
     """Local restrictions; an owned MUTE may be replaced by a linked BAN/KICK."""
 
