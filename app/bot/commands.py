@@ -23,7 +23,6 @@ LOCAL_COMMANDS = (
     "warn",
     "unwarn",
     "kick",
-    "warnings",
     "warns",
     "moderation",
 )
@@ -51,7 +50,7 @@ async def group_commands(bot: Bot) -> None:
                 command=name,
                 description=t(
                     "lm.history"
-                    if name in {"warnings", "warns"}
+                    if name in {"warns"}
                     else "lm.control.unwarn"
                     if name == "unwarn"
                     else "lm.title_command"

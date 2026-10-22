@@ -76,6 +76,12 @@ async def test_real_postgres_0022_tables_constraints_and_models_match(postgres_c
         def run(sync):
             with Operations.context(MigrationContext.configure(sync)):
                 migration.upgrade()
+                next_spec = importlib.util.spec_from_file_location(
+                    "controls_migration", ROOT / "migrations/versions/0023_group_help_controls.py"
+                )
+                next_migration = importlib.util.module_from_spec(next_spec)
+                next_spec.loader.exec_module(next_migration)
+                next_migration.upgrade()
             diffs = compare_metadata(
                 MigrationContext.configure(sync, opts={"compare_type": True}), Base.metadata
             )

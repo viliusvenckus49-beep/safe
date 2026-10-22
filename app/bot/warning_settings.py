@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select
 
-from app.bot.callbacks import WarningSettings
+from app.bot.callbacks import GroupHelp, WarningSettings
 from app.bot.keyboards import action, keyboard
 from app.bot.local_admin import access, display
 from app.bot.moderation_messages import duration_text, identity_fields, identity_labels
@@ -99,7 +99,7 @@ async def policy_panel(message: Message, policy: GroupModerationSettings | None,
             (str(n) + (" ✅" if n == limit else ""), cb("limit", chat, str(n), version))
             for n in range(2, 7)
         ],
-        [(t("ws.back"), cb("groups"))],
+        [(t("ws.back"), GroupHelp(action="group", chat=chat).pack())],
     ]
     await display(
         message,

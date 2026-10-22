@@ -278,8 +278,10 @@ async def test_photo_layout_localization_edit_only_and_back_navigation(
         await service.set_language(42, lang)
         await service.access.change(900, "42", True, "a" * 32)
     await journey.click(action("group_help"), actor=42)
-    assert cb("groups") in [b.callback_data for b in buttons(journey)]
-    await journey.click(cb("groups"), actor=42)
+    from app.bot.group_help import cb as gh_cb
+
+    assert gh_cb("group", CHAT) in [b.callback_data for b in buttons(journey)]
+    await journey.click(gh_cb("group", CHAT), actor=42)
     await journey.click(cb("policy", CHAT), actor=42)
     menu = screen(journey)
     assert isinstance(menu, EditMessageText) and "<b>" in menu.text and "<u>" in menu.text
@@ -294,7 +296,8 @@ async def test_photo_layout_localization_edit_only_and_back_navigation(
     mute = next(
         b.callback_data
         for b in buttons(journey)
-        if WarningSettings.unpack(b.callback_data).action == "duration"
+        if b.callback_data.startswith("ws|")
+        and WarningSettings.unpack(b.callback_data).action == "duration"
     )
     await journey.click(mute, actor=42)
     duration = next(
@@ -306,7 +309,8 @@ async def test_photo_layout_localization_edit_only_and_back_navigation(
     off = next(
         b.callback_data
         for b in buttons(journey)
-        if WarningSettings.unpack(b.callback_data).value == "OFF"
+        if b.callback_data.startswith("ws|")
+        and WarningSettings.unpack(b.callback_data).value == "OFF"
     )
     await journey.click(off, actor=42)
     assert len([c for c in journey.transport.calls if isinstance(c, SendMessage)]) == sent

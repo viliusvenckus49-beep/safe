@@ -136,6 +136,44 @@ class GroupModerationService:
         self.authorization = GroupAuthorizer(bot)
         self.use_mtproto_lookup = use_mtproto_lookup
 
+    async def ensure_commands(self, chat_id: int, actor_id: int) -> None:
+        """Commands need live group/bot authority, without a separate module menu.
+
+        Enabling adds capabilities only, so existing pending policy snapshots remain
+        valid. Duration limits and explicit permanent-action restrictions are retained.
+        """
+        await self.authorization.actor(chat_id, actor_id)
+        await self.authorization.bot_rights(chat_id)
+        try:
+            await lock_group(self.session, chat_id)
+            policy = await self.session.get(
+                GroupModerationSettings, chat_id, populate_existing=True
+            )
+            if policy is None:
+                policy = GroupModerationSettings(
+                    chat_id=chat_id,
+                    version=1,
+                    allow_permanent_bans=True,
+                    allow_permanent_mutes=True,
+                )
+                self.session.add(policy)
+            fields = (
+                "enabled",
+                "bans_enabled",
+                "mutes_enabled",
+                "warnings_enabled",
+                "kicks_enabled",
+            )
+            if any(not getattr(policy, field) for field in fields):
+                for field in fields:
+                    setattr(policy, field, True)
+                policy.updated_by, policy.updated_at = actor_id, now()
+                audit(self.session, "commands_available", actor_id, chat_id)
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            raise
+
     async def _check_group(self, chat_id: int) -> None:
         try:
             await lock_group(self.session, chat_id)

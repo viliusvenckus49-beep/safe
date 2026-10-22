@@ -184,7 +184,7 @@ async def test_revoked_bot_rights_cannot_be_misreported_as_absent_target(
     native.members[CHAT, native.id].can_restrict_members = False
     await journey.send(f"/{command} @target_user", actor=42, chat=CHAT)
     result = assert_private(journey, "/" + command, "bot_rights")
-    assert len(attempts) == 1  # No target lookup after failed fresh authorization.
+    assert len(attempts) == 0  # Bot rights are now checked before any target lookup.
     assert t("lm.diagnostic.not_in_group.title") not in result.text
     await no_sanctions(database)
 
@@ -315,7 +315,7 @@ async def test_private_fsm_error_uses_selected_command_without_replaying_it(
 async def test_numeric_warning_history_for_departed_user_is_not_newly_blocked(username_journey):
     journey, native = username_journey
     native.members[CHAT, 51] = native.peer(51, "left")
-    await journey.send("/warnings 51", actor=42, chat=CHAT)
+    await journey.send("/warns 51", actor=42, chat=CHAT)
     assert t("lm.no_history") in journey.text()
     assert t("lm.diagnostic.not_in_group.title") not in journey.text()
     assert native.calls == []
@@ -409,7 +409,7 @@ async def test_legacy_permanent_flags_do_not_block_an_enabled_command(
 
 
 @pytest.mark.parametrize("command", ["ban", "mute"])
-async def test_disabled_module_does_not_claim_duration_is_the_only_problem(
+async def test_authorized_command_initializes_its_capability_without_a_module_toggle(
     username_journey, database, command
 ):
     from sqlalchemy import update
@@ -425,6 +425,10 @@ async def test_disabled_module_does_not_claim_duration_is_the_only_problem(
         )
         await session.commit()
     await journey.send("/" + command + " 51 30m", actor=42, chat=CHAT)
-    assert_private(journey, "/" + command, "module_disabled")
-    assert native.calls == []
-    await no_sanctions(database)
+    sent = messages(journey, CHAT)
+    assert len(sent) == 1 and sent[0].ephemeral_message_parameters is None
+    assert len(native.calls) == 1
+    async with database() as session:
+        policy = await session.get(GroupModerationSettings, CHAT)
+        assert getattr(policy, command + "s_enabled") is True
+        assert policy.max_duration_seconds == 2592000

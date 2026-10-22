@@ -73,7 +73,8 @@ async def test_all_groups_get_default_and_three_language_menus():
         assert call.kwargs["scope"] == BotCommandScopeAllGroupChats()
     for call in calls[4:]:
         assert call.kwargs["scope"] == BotCommandScopeAllChatAdministrators()
-        assert {"ban", "unban", "mute", "unmute", "warn", "kick", "warnings", "moderation"} <= {
+        assert "warnings" not in {item.command for item in call.args[0]}
+        assert {"ban", "unban", "mute", "unmute", "warn", "kick", "warns", "moderation"} <= {
             item.command for item in call.args[0]
         }
     assert {call.kwargs.get("language_code") for call in calls} == {None, "lt", "en", "ru"}

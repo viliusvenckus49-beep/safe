@@ -690,9 +690,7 @@ def register_local_handlers(router: Router) -> None:
                 message, service, error, command="/moderation", local=None, chat=None, username=None
             )
 
-    @router.message(
-        Command("ban", "unban", "mute", "unmute", "warn", "unwarn", "kick", "warnings", "warns")
-    )
+    @router.message(Command("ban", "unban", "mute", "unmute", "warn", "unwarn", "kick", "warns"))
     async def local_command(
         message: Message, state: FSMContext, service: Service, session_factory: Any
     ) -> None:
@@ -716,6 +714,7 @@ def register_local_handlers(router: Router) -> None:
             first = args[0].split(maxsplit=1)[0] if args and args[0].strip() else ""
             username = first if first.startswith("@") else None
             local = await access(service, bound_bot(message), int(chat), actor)
+            await local.ensure_commands(int(chat), actor)
             target, until, reason = await parse_target_input(
                 local, int(chat), actor, args[0] if args else "", message.reply_to_message, kind
             )

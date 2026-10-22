@@ -199,7 +199,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     router = Router(name="safecheck")
     middleware = ServiceMiddleware(settings, session_factory)
     router.message.outer_middleware(middleware)
+    router.edited_message.outer_middleware(middleware)
     router.callback_query.outer_middleware(middleware)
+    from app.bot.group_help import register_group_help
+
+    register_group_help(router)
     register_local_handlers(router)
     from app.bot.warning_settings import register_warning_settings_handlers
 
@@ -686,11 +690,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             )
         elif name == "group_help":
             await clear_flow(state)
-            await render(
-                message,
-                t("group_help.title"),
-                reply_markup=kb.group_help(owner=service.access.is_owner(actor)),
-            )
+            from app.bot.group_help import groups as group_help_groups
+
+            await group_help_groups(message, service, actor)
         elif name == "status":
             await show_runtime_status(message, state, service, actor)
         elif name in {"add_sc", "del_sc"}:
@@ -1153,6 +1155,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             p.text("evidence") + f"\n\n📎 {len(evidence)} / 10",
             reply_markup=kb.report(data["nonce"], "evidence"),
         )
+
+    @router.edited_message()
+    async def edited_group_message(message: Message):
+        # The shared middleware applies authenticated content checks to edits.
+        return None
 
     register_scam_handlers(router)
     register_vote_handlers(router)

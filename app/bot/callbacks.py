@@ -69,6 +69,12 @@ class CheckSettings(CallbackData, prefix="ck", sep="|"):
     version: int = 0
 
 
+class GroupHelp(CallbackData, prefix="gh", sep="|"):
+    action: str = "groups"
+    chat: int = 0
+    page: int = 0
+
+
 class AdsAction(CallbackData, prefix="ad3"):
     action: str
     campaign: int = 0

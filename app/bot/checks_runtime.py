@@ -8,7 +8,7 @@ import structlog
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from sqlalchemy import and_, or_, select, update
 
-from app.checks import API_TIMEOUT, evidence, is_member, observe, policy_for_event
+from app.checks import API_TIMEOUT, evidence, is_member, observe, observe_words, policy_for_event
 from app.errors import DomainError
 from app.group_authorization import GroupAuthorizer
 from app.i18n import t, use_language
@@ -35,8 +35,13 @@ def security_text(event, user=None, *, planned=False):
         f"\n\n⚠️ <b>{t('checks.reason_label')}:</b> {escape(t('checks.reason.' + event.rule))}"
         f"\n🚫 <b>{label}:</b> <b>{action}</b>"
     )
-    if planned:
-        text += "\n" + t("checks.delay")
+    if (getattr(event, "kick_attempt", 0) or 0) >= 4:
+        return (
+            text
+            + "\n\n<i>"
+            + t("checks.repeat_ban_planned" if planned else "checks.repeat_ban")
+            + "</i>"
+        )
     return text + "\n\n<i>" + escape(t("checks.hint." + event.rule)) + "</i>"
 
 
@@ -50,8 +55,20 @@ async def inspect_message(message, sessions):
         return
     if message.new_chat_members or message.left_chat_member:
         return
+    filtered = await observe_words(
+        sessions,
+        message.bot,
+        message.chat.id,
+        message.from_user,
+        message.message_id,
+        message.text or message.caption or "",
+    )
     await observe(
-        sessions, message.bot, message.chat.id, message.from_user, message_id=message.message_id
+        sessions,
+        message.bot,
+        message.chat.id,
+        message.from_user,
+        message_id=None if filtered else message.message_id,
     )
 
 
@@ -88,6 +105,27 @@ async def _edit_notice(bot, event, text):
         except (TelegramAPIError, TimeoutError, OSError):
             pass
     return False
+
+
+def words_text(event, *, completed=False):
+    text = (
+        "🛡 <b>REDSAFE SECURITY</b>"
+        f"\n\n👤 <b>{escape(event.display_name)}</b> [<code>{event.telegram_id}</code>]"
+        "\n\n⚠️ "
+        + t("bw.removed" if event.message_deleted else "bw.detected")
+        + "\n\n<i>"
+        + t("bw.hint")
+        + "</i>"
+    )
+    if event.action != "DELETE":
+        text += (
+            "\n\n🚫 <b>"
+            + t("checks.action" if completed else "checks.planned")
+            + ":</b> <b>"
+            + ACTION_NAMES[event.action]
+            + "</b>"
+        )
+    return text
 
 
 async def _finish_notice(session, bot, event, policy):
@@ -135,7 +173,11 @@ async def _finish_notice(session, bot, event, policy):
     event.state, event.result = "DONE", "CONFIRMED"
     await session.commit()
     if policy.notify_result:
-        done = await _edit_notice(bot, event, security_text(event))
+        done = await _edit_notice(
+            bot,
+            event,
+            words_text(event, completed=True) if event.rule == "words" else security_text(event),
+        )
         event.result = "CONFIRMED_NOTICE_UPDATED" if done else "CONFIRMED_NOTICE_UPDATE_FAILED"
         await session.commit()
 
@@ -176,8 +218,10 @@ async def _process(sessions, bot, identifier):
                     or member.user.is_bot
                 ):
                     raise DomainError("checks_exempt_or_left")
-                bad, unknown = await evidence(
-                    session, bot, policy, member.user, member, only=event.rule
+                bad, unknown = (
+                    (["words"], [])
+                    if event.rule == "words"
+                    else await evidence(session, bot, policy, member.user, member, only=event.rule)
                 )
                 if event.rule not in bad or unknown:
                     raise DomainError("checks_unconfirmed")
@@ -203,6 +247,8 @@ async def _process(sessions, bot, identifier):
                             utc(event.execute_after) + timedelta(seconds=policy.mute_seconds)
                         ).replace(microsecond=0)
                         if event.action == "MUTE"
+                        else (now() + timedelta(hours=24)).replace(microsecond=0)
+                        if event.kick_attempt >= 4
                         else None,
                         reason=t("checks.reason." + event.rule),
                         key="checks:" + str(event.id),
@@ -218,7 +264,31 @@ async def _process(sessions, bot, identifier):
                 event.attempts += 1
                 await session.commit()  # Persist IO fence; no sleep or SQL lock while waiting.
                 try:
-                    if event.action == "DELETE":
+                    if event.rule == "words":
+                        if policy.words_delete and not event.message_deleted:
+                            deleted = await asyncio.wait_for(
+                                bot.delete_message(event.chat_id, event.message_id), API_TIMEOUT
+                            )
+                            if deleted is not True:
+                                raise DomainError("checks_delete_unconfirmed")
+                            event.message_deleted = True
+                            await session.commit()
+                        result = await asyncio.wait_for(
+                            bot.send_message(event.chat_id, words_text(event), parse_mode="HTML"),
+                            API_TIMEOUT,
+                        )
+                        if not getattr(result, "message_id", None):
+                            event.state, event.result = "FAILED", "NOTICE_NOT_CONFIRMED"
+                        else:
+                            event.notice_message_id = result.message_id
+                            event.notice_sent_at = now()
+                            event.execute_after = event.notice_sent_at + timedelta(
+                                seconds=event.grace_seconds
+                            )
+                            event.available_at = event.execute_after
+                            event.state = "DONE" if event.action == "DELETE" else "WAITING"
+                            event.result = "NOTICE_DELIVERED"
+                    elif event.action == "DELETE":
                         result = await asyncio.wait_for(
                             bot.delete_message(event.chat_id, event.message_id), API_TIMEOUT
                         )
@@ -240,7 +310,7 @@ async def _process(sessions, bot, identifier):
                             event.notice_message_id = result.message_id
                             event.notice_sent_at = now()
                             event.execute_after = event.notice_sent_at + timedelta(
-                                seconds=GRACE_SECONDS
+                                seconds=event.grace_seconds
                             )
                             event.state = "DONE" if event.action == "ADVISE" else "WAITING"
                             event.available_at = event.execute_after

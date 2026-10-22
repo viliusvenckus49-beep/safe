@@ -353,7 +353,7 @@ class ProfileActivity(Base):
 
 
 class GroupModerationSettings(Base):
-    """Local moderation is opt-in; global SAFECheck administrator grants do not apply."""
+    """Local commands require live Telegram authority; global administrator grants do not apply."""
 
     __tablename__ = "group_moderation_settings"
     chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
@@ -398,6 +398,9 @@ class GroupCheckSettings(Base):
     notify_result: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     mute_seconds: Mapped[int] = mapped_column(default=86400, server_default="86400")
     spam_terms: Mapped[list[str]] = mapped_column(JSON, default=list)
+    banned_words: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    words_action: Mapped[str] = mapped_column(String(8), default="OFF", server_default="OFF")
+    words_delete: Mapped[bool] = mapped_column(default=True, server_default=text("true"))
     language: Mapped[str] = mapped_column(String(2), default="lt", server_default="lt")
     updated_by: Mapped[int] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -415,6 +418,8 @@ class GroupCheckMember(Base):
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     episodes: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    kick_attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    kick_join: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class GroupCheckEvent(Base):
@@ -435,6 +440,10 @@ class GroupCheckEvent(Base):
     notice_message_id: Mapped[int | None] = mapped_column(BigInteger)
     notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     execute_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    grace_seconds: Mapped[int] = mapped_column(default=15, server_default="15")
+    kick_attempt: Mapped[int] = mapped_column(default=0, server_default="0")
+    matched_word: Mapped[str | None] = mapped_column(String(100))
+    message_deleted: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     attempts: Mapped[int] = mapped_column(default=0, server_default="0")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     result: Mapped[str | None] = mapped_column(String(80))
