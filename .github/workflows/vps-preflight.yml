@@ -35,66 +35,60 @@ jobs:
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n python3 -c 'import importlib.util,json,shutil,sys
-          from pathlib import Path
-          root=Path(sys.argv[1])
-          spec=importlib.util.spec_from_file_location('"'"'release_probe'"'"',root/'"'"'deploy/production_release.py'"'"')
-          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-          known={'"'"'Use an immutable SHA release directory'"'"','"'"'Original production bot is not running'"'"','"'"'Unknown production Compose project'"'"','"'"'Missing production source'"'"','"'"'Unreviewed migration chain'"'"','"'"'Invalid release version'"'"','"'"'Production data service is not healthy'"'"','"'"'Unfinished or uncertain production work; reconcile first'"'"','"'"'Another running container shares the production network'"'"'}
-          phase='"'"'constructor'"'"'
-          try:
-              release=module.Release(root,root.name)
-              print('"'"'ReleaseConstructor=PASS'"'"')
-              phase='"'"'idle'"'"';release.idle();print('"'"'ReleaseIdle=PASS'"'"')
-              phase='"'"'writers'"'"';release.writers();print('"'"'ReleaseWriters=PASS'"'"')
-              free=shutil.disk_usage(root).free
-              available=next(int(line.split()[1])*1024 for line in Path('"'"'/proc/meminfo'"'"').read_text().splitlines() if line.startswith('"'"'MemAvailable:'"'"'))
-              print('"'"'ReleaseResources='"'"'+json.dumps({'"'"'free_bytes'"'"':free,'"'"'available_memory_bytes'"'"':available,'"'"'disk_guard'"'"':free>=2*1024**3,'"'"'memory_guard'"'"':available>=768*1024**2}))
-          except Exception as error:
-              message=str(error)
-              print('"'"'ReleaseGuardBlocked='"'"'+json.dumps({'"'"'phase'"'"':phase,'"'"'type'"'"':type(error).__name__,'"'"'reason'"'"':message if message in known else '"'"'withheld'"'"'},sort_keys=True))
-          ' "$HOME/safecheck-releases/35787658fd8389a43487f4aa25f7ea22f4f16b68"
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
           import json
+          import re
           import asyncpg
           from app.config import Settings
-          from app.health import snapshot
           
-          def emit(name,value):
-              print(name+'"'"'='"'"'+json.dumps(value,default=str,sort_keys=True))
+          
+          def emit(name, value):
+              print(name + '"'"'='"'"' + json.dumps(value, default=str, sort_keys=True))
+          
+          
+          def safe_error(value):
+              if value is None:
+                  return None
+              return value if re.fullmatch(r'"'"'[A-Za-z_][A-Za-z0-9_]{0,79}'"'"', value) else '"'"'DETAILS_WITHHELD'"'"'
+          
           
           async def main():
-              state=snapshot()
-              emit('"'"'RuntimeHeartbeat'"'"',state)
-              if not state['"'"'healthy'"'"']:
-                  raise RuntimeError('"'"'Runtime unhealthy'"'"')
-              db=await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
+              db = await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"', '"'"'postgresql:'"'"'))
               try:
-                  async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
-                      revision=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
-                      emit('"'"'ChecksSchema'"'"',revision)
-                      if revision not in {'"'"'0022'"'"','"'"'0023'"'"'}:
-                          raise RuntimeError('"'"'Expected Checks schema'"'"')
-                      pending=await db.fetch("SELECT j.id,j.sanction_id,j.operation,j.status,j.result,j.attempts,j.available_at,s.kind,s.status AS sanction_status,s.chat_id FROM group_sanction_jobs j JOIN group_sanctions s ON s.id=j.sanction_id WHERE j.status IN ('"'"'PENDING'"'"','"'"'PROCESSING'"'"','"'"'UNCERTAIN'"'"') ORDER BY j.id LIMIT 20")
-                      emit('"'"'PendingNativeJobs'"'"',[dict(r) for r in pending])
-                      ads=await db.fetch("SELECT id,status FROM ad_publication_attempts WHERE status IN ('"'"'CLAIMED'"'"','"'"'SENDING'"'"','"'"'UNCERTAIN'"'"') ORDER BY id LIMIT 20")
-                      emit('"'"'PendingAds'"'"',[dict(r) for r in ads])
-                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds FROM group_check_settings ORDER BY chat_id'"'"')
-                      emit('"'"'ChecksPolicies'"'"',[dict(r) for r in rows])
-                      states=await db.fetch('"'"'SELECT state,count(*) AS count FROM group_check_events GROUP BY state ORDER BY state'"'"')
-                      emit('"'"'ChecksEvents'"'"',[dict(r) for r in states])
-                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+interval '"'"'15 seconds'"'"' OR j.created_at<e.execute_after)")
-                      emit('"'"'EarlyOrUnannouncedCheckActions'"'"',invalid)
-                      if invalid:
-                          raise RuntimeError('"'"'Notice grace invariant failed'"'"')
-                      policies=await db.fetch('"'"'SELECT chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version FROM group_moderation_settings ORDER BY chat_id'"'"')
-                      emit('"'"'WarningPolicies'"'"',[dict(r) for r in policies])
+                  async with db.transaction(readonly=True, isolation='"'"'repeatable_read'"'"'):
+                      row = await db.fetchrow('"'"''"'"''"'"'SELECT a.id,a.schedule_id,a.content_version_id,a.chat_id,a.schedule_version,a.due_at,a.status,a.fence,a.lease_until,a.retry_at,a.error,a.notified,a.created_at,a.completed_at,s.campaign_id,s.status AS schedule_status,s.version AS current_schedule_version,s.next_run_at,s.updated_at AS schedule_updated_at,c.internal_name,g.title AS group_title FROM ad_publication_attempts a JOIN ad_schedules s ON s.id=a.schedule_id JOIN ad_campaigns c ON c.id=s.campaign_id LEFT JOIN managed_groups g ON g.chat_id=a.chat_id WHERE a.id=79'"'"''"'"''"'"')
+                      if row is None:
+                          emit('"'"'Attempt79'"'"', None)
+                          return
+                      data = dict(row)
+                      data['"'"'error'"'"'] = safe_error(data['"'"'error'"'"'])
+                      emit('"'"'Attempt79'"'"', data)
+                      parts = await db.fetch('"'"'SELECT id,position,kind,status,message_ids,tries,error FROM ad_publication_parts WHERE attempt_id=79 ORDER BY position'"'"')
+                      values = []
+                      for part in parts:
+                          value = dict(part)
+                          value['"'"'error'"'"'] = safe_error(value['"'"'error'"'"'])
+                          values.append(value)
+                      emit('"'"'Attempt79Parts'"'"', values)
+                      audit = await db.fetch("SELECT id,action,created_at,details FROM audit_events WHERE action LIKE '"'"'ads_publication_%'"'"' AND details->>'"'"'attempt_id'"'"'='"'"'79'"'"' ORDER BY id")
+                      values = []
+                      keys = {'"'"'campaign_id'"'"','"'"'attempt_id'"'"','"'"'schedule_id'"'"','"'"'chat_id'"'"','"'"'content_version_id'"'"','"'"'fence'"'"','"'"'part_id'"'"','"'"'position'"'"','"'"'status'"'"','"'"'message_ids'"'"'}
+                      for entry in audit:
+                          value = dict(entry)
+                          details = value.pop('"'"'details'"'"')
+                          if isinstance(details, str):
+                              details = json.loads(details)
+                          value['"'"'details'"'"'] = {k: v for k, v in details.items() if k in keys}
+                          value['"'"'error'"'"'] = safe_error(details.get('"'"'error'"'"'))
+                          values.append(value)
+                      emit('"'"'Attempt79Audit'"'"', values)
               finally:
                   await db.close()
+          
           try:
               asyncio.run(main())
           except Exception as error:
-              emit('"'"'ReadOnlyChecksVerificationFailed'"'"',{'"'"'type'"'"':type(error).__name__})
+              emit('"'"'ReadOnlyAttemptInspectionFailed'"'"', {'"'"'type'"'"': type(error).__name__})
               raise SystemExit(1) from None
           '
           REMOTE
