@@ -366,10 +366,22 @@ class GroupModerationSettings(Base):
     version: Mapped[int] = mapped_column(default=1, server_default="1")
     max_duration_seconds: Mapped[int] = mapped_column(default=2592000, server_default="2592000")
     allow_permanent_bans: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
+    warning_limit: Mapped[int] = mapped_column(default=3, server_default="3")
+    warning_action: Mapped[str] = mapped_column(String(4), default="MUTE", server_default="MUTE")
+    warning_mute_seconds: Mapped[int] = mapped_column(default=86400, server_default="86400")
+    warning_version: Mapped[int] = mapped_column(default=1, server_default="1")
     updated_by: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         CheckConstraint("version > 0", name="ck_group_moderation_version"),
+        CheckConstraint("warning_limit BETWEEN 2 AND 6", name="ck_group_warning_limit"),
+        CheckConstraint(
+            "warning_action IN ('OFF','KICK','MUTE','BAN')", name="ck_group_warning_action"
+        ),
+        CheckConstraint(
+            "warning_mute_seconds BETWEEN 60 AND 31536000", name="ck_group_warning_mute"
+        ),
+        CheckConstraint("warning_version > 0", name="ck_group_warning_version"),
         CheckConstraint(
             "max_duration_seconds BETWEEN 60 AND 31536000", name="ck_group_moderation_duration"
         ),
@@ -494,11 +506,13 @@ class GroupWarningEscalation(Base):
     sanction_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"), unique=True)
     draft_id: Mapped[str | None] = mapped_column(ForeignKey("group_moderation_drafts.id"))
     state: Mapped[str] = mapped_column(String(16), default="PENDING")
+    warning_limit: Mapped[int] = mapped_column(default=3, server_default="3")
     result: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (
         CheckConstraint("telegram_id > 0", name="ck_warning_escalation_user"),
+        CheckConstraint("warning_limit BETWEEN 2 AND 6", name="ck_escalation_warning_limit"),
         CheckConstraint(
             "state IN ('PENDING','SUCCEEDED','FAILED','UNCERTAIN','CANCELLED')",
             name="ck_warning_escalation_state",

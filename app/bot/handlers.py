@@ -201,6 +201,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     router.message.outer_middleware(middleware)
     router.callback_query.outer_middleware(middleware)
     register_local_handlers(router)
+    from app.bot.warning_settings import register_warning_settings_handlers
+
+    register_warning_settings_handlers(router)
     from app.bot.ads_message_editor import register_message_editor
     from app.bot.auto_ads import register_auto_ads_handlers
 

@@ -745,9 +745,9 @@ class LocalModerationExecutor:
                 )
                 .values(receipt_done=False, receipt_checked_at=None)
             )
-        from app.warning_services import complete_warning_mute
+        from app.warning_services import complete_warning_action
 
-        await complete_warning_mute(session, sanction, job, state, result)
+        await complete_warning_action(session, sanction, job, state, result)
         audit(
             session,
             "attempt",

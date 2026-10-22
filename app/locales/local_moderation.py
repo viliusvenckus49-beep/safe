@@ -387,8 +387,8 @@ CONTROLS = {
         "busy": "Sankcija vykdoma arba jos rezultatas neaiškus. Veiksmas nekartojamas; reikalinga patikra.",
         "warn_active": "Aktyvus",
         "warn_cancelled": "Įspėjimai anuliuoti. Istorija išsaugota.",
-        "warn_consumed": "Įspėjimai panaudoti automatiniam MUTE. Aktyvūs įspėjimai: 0/3.",
-        "auto_reason": "<b>Automatinis MUTE 24 valandoms už 3 įspėjimus.</b>\nAktyvūs įspėjimai po sėkmingos bausmės: <b>0/3</b>.",
+        "warn_consumed": "Įspėjimai panaudoti automatinei bausmei.",
+        "auto_reason": "<b>Automatinė bausmė už {limit} įspėjimus.</b>",
     },
     "en": {
         "warn_title": "⚠️ USER WARNED",
@@ -405,8 +405,8 @@ CONTROLS = {
         "busy": "The sanction is in progress or its outcome is uncertain. It will not be repeated; review is required.",
         "warn_active": "Active",
         "warn_cancelled": "Warnings cleared. History preserved.",
-        "warn_consumed": "Warnings used for the automatic MUTE. Active warnings: 0/3.",
-        "auto_reason": "<b>Automatic 24-hour MUTE for 3 warnings.</b>\nActive warnings after the successful sanction: <b>0/3</b>.",
+        "warn_consumed": "Warnings used for the automatic punishment.",
+        "auto_reason": "<b>Automatic punishment for {limit} warnings.</b>",
     },
     "ru": {
         "warn_title": "⚠️ ПОЛЬЗОВАТЕЛЬ ПРЕДУПРЕЖДЁН",
@@ -423,15 +423,15 @@ CONTROLS = {
         "busy": "Санкция выполняется или её результат неизвестен. Повтора не будет; нужна проверка.",
         "warn_active": "Активно",
         "warn_cancelled": "Предупреждения сняты. История сохранена.",
-        "warn_consumed": "Предупреждения использованы для автоматического MUTE. Активных предупреждений: 0/3.",
-        "auto_reason": "<b>Автоматический MUTE на 24 часа за 3 предупреждения.</b>\nАктивных предупреждений после успешной санкции: <b>0/3</b>.",
+        "warn_consumed": "Предупреждения использованы для автоматического наказания.",
+        "auto_reason": "<b>Автоматическое наказание. Лимит предупреждений: {limit}.</b>",
     },
 }
 CONTROLS["lt"].update(
     {
-        "auto_pending": "Pasiekta 3 įspėjimų riba. Automatinis MUTE laukia patvirtinto rezultato; įspėjimai dar aktyvūs.",
-        "auto_failed": "Automatinio MUTE pritaikyti nepavyko. Įspėjimai liko aktyvūs.",
-        "auto_uncertain": "Automatinio MUTE rezultatas neaiškus. Įspėjimai liko aktyvūs; veiksmas nekartojamas automatiškai.",
+        "auto_pending": "Pasiektas įspėjimų limitas. Automatinė bausmė laukia patvirtinto rezultato; įspėjimai dar aktyvūs.",
+        "auto_failed": "Automatinės bausmės pritaikyti nepavyko. Įspėjimai liko aktyvūs.",
+        "auto_uncertain": "Automatinės bausmės rezultatas neaiškus. Įspėjimai liko aktyvūs; veiksmas nekartojamas automatiškai.",
         "released": "Ši sankcija panaikinta. Mygtukas nebeaktyvus.",
         "expired": "Šios sankcijos laikas baigėsi. Mygtukas nebeaktyvus.",
         "history_clear": "Įspėjimų būseną pakeitė administratorius {admin} · {date}",
@@ -439,9 +439,9 @@ CONTROLS["lt"].update(
 )
 CONTROLS["en"].update(
     {
-        "auto_pending": "The 3-warning limit was reached. Automatic MUTE is awaiting a confirmed outcome; warnings remain active.",
-        "auto_failed": "Automatic MUTE could not be applied. Warnings remain active.",
-        "auto_uncertain": "The automatic MUTE outcome is uncertain. Warnings remain active; the action is not automatically repeated.",
+        "auto_pending": "The warning limit was reached. The automatic punishment is awaiting a confirmed outcome; warnings remain active.",
+        "auto_failed": "Automatic punishment could not be applied. Warnings remain active.",
+        "auto_uncertain": "The automatic punishment outcome is uncertain. Warnings remain active; the action is not automatically repeated.",
         "released": "This sanction was revoked. The button is inactive.",
         "expired": "This sanction expired. The button is inactive.",
         "history_clear": "Warning state changed by administrator {admin} · {date}",
@@ -449,9 +449,9 @@ CONTROLS["en"].update(
 )
 CONTROLS["ru"].update(
     {
-        "auto_pending": "Достигнут лимит в 3 предупреждения. Ожидается результат автоматического MUTE; предупреждения пока активны.",
-        "auto_failed": "Не удалось применить автоматический MUTE. Предупреждения остаются активными.",
-        "auto_uncertain": "Результат автоматического MUTE неизвестен. Предупреждения активны; автоматического повтора не будет.",
+        "auto_pending": "Достигнут лимит предупреждений. Ожидается результат автоматического наказания; предупреждения пока активны.",
+        "auto_failed": "Не удалось применить автоматическое наказание. Предупреждения остаются активными.",
+        "auto_uncertain": "Результат автоматического наказания неизвестен. Предупреждения активны; автоматического повтора не будет.",
         "released": "Санкция снята. Кнопка неактивна.",
         "expired": "Срок санкции истёк. Кнопка неактивна.",
         "history_clear": "Статус предупреждений изменил администратор {admin} · {date}",

@@ -446,9 +446,9 @@ class GroupModerationService:
             self.session.add(sanction)
             await self.session.flush()
             if kind == "WARN":
-                from app.warning_services import schedule_warning_mute
+                from app.warning_services import schedule_warning_action
 
-                await schedule_warning_mute(self.session, sanction, policy, group)
+                await schedule_warning_action(self.session, sanction, policy, group)
             if draft is not None:
                 draft.status, draft.sanction_id = "CONFIRMED", sanction.id
             if kind != "WARN":

@@ -10,7 +10,7 @@ from app.bot.keyboards import keyboard
 from app.bot.moderation_messages import identity_fields, identity_labels
 from app.errors import DomainError
 from app.i18n import t
-from app.models import GroupSanction
+from app.models import GroupModerationSettings, GroupSanction
 from app.moderation_services import GroupModerationService, utc
 from app.warning_services import active_warnings, reset_prompt
 
@@ -39,11 +39,12 @@ async def panel(
     labels = await identity_labels(
         local.session, {origin.telegram_id}, bot=message.bot, chat=origin.chat_id
     )
+    policy = await local.session.get(GroupModerationSettings, origin.chat_id)
     text = (
         "<b><u>CRIMSON • WARN CONTROL</u></b>\n\n"
         + identity_fields(origin.telegram_id, labels[origin.telegram_id])
         + "\n"
-        + t("lm.control.active_count", count=len(rows))
+        + t("lm.control.active_count", count=len(rows), limit=policy.warning_limit if policy else 3)
     )
     back = [(t("lm.back"), control("manage", origin.id))]
     buttons: list[list[tuple[str, str]]] = []

@@ -14,6 +14,7 @@ from app.i18n import language, t
 from app.models import (
     AuditEvent,
     GroupModerationDraft,
+    GroupModerationSettings,
     GroupSanction,
     GroupSanctionJob,
     GroupWarningEscalation,
@@ -157,6 +158,7 @@ def format_success(
     reason: str = "",
     duration_seconds: int | None = None,
     warnings: int | None = None,
+    warning_limit: int = 3,
 ) -> str:
     """Labels use real HTML bold; every external value is escaped exactly once."""
     fields = ["<b>" + t("lm.control.warn_title") + "</b>" if kind == "WARN" else HEADINGS[kind]]
@@ -168,7 +170,7 @@ def format_success(
             f"⏳ <b>{t('lm.notice.duration')}:</b> {escape(duration_text(duration_seconds, kind))}"
         )
     if kind == "WARN" and warnings is not None:
-        fields.append(f"⚠️ <b>{t('lm.notice.warnings')}:</b> {warnings}/3")
+        fields.append(f"⚠️ <b>{t('lm.notice.warnings')}:</b> {warnings}/{warning_limit}")
     if compact(reason):
         fields.append(f"📋 <b>{t('lm.notice.reason')}:</b> {escape(compact(reason))}")
     fields += [f"👑 <b>{t('lm.notice.admin')}:</b> {escape(compact(admin))}", BRAND]
@@ -234,7 +236,11 @@ async def success_message(
         session, {draft.telegram_id, draft.actor_id}, observed=observed, bot=bot, chat=draft.chat_id
     )
     warnings = None
+    warning_limit, warning_action = 3, "MUTE"
     if draft.kind == "WARN":
+        policy = await session.get(GroupModerationSettings, draft.chat_id)
+        if policy is not None:
+            warning_limit, warning_action = policy.warning_limit, policy.warning_action
         # Stable count at this warning, isolated to this group and numeric user.
         # Only active warnings count; cleared and consumed history is retained.
         warnings = await session.scalar(
@@ -261,6 +267,7 @@ async def success_message(
         reason=draft.reason,
         duration_seconds=seconds,
         warnings=warnings,
+        warning_limit=warning_limit,
     )
 
     if draft.kind == "WARN" and sanction.status in {"CANCELLED", "COMPLETED"}:
@@ -269,7 +276,7 @@ async def success_message(
             if sanction.status == "CANCELLED"
             else "lm.control.warn_consumed"
         )
-    if draft.kind == "WARN" and (warnings or 0) >= 3:
+    if draft.kind == "WARN" and warning_action != "OFF" and (warnings or 0) >= warning_limit:
         event = await session.scalar(
             select(GroupWarningEscalation)
             .where(
@@ -312,13 +319,11 @@ async def success_message(
             text += "\n\n" + t("lm.control.replaced", kind=replacement.kind)
     automatic = (
         await session.scalar(
-            select(GroupWarningEscalation.id).where(
-                GroupWarningEscalation.sanction_id == sanction.id
-            )
+            select(GroupWarningEscalation).where(GroupWarningEscalation.sanction_id == sanction.id)
         )
-        if draft.kind == "MUTE"
+        if draft.kind in {"MUTE", "BAN", "KICK"}
         else None
     )
     if automatic is not None:
-        text += "\n\n" + t("lm.control.auto_reason")
+        text += "\n\n" + t("lm.control.auto_reason", limit=automatic.warning_limit)
     return text

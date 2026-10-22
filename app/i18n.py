@@ -21,6 +21,7 @@ from app.locales.moderation_control import CATALOGS as MODERATION_CONTROL
 from app.locales.presentation import CATALOGS as PRESENTATION
 from app.locales.scam_management import CATALOGS as SCAM_MANAGEMENT
 from app.locales.trusted_management import CATALOGS as TRUSTED_MANAGEMENT
+from app.locales.warnings import CATALOGS as WARNINGS
 
 LANGUAGES = frozenset({"lt", "en", "ru"})
 language: ContextVar[str] = ContextVar("language", default="lt")
@@ -57,6 +58,7 @@ CATALOGS = {
         **ADS_GLOBAL[lang],
         **ADS_CUSTOMERS[lang],
         **AUTO_ADS[lang],
+        **WARNINGS[lang],
     }
     for lang in LANGUAGES
 }
