@@ -388,7 +388,7 @@ class LocalModerationExecutor:
                 member = await self.authorization.target(sanction.chat_id, sanction.telegram_id)
                 if (
                     job.operation == "APPLY"
-                    and sanction.kind == "KICK"
+                    and sanction.kind in {"MUTE", "KICK"}
                     and (
                         member.status == "left"
                         or member.status == "restricted"
@@ -422,10 +422,19 @@ class LocalModerationExecutor:
                         raise DomainError("group_moderation_supergroup_required")
                 user = await Repository(session).user_by_telegram(sanction.telegram_id)
                 scam = user is not None and await Repository(session).has_scam_identity(user)
+                external_snapshot = None
                 if job.operation == "APPLY" and scam:
                     raise DomainError("group_moderation_scam_protected")
                 if job.operation == "RELEASE":
-                    if scam or not sanction.owned:
+                    from app.external_releases import authorization as external_authorization
+                    from app.external_releases import snapshot as restriction_snapshot
+
+                    external_snapshot = (
+                        await external_authorization(session, sanction, job)
+                        if not sanction.owned and not scam
+                        else None
+                    )
+                    if scam or (not sanction.owned and external_snapshot is None):
                         await self.finish(
                             session,
                             job,
@@ -456,37 +465,20 @@ class LocalModerationExecutor:
                             raise DomainError("group_moderation_existing_restriction")
                         result, owned = "ALREADY_BANNED", False
                     else:
-                        if member.status == "restricted":
-                            predecessor = (
-                                await session.get(GroupSanction, sanction.replaces_sanction_id)
-                                if sanction.replaces_sanction_id
-                                else None
+                        if (
+                            member.status == "restricted"
+                            and sanction.kind == "MUTE"
+                            and getattr(member, "can_send_messages", None) is not True
+                        ):
+                            # Repeating MUTE must not overwrite another personal
+                            # restriction. BAN/KICK are explicit stronger actions
+                            # and do not require ownership of the prior MUTE.
+                            chat = await asyncio.wait_for(
+                                self.bot.get_chat(sanction.chat_id), API_TIMEOUT
                             )
-                            owned_mute = (
-                                predecessor is not None
-                                and sanction.kind in {"BAN", "KICK"}
-                                and predecessor.chat_id == sanction.chat_id
-                                and predecessor.telegram_id == sanction.telegram_id
-                                and predecessor.kind == "MUTE"
-                                and predecessor.status == "ACTIVE"
-                                and predecessor.owned
-                                and getattr(member, "is_member", None) is True
-                                and deadline(getattr(member, "until_date", None))
-                                == deadline(predecessor.until_date)
-                                and all(
-                                    getattr(member, key, None) is False
-                                    for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
-                                )
-                            )
-                            defaults_match = False
-                            if not owned_mute:
-                                chat = await asyncio.wait_for(
-                                    self.bot.get_chat(sanction.chat_id), API_TIMEOUT
-                                )
-                                defaults_match = matches_group_defaults(
-                                    member, getattr(chat, "permissions", None)
-                                )
-                            if not owned_mute and not defaults_match:
+                            if not matches_group_defaults(
+                                member, getattr(chat, "permissions", None)
+                            ):
                                 raise DomainError("group_moderation_existing_restriction")
                         self.check_write_deadline(job, sanction)
                         sent = True
@@ -518,11 +510,24 @@ class LocalModerationExecutor:
                     expected = "kicked" if sanction.kind in {"BAN", "KICK"} else "restricted"
                     if member.status != expected:
                         result = "ALREADY_CLEAR"
-                    elif deadline(getattr(member, "until_date", None)) != deadline(until):
+                    elif external_snapshot is not None and (
+                        restriction_snapshot(
+                            member, "UNBAN" if sanction.kind in {"BAN", "KICK"} else "UNMUTE"
+                        )
+                        != external_snapshot
+                    ):
                         result = "RESTRICTION_CHANGED"
-                    elif sanction.kind == "MUTE" and any(
-                        getattr(member, key, None) is not False
-                        for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
+                    elif external_snapshot is None and deadline(
+                        getattr(member, "until_date", None)
+                    ) != deadline(until):
+                        result = "RESTRICTION_CHANGED"
+                    elif (
+                        external_snapshot is None
+                        and sanction.kind == "MUTE"
+                        and any(
+                            getattr(member, key, None) is not False
+                            for key in MUTE_PERMISSIONS.model_dump(exclude_none=True)
+                        )
                     ):
                         result = "RESTRICTION_CHANGED"
                     elif sanction.kind in {"BAN", "KICK"}:

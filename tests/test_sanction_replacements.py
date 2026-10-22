@@ -16,7 +16,6 @@ from test_warning_controls import click, sent
 
 from app.bot.callbacks import ModerationControl
 from app.bot.local_moderation import LocalModerationExecutor
-from app.bot.moderation_errors import diagnose_state
 from app.errors import DomainError
 from app.i18n import t
 from app.models import AuditEvent, GroupModerationDraft, GroupSanction, GroupSanctionJob, now
@@ -168,15 +167,20 @@ async def test_external_ban_during_replacement_is_not_claimed_as_owned(database)
         assert (await session.get(GroupSanction, mid)).status == "ACTIVE"
 
 
-async def test_unowned_mute_cannot_be_used_as_replacement_authority(database):
+async def test_ban_over_unowned_mute_keeps_original_ownership_history(database):
     bot = NativeBot()
-    mid, _ = await muted(database, bot)
+    mid, worker = await muted(database, bot)
     async with database() as session:
         (await session.get(GroupSanction, mid)).owned = False
         await session.commit()
-    with pytest.raises(DomainError, match="conflict"):
-        await request(database, bot, "BAN", "unowned-mute-ban")
-    assert len(bot.calls) == 1
+    sid = await request(database, bot, "BAN", "unowned-mute-ban")
+    await worker.process(sanction_id=sid)
+    assert [call[0] for call in bot.calls] == ["restrict", "ban"]
+    async with database() as session:
+        old = await session.get(GroupSanction, mid)
+        current = await session.get(GroupSanction, sid)
+        assert old.status == "COMPLETED" and not old.owned
+        assert current.status == "ACTIVE" and current.owned
 
 
 async def test_repeated_kick_does_not_ban_departed_member_again(username_journey):
@@ -230,20 +234,17 @@ async def test_all_pre_send_cancellations_cancel_unused_release(database, path):
     assert not bot.calls
 
 
-async def test_foreign_or_changed_mute_is_not_overwritten(database):
+async def test_explicit_kick_can_remove_a_member_with_a_changed_mute(database):
     bot = NativeBot()
     mid, worker = await muted(database, bot)
     new = await request(database, bot, "KICK", "changed-mute")
     bot.members[CHAT, 51].until_date += timedelta(hours=2)
     await worker.process(sanction_id=new)
-    assert len(bot.calls) == 1
+    await worker.process(sanction_id=new)
+    assert [call[0] for call in bot.calls] == ["restrict", "ban", "unban"]
     async with database() as session:
-        assert (await session.get(GroupSanction, mid)).status == "ACTIVE"
-        assert (await session.get(GroupSanction, new)).status == "CANCELLED"
-        assert (
-            await diagnose_state(GroupModerationService(session, bot), CHAT, 42, 51, "/kick")
-            == "restriction"
-        )
+        assert (await session.get(GroupSanction, mid)).status == "COMPLETED"
+        assert (await session.get(GroupSanction, new)).status == "COMPLETED"
 
 
 async def test_postgres_two_administrators_cannot_replace_same_mute_twice(postgres_contract):

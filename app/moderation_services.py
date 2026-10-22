@@ -359,7 +359,7 @@ class GroupModerationService:
         await self.authorization.actor(chat_id, actor_id)
         await self.authorization.bot_rights(chat_id)
         member = await self.authorization.target(chat_id, target_id)
-        if kind == "KICK" and (
+        if kind in {"MUTE", "KICK"} and (
             member.status == "left"
             or member.status == "restricted"
             and getattr(member, "is_member", None) is False
@@ -398,6 +398,9 @@ class GroupModerationService:
             )
             validate_policy(policy, group, kind, until_date)
             assert policy is not None
+            from app.external_releases import reconcile
+
+            await reconcile(self, chat_id, target_id, member)
             active = list(
                 await self.session.scalars(
                     select(GroupSanction).where(
@@ -414,7 +417,6 @@ class GroupModerationService:
                     or kind not in {"BAN", "KICK"}
                     or active[0].kind != "MUTE"
                     or active[0].status != "ACTIVE"
-                    or not active[0].owned
                 ):
                     raise DomainError("group_moderation_conflict")
                 predecessor = active[0]
@@ -666,7 +668,7 @@ class GroupModerationService:
         await self._check_group(chat_id)
         await self.authorization.actor(chat_id, actor_id)
         await self.authorization.bot_rights(chat_id)
-        await self.authorization.target(chat_id, target_id)
+        member = await self.authorization.target(chat_id, target_id)
         try:
             group = await lock_group(self.session, chat_id)
             if kind not in {"UNBAN", "UNMUTE"}:
@@ -690,6 +692,9 @@ class GroupModerationService:
                     raise DomainError("group_moderation_request_conflict")
                 await self.session.commit()
                 return existing
+            from app.external_releases import reconcile
+
+            await reconcile(self, chat_id, target_id, member)
             draft = GroupModerationDraft(
                 id=uuid4().hex,
                 chat_id=chat_id,
@@ -703,6 +708,9 @@ class GroupModerationService:
                 status="PENDING",
             )
             self.session.add(draft)
+            from app.external_releases import prepare as prepare_external_release
+
+            await prepare_external_release(self, draft, member)
             await self.session.commit()
             return draft
         except Exception:
@@ -738,6 +746,12 @@ class GroupModerationService:
             raise DomainError("group_moderation_invalid_draft")
         if draft.status == "PENDING" and utc(draft.expires_at) <= now():
             raise DomainError("group_moderation_invalid_draft")
+        from app.external_releases import confirm as confirm_external_release
+        from app.external_releases import intent as external_release_intent
+
+        external = await external_release_intent(self.session, draft)
+        if external is not None:
+            return await confirm_external_release(self, draft, external)
         chat, target, kind, reason, until = (
             draft.chat_id,
             draft.telegram_id,

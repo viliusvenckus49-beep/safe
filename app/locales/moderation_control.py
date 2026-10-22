@@ -2,6 +2,8 @@
 
 CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
     "lt": {
+        "external_title": "<b><u>Patvirtinti apribojimo panaikinimą</u></b>",
+        "external_confirm": "Bus atliktas <b>{action}</b> ir panaikintas esamas šio naudotojo Telegram apribojimas <b>tik šioje grupėje</b>. Prieš vykdymą teisės ir apribojimo būsena bus patikrintos dar kartą.",
         "replaced": "<b>MUTE užbaigtas: pritaikytas {kind}.</b> Ankstesnis UNMUTE nebegalioja.",
         "warn_title": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
         "unwarn": "× UNWARN",
@@ -33,12 +35,12 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
             "Sankcijos laikas baigėsi, o Telegram neberodo atitinkamo apribojimo. <b>Papildomas veiksmas neatliktas.</b>",
         ),
         "foreign": (
-            "SAFECheck sankcija nepatvirtinta",
-            "Telegram rodo apribojimą, tačiau <b>aktyvios SAFECheck sankcijos nuosavybė nepatvirtinta</b>. Apribojimas nepanaikintas.",
+            "Reikia patvirtinti apribojimo panaikinimą",
+            "Šiam Telegram apribojimui nėra galiojančio panaikinimo patvirtinimo. <b>Paleisk UNBAN arba UNMUTE komandą iš naujo.</b> Apribojimas dar nepanaikintas.",
         ),
         "changed": (
             "Apribojimo būsena pasikeitė",
-            "Telegram apribojimas nebeatitinka šios SAFECheck sankcijos. <b>Apribojimas nepanaikintas.</b>",
+            "Ankstesnis patvirtinimas nebeatitinka dabartinės Telegram būsenos. <b>Paleisk komandą iš naujo.</b> Apribojimas nepanaikintas.",
         ),
         "busy": (
             "Veiksmas jau vykdomas",
@@ -87,6 +89,8 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
         ),
     },
     "en": {
+        "external_title": "<b><u>Confirm restriction removal</u></b>",
+        "external_confirm": "<b>{action}</b> will remove this user's current Telegram restriction <b>in this group only</b>. Permissions and the restriction state will be checked again before execution.",
         "replaced": "<b>MUTE ended: {kind} applied.</b> The previous UNMUTE control is no longer valid.",
         "warn_title": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
         "unwarn": "× UNWARN",
@@ -118,12 +122,12 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
             "The deadline passed and Telegram no longer reports the restriction. <b>No further action was taken.</b>",
         ),
         "foreign": (
-            "SAFECheck ownership unconfirmed",
-            "Telegram reports a restriction, but <b>ownership of an active SAFECheck sanction is unconfirmed</b>. It was not lifted.",
+            "Restriction removal needs confirmation",
+            "There is no valid removal approval for this Telegram restriction. <b>Run UNBAN or UNMUTE again.</b> The restriction has not been lifted.",
         ),
         "changed": (
             "Restriction changed",
-            "The Telegram restriction no longer matches this SAFECheck sanction. <b>It was not lifted.</b>",
+            "The previous approval no longer matches the current Telegram state. <b>Run the command again.</b> The restriction has not been lifted.",
         ),
         "busy": (
             "Action in progress",
@@ -172,6 +176,8 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
         ),
     },
     "ru": {
+        "external_title": "<b><u>Подтвердить снятие ограничения</u></b>",
+        "external_confirm": "<b>{action}</b> снимет текущее ограничение Telegram у этого пользователя <b>только в этой группе</b>. Перед выполнением права и состояние ограничения будут проверены повторно.",
         "replaced": "<b>MUTE завершён: применён {kind}.</b> Прежняя кнопка UNMUTE больше не действует.",
         "warn_title": "⚠️ 𝗨𝗦𝗘𝗥 • 𝗪𝗔𝗥𝗡𝗘𝗗",
         "unwarn": "× UNWARN",
@@ -203,12 +209,12 @@ CATALOGS: dict[str, dict[str, str | tuple[str, str]]] = {
             "Срок истёк, и Telegram больше не показывает ограничение. <b>Дополнительных действий нет.</b>",
         ),
         "foreign": (
-            "Принадлежность санкции не подтверждена",
-            "Telegram показывает ограничение, но <b>принадлежность активной санкции SAFECheck не подтверждена</b>. Оно не снято.",
+            "Нужно подтвердить снятие ограничения",
+            "Для этого ограничения Telegram нет действующего подтверждения снятия. <b>Повторите UNBAN или UNMUTE.</b> Ограничение ещё не снято.",
         ),
         "changed": (
             "Ограничение изменилось",
-            "Ограничение Telegram больше не соответствует санкции SAFECheck. <b>Оно не снято.</b>",
+            "Предыдущее подтверждение больше не соответствует текущему состоянию Telegram. <b>Повторите команду.</b> Ограничение не снято.",
         ),
         "busy": (
             "Действие выполняется",
