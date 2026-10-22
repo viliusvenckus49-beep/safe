@@ -1,4 +1,4 @@
-name: SAFECheck VPS preflight
+name: SAFECheck isolated release preparation diagnostics
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: safecheck-vps-readonly-diagnostics
+  group: safecheck-vps
   cancel-in-progress: false
 jobs:
   inspect:
@@ -27,7 +27,7 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Inspect existing deployment without changing it
+      - name: Prepare tested candidate without migration or main bot restart
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
@@ -35,24 +35,41 @@ jobs:
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n python3 -c 'import importlib.util,json,shutil,sys
+          sudo -n python3 -c 'import importlib.util
+          import json
+          import sys
           from pathlib import Path
+          
           root=Path(sys.argv[1])
           spec=importlib.util.spec_from_file_location('"'"'release_probe'"'"',root/'"'"'deploy/production_release.py'"'"')
           module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-          known={'"'"'Use an immutable SHA release directory'"'"','"'"'Original production bot is not running'"'"','"'"'Unknown production Compose project'"'"','"'"'Missing production source'"'"','"'"'Unreviewed migration chain'"'"','"'"'Invalid release version'"'"','"'"'Production data service is not healthy'"'"','"'"'Unfinished or uncertain production work; reconcile first'"'"','"'"'Another running container shares the production network','Insufficient release disk space','Insufficient release memory'"'"'}
-          phase='"'"'constructor'"'"'
+          known={
+          '"'"'Use an immutable SHA release directory'"'"','"'"'Original production bot is not running'"'"',
+          '"'"'Unknown production Compose project'"'"','"'"'Missing production source'"'"','"'"'Unreviewed migration chain'"'"',
+          '"'"'Invalid release version'"'"','"'"'Production data service is not healthy'"'"',
+          '"'"'Unfinished or uncertain production work; reconcile first'"'"',
+          '"'"'Another running container shares the production network'"'"',
+          '"'"'Insufficient release disk space'"'"','"'"'Insufficient release memory'"'"',
+          '"'"'Production data service configuration differs'"'"','"'"'Production volume or credential paths differ'"'"',
+          '"'"'Production database/cache container changed'"'"'}
+          class TracedRelease(module.Release):
+              def run(self,args,**kwargs):
+                  if args[:2]==['"'"'docker'"'"','"'"'build'"'"']:
+                      print('"'"'PrepareStage=BUILD'"'"',flush=True)
+                  return super().run(args,**kwargs)
+              def idle(self):
+                  print('"'"'PrepareStage=IDLE'"'"',flush=True)
+                  return super().idle()
+              def writers(self):
+                  print('"'"'PrepareStage=WRITERS'"'"',flush=True)
+                  return super().writers()
           try:
-              release=module.Release(root,root.name)
-              print('"'"'ReleaseConstructor=PASS'"'"')
-              phase='"'"'idle'"'"';release.idle();print('"'"'ReleaseIdle=PASS'"'"')
-              phase='"'"'writers'"'"';release.writers();print('"'"'ReleaseWriters=PASS'"'"')
-              free=shutil.disk_usage(root).free
-              available=next(int(line.split()[1])*1024 for line in Path('"'"'/proc/meminfo'"'"').read_text().splitlines() if line.startswith('"'"'MemAvailable:'"'"'))
-              print('"'"'ReleaseResources='"'"'+json.dumps({'"'"'free_bytes'"'"':free,'"'"'available_memory_bytes'"'"':available,'"'"'disk_guard'"'"':free>=2*1024**3,'"'"'memory_guard'"'"':available>=768*1024**2}))
+              release=TracedRelease(root,root.name)
+              release.prepare()
+              print('"'"'ProductionPrepare=PASS; NoMigration=True; MainBotUnchanged=True'"'"',flush=True)
           except Exception as error:
-              message=str(error)
-              print('"'"'ReleaseGuardBlocked='"'"'+json.dumps({'"'"'phase'"'"':phase,'"'"'type'"'"':type(error).__name__,'"'"'reason'"'"':message if message in known else '"'"'withheld'"'"'},sort_keys=True))
+              reason=str(error)
+              print('"'"'ProductionPrepareBlocked='"'"'+json.dumps({'"'"'type'"'"':type(error).__name__,'"'"'reason'"'"':reason if reason in known else '"'"'withheld'"'"'}),flush=True)
           ' "$HOME/safecheck-releases/35787658fd8389a43487f4aa25f7ea22f4f16b68"
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
           import json
