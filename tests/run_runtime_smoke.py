@@ -7,6 +7,8 @@ from tempfile import TemporaryDirectory
 
 from aiogram.client.session.base import BaseSession
 from aiogram.types import User, WebhookInfo
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from app import main
@@ -52,7 +54,10 @@ async def smoke():
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await connection.execute(text("CREATE TABLE alembic_version(version_num VARCHAR(32))"))
-        await connection.execute(text("INSERT INTO alembic_version VALUES ('0020')"))
+        await connection.execute(
+            text("INSERT INTO alembic_version VALUES (:revision)"),
+            {"revision": ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()},
+        )
     await engine.dispose()
     transport = []
 
