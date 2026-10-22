@@ -42,7 +42,7 @@ def session(*args,**kwargs):
 def test_payload_is_pinned_reviewed_current_runtime_not_new_dependencies():
     base = op.predecessor()
     patches = op.incoming(base)
-    assert len(patches) == 43
+    assert len(patches) == 46
     for name in op.PAYLOAD:
         assert patches[name] == (ROOT / name).read_bytes()
         assert (
@@ -216,7 +216,7 @@ def test_migration_task_selects_only_named_rehearsal_database_and_private_stdin(
 
     def docker(args, **kwargs):
         calls.append((args, kwargs))
-        return "" if args[0] == "ps" else "ADS_MIGRATION20=PASS; ExistingRowsVerified=True"
+        return "" if args[0] == "ps" else "ADS_MIGRATION21=PASS; ExistingRowsVerified=True"
 
     kit = SimpleNamespace(
         ROOT=tmp_path,
@@ -242,7 +242,7 @@ def test_migration_task_selects_only_named_rehearsal_database_and_private_stdin(
     assert env["DATABASE_URL"].endswith("/safecheck_staging")
 
 
-@pytest.mark.parametrize("revision", ["0016", "0019", "0020"])
+@pytest.mark.parametrize("revision", ["0016", "0019", "0020", "0021"])
 async def test_real_migration_operator_retains_legacy_rows_and_policy_history(revision):
     import asyncpg
 
@@ -275,8 +275,15 @@ async def test_real_migration_operator_retains_legacy_rows_and_policy_history(re
                 INSERT INTO audit_events(actor_id,action,details,created_at)
                 VALUES(900,'preserve','{}',now());
             """
-            if revision == "0020":
+            if revision in {"0020", "0021"}:
                 seed = seed.replace("'FUTURE'", "'EXISTING'")
+            if revision == "0021":
+                seed += """
+                    INSERT INTO managed_groups(chat_id,chat_type,title,enabled,approved,can_restrict_members,updated_at)
+                    VALUES(-100,'supergroup','Keep policy',true,true,true,now());
+                    INSERT INTO group_moderation_settings(chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version,updated_at)
+                    VALUES(-100,5,'BAN',3600,4,now());
+                """
             await db.execute(seed)
         finally:
             await db.close()
@@ -292,7 +299,7 @@ async def test_real_migration_operator_retains_legacy_rows_and_policy_history(re
             timeout=50,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "ADS_MIGRATION20=PASS; ExistingRowsVerified=True" in result.stdout
+        assert "ADS_MIGRATION21=PASS; ExistingRowsVerified=True" in result.stdout
     finally:
         await admin.execute('DROP DATABASE "' + name + '" WITH (FORCE)')
         await admin.close()
@@ -483,7 +490,7 @@ async def test_postgres_preflight_distinguishes_archived_ads_from_live_work(
     )
 
 
-def test_emoji_update_retains_exact_previous_auto_ads_source_manifest():
+def test_warning_policy_update_retains_exact_previous_auto_ads_source_manifest():
     base = op.predecessor()
     previous = "c83b09695e05189252bce94ee0ebe032ec207b2c"
     assert base.REVIEWED_SOURCE_SHA[previous] == op.PREVIOUS_ADS_SOURCE_SHA[previous]
@@ -493,7 +500,15 @@ def test_emoji_update_retains_exact_previous_auto_ads_source_manifest():
     )
     assert (
         base.REVIEWED_SOURCE_SHA[previous]["app/models.py"]
-        == base.REVIEWED_SOURCE_SHA[op.CODE_HEAD]["app/models.py"]
+        == op.PREVIOUS_ADS_SOURCE_SHA["ecfa4a193a9178b59c768835dd50cea6bd892233"]["app/models.py"]
+    )
+    assert (
+        base.REVIEWED_SOURCE_SHA[previous]["app/models.py"]
+        != base.REVIEWED_SOURCE_SHA[op.CODE_HEAD]["app/models.py"]
+    )
+    assert (
+        "migrations/versions/0021_group_warning_settings.py"
+        in base.REVIEWED_SOURCE_SHA[op.CODE_HEAD]
     )
 
 

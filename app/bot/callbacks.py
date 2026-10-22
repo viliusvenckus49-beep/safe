@@ -55,6 +55,13 @@ class LocalAction(CallbackData, prefix="lm2", sep="|"):
     value: str = ""
 
 
+class WarningSettings(CallbackData, prefix="ws", sep="|"):
+    action: str
+    chat: int = 0
+    value: str = ""
+    version: int = 0
+
+
 class AdsAction(CallbackData, prefix="ad3"):
     action: str
     campaign: int = 0

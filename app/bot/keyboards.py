@@ -16,6 +16,7 @@ from app.bot.callbacks import (
     Moderation,
     ReportStep,
     ReputationModeration,
+    WarningSettings,
 )
 from app.bot.group_keyboards import GroupAction
 from app.i18n import t
@@ -149,6 +150,7 @@ def admin(owner: bool = False) -> InlineKeyboardMarkup:
 def group_help(owner: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [(t("ads.title"), AdsAction(action="root").pack())],
+        [(t("ws.button"), WarningSettings(action="groups").pack())],
         [(t("group_help.moderation"), LocalAction(action="groups").pack())],
     ]
     if owner:

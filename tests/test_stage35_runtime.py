@@ -4,6 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from test_integration_contracts import postgres_contract as postgres_contract
 
@@ -19,7 +21,10 @@ async def prepared(database, settings, monkeypatch, tmp_path):
         await conn.execute(
             text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)")
         )
-        await conn.execute(text("INSERT INTO alembic_version VALUES ('0020')"))
+        await conn.execute(
+            text("INSERT INTO alembic_version VALUES (:revision)"),
+            {"revision": ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()},
+        )
     monkeypatch.setattr(main, "create_database", lambda _: (engine, database))
     monkeypatch.setattr(main, "configure_logging", lambda _: None)
     monkeypatch.setenv("HEALTH_PATH", str(tmp_path / "health.json"))
