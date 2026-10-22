@@ -340,6 +340,7 @@ class GroupModerationService:
         reason: str,
         key: str,
         draft_id: str | None = None,
+        check_event_id: int | None = None,
     ) -> GroupSanction:
         numeric_id(target_id)
         request_key(key)
@@ -367,6 +368,13 @@ class GroupModerationService:
             raise DomainError("group_moderation_target_not_member")
         try:
             group = await lock_group(self.session, chat_id)
+            check_event = None
+            if check_event_id is not None:
+                from app.checks import guard_request
+
+                check_event = await guard_request(
+                    self.session, check_event_id, chat_id, target_id, kind
+                )
             draft = await self.check_draft(draft_id, chat_id, actor_id, target_id, kind)
             if draft is not None and (
                 key != "local:" + draft.id
@@ -445,6 +453,8 @@ class GroupModerationService:
             )
             self.session.add(sanction)
             await self.session.flush()
+            if check_event is not None:
+                check_event.sanction_id, check_event.state = sanction.id, "QUEUED"
             if kind == "WARN":
                 from app.warning_services import schedule_warning_action
 

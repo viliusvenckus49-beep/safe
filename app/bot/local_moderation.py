@@ -386,6 +386,10 @@ class LocalModerationExecutor:
                     await self.authorization.actor(sanction.chat_id, job.actor_id)
                 await self.authorization.bot_rights(sanction.chat_id)
                 member = await self.authorization.target(sanction.chat_id, sanction.telegram_id)
+                if job.operation == "APPLY":
+                    from app.checks import guard_job
+
+                    await guard_job(session, self.bot, sanction, member)
                 if (
                     job.operation == "APPLY"
                     and sanction.kind in {"MUTE", "KICK"}
@@ -407,6 +411,9 @@ class LocalModerationExecutor:
                     await session.rollback()
                     return
                 if job.operation == "APPLY":
+                    from app.checks import guard_version
+
+                    await guard_version(session, sanction)
                     policy = await session.get(
                         GroupModerationSettings, sanction.chat_id, populate_existing=True
                     )

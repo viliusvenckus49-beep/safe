@@ -14,6 +14,7 @@ from app.locales.ads_global import CATALOGS as ADS_GLOBAL
 from app.locales.ads_publication import CATALOGS as ADS_PUBLICATION
 from app.locales.auto_ads import CATALOGS as AUTO_ADS
 from app.locales.button_icons import CATALOGS as BUTTON_ICONS
+from app.locales.checks import CATALOGS as CHECKS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
 from app.locales.local_moderation import CATALOGS as LOCAL_MODERATION
@@ -59,6 +60,7 @@ CATALOGS = {
         **ADS_CUSTOMERS[lang],
         **AUTO_ADS[lang],
         **WARNINGS[lang],
+        **CHECKS[lang],
     }
     for lang in LANGUAGES
 }

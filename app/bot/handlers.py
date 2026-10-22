@@ -204,6 +204,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     from app.bot.warning_settings import register_warning_settings_handlers
 
     register_warning_settings_handlers(router)
+    from app.bot.checks_ui import register_checks_handlers
+
+    register_checks_handlers(router)
     from app.bot.ads_message_editor import register_message_editor
     from app.bot.auto_ads import register_auto_ads_handlers
 

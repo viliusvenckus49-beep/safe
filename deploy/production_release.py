@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backup-first 0021 release. No staging runtime, automatic DB restore or Redis reset."""
+"""Backup-first 0022 release. No staging runtime, automatic DB restore or Redis reset."""
 
 import argparse
 import hashlib
@@ -27,6 +27,7 @@ PINS = {
     "0019_linked_sanction_replacements.py": "34bb8d7b7c0acfb769e2a5cda05876b4a617501a3149a385ebcc94b1ab768747",
     "0020_unified_auto_ads.py": "66b92eb3ad9521adc564f18489081e9387a9afebbf38736489e8d08cbf50e98b",
     "0021_group_warning_settings.py": "3ebc12ee1495c08e0a032a77cc0cf8bc2afd598d9c2370285a7035be4c5e13a6",
+    "0022_group_checks.py": "4e88c33720339b02cbc82ae57ca86f6a603caae58fe0eb0246b0812fad9e1783",
 }
 
 
@@ -96,8 +97,8 @@ class Release:
         if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", self.version):
             raise RuntimeError("Invalid release version")
         self.image = "safecheck:" + self.version + "-" + sha[:12]
-        self.backup_dir = Path("/var/backups/safecheck") / ("production-0021-" + uuid4().hex)
-        self.state = Path("/var/lib/safecheck") / ("production-0021-" + sha)
+        self.backup_dir = Path("/var/backups/safecheck") / ("production-0022-" + uuid4().hex)
+        self.state = Path("/var/lib/safecheck") / ("production-0022-" + sha)
         self.fingerprints = {
             name: self.service_fingerprint(name)
             for name in ("safecheck-postgres-1", "safecheck-redis-1")
@@ -154,6 +155,7 @@ class Release:
             ("group_sanction_jobs", "status IN ('PENDING','PROCESSING','UNCERTAIN')"),
             ("group_sanctions", "status IN ('PENDING','REVOKING','UNCERTAIN')"),
             ("ad_publication_attempts", "status IN ('CLAIMED','SENDING','UNCERTAIN')"),
+            ("group_check_events", "state IN ('PENDING','WAITING','SENDING','QUEUED')"),
         ):
             exists = self.sql("SELECT to_regclass('public." + table + "') IS NOT NULL")
             if "t" in exists and "0" not in self.sql(
@@ -480,7 +482,7 @@ class Release:
                         flush=True,
                     )
                 raise
-        print("PRODUCTION_RELEASE=HEALTHY; Schema=0021; Image=" + self.image, flush=True)
+        print("PRODUCTION_RELEASE=HEALTHY; Schema=0022; Image=" + self.image, flush=True)
 
 
 def main():

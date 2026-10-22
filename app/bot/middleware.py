@@ -180,6 +180,13 @@ class ServiceMiddleware(BaseMiddleware):
                                 exception_type=type(error).__name__,
                             )
             current = monotonic()
+            if group_message and isinstance(event, Message) and event.bot is not None:
+                from app.bot.checks_runtime import inspect_message
+
+                try:
+                    await inspect_message(event, self.session_factory)
+                except Exception as error:
+                    log.warning("checks_message_deferred", exception_type=type(error).__name__)
             if len(self.recent) > 10000:
                 self.recent = {
                     key: seen
