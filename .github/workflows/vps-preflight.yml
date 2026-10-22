@@ -40,7 +40,7 @@ jobs:
           root=Path(sys.argv[1])
           spec=importlib.util.spec_from_file_location('"'"'release_probe'"'"',root/'"'"'deploy/production_release.py'"'"')
           module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-          known={'"'"'Use an immutable SHA release directory'"'"','"'"'Original production bot is not running'"'"','"'"'Unknown production Compose project'"'"','"'"'Missing production source'"'"','"'"'Unreviewed migration chain'"'"','"'"'Invalid release version'"'"','"'"'Production data service is not healthy'"'"','"'"'Unfinished or uncertain production work; reconcile first'"'"','"'"'Another running container shares the production network'"'"'}
+          known={'"'"'Use an immutable SHA release directory'"'"','"'"'Original production bot is not running'"'"','"'"'Unknown production Compose project'"'"','"'"'Missing production source'"'"','"'"'Unreviewed migration chain'"'"','"'"'Invalid release version'"'"','"'"'Production data service is not healthy'"'"','"'"'Unfinished or uncertain production work; reconcile first'"'"','"'"'Another running container shares the production network','Insufficient release disk space','Insufficient release memory'"'"'}
           phase='"'"'constructor'"'"'
           try:
               release=module.Release(root,root.name)
