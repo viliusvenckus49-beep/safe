@@ -67,6 +67,7 @@ from app.services import DomainError, Service
 ADMIN_ACTIONS = {
     "trusted_admin",
     "admin",
+    "group_help",
     "admin_scams",
     "admin_target_back",
     "pending",
@@ -676,6 +677,13 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 message,
                 p.text("admin"),
                 reply_markup=kb.admin(owner=service.access.is_owner(actor)),
+            )
+        elif name == "group_help":
+            await clear_flow(state)
+            await render(
+                message,
+                t("group_help.title"),
+                reply_markup=kb.group_help(owner=service.access.is_owner(actor)),
             )
         elif name == "status":
             await show_runtime_status(message, state, service, actor)

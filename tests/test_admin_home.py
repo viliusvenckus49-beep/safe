@@ -4,13 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.methods import AnswerCallbackQuery, SendDocument, SendMessage, SendPhoto
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    EditMessageText,
+    SendDocument,
+    SendMessage,
+    SendPhoto,
+)
 from test_telegram import journey as telegram_journey
 
 from app.admin_services import AdminService
 from app.bot import group_keyboards
 from app.bot import keyboards as kb
-from app.bot.callbacks import AdminAccess, AdminHelp, Language
+from app.bot.callbacks import AdminAccess, AdminHelp, AdsAction, Language, LocalAction
 from app.bot.group_keyboards import GroupAction
 from app.bot.handlers import ADMIN_ACTIONS
 from app.bot.screens import send_screen
@@ -31,7 +37,7 @@ def last_screen(journey):
     return next(
         item
         for item in reversed(journey.transport.calls)
-        if isinstance(item, (SendMessage, SendPhoto, SendDocument))
+        if isinstance(item, (SendMessage, SendPhoto, SendDocument, EditMessageText))
     )
 
 
@@ -67,8 +73,30 @@ async def test_private_start_exposes_only_existing_role_permissions(
     with use_language(lang):
         assert last_screen(journey).reply_markup == kb.admin(actor == OWNER)
     routes = values(last_screen(journey).reply_markup)
-    assert (GroupAction(action="list").pack() in routes) is (actor == OWNER)
+    assert kb.action("group_help") in routes
+    assert GroupAction(action="list").pack() not in routes
+    assert AdsAction(action="root").pack() not in routes
     assert (AdminAccess(action="list").pack() in routes) is (actor == OWNER)
+    await journey.click(kb.action("group_help"), actor=actor)
+    with use_language(lang):
+        assert last_screen(journey).reply_markup == kb.group_help(actor == OWNER)
+        assert last_screen(journey).text == t("group_help.title")
+    routes = values(last_screen(journey).reply_markup)
+    assert AdsAction(action="root").pack() in routes
+    assert LocalAction(action="groups").pack() in routes
+    assert (GroupAction(action="list").pack() in routes) is (actor == OWNER)
+    entries = [AdsAction(action="root").pack(), LocalAction(action="groups").pack()]
+    if actor == OWNER:
+        entries.append(GroupAction(action="list").pack())
+    for entry in entries:
+        await journey.click(entry, actor=actor)
+        assert kb.action("group_help") in values(last_screen(journey).reply_markup)
+        await journey.click(kb.action("group_help"), actor=actor)
+        with use_language(lang):
+            assert last_screen(journey).reply_markup == kb.group_help(actor == OWNER)
+    await journey.click(kb.action("admin"), actor=actor)
+    with use_language(lang):
+        assert last_screen(journey).reply_markup == kb.admin(actor == OWNER)
 
 
 async def test_trusted_status_does_not_grant_management_menu(journey, database, settings):
@@ -112,7 +140,7 @@ async def test_group_start_never_exposes_global_management(
     assert last_screen(journey).reply_markup == kb.home(private=False)
     await journey.click(kb.action("home"), actor=actor, chat=-100)
     assert last_screen(journey).reply_markup == kb.home(private=False)
-    for name in ("admin", "status"):
+    for name in ("admin", "status", "group_help"):
         await journey.click(kb.action(name), actor=actor, chat=-100)
         assert isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
         assert journey.transport.calls[-1].show_alert
@@ -125,7 +153,9 @@ def test_owner_flag_alone_or_group_context_cannot_expose_management():
 
 
 @pytest.mark.parametrize("return_route", [kb.action("home"), Language(lang="en").pack()])
-@pytest.mark.parametrize("protected_route", [kb.action("add_sc"), kb.action("status")])
+@pytest.mark.parametrize(
+    "protected_route", [kb.action("add_sc"), kb.action("status"), kb.action("group_help")]
+)
 async def test_revocation_hides_buttons_and_rejects_saved_callback(
     journey, database, settings, return_route, protected_route
 ):
@@ -178,6 +208,7 @@ async def test_moderator_cannot_execute_owner_only_menu_routes(journey, database
     "route",
     [
         kb.action("admin"),
+        kb.action("group_help"),
         kb.action("trusted_admin"),
         kb.action("pending"),
         kb.action("rep_pending", "0"),

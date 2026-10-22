@@ -133,7 +133,7 @@ async def root(message, ads, actor, *, edit=True):
             [
                 [(t("ua.new"), content_cb("new"))],
                 [(t("ua.mine"), cb("list"))],
-                [(t("ua.back"), action("admin"))],
+                [(t("ua.back"), action("group_help"))],
             ]
         ),
         edit=edit,

@@ -26,7 +26,7 @@ def menu(groups: Sequence[Any], *, admin: bool) -> InlineKeyboardMarkup:
         for group in groups
     ]
     rows.append(
-        [inline_button(t("button.back"), callback_data="sc|admin|" if admin else "sc|home|")]
+        [inline_button(t("button.back"), callback_data="sc|group_help|" if admin else "sc|home|")]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
