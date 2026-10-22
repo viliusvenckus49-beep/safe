@@ -237,8 +237,11 @@ async def guard_request(session, event_id, chat, target, kind):
     await policy_for_event(session, event)
     if (
         not event.notice_message_id
+        or event.notice_sent_at is None
+        or event.execute_after is None
         or event.state not in {"WAITING", "QUEUED"}
-        or utc(event.available_at) > now()
+        or utc(event.execute_after) > now()
+        or (utc(event.execute_after) - utc(event.notice_sent_at)).total_seconds() < 15
     ):
         raise DomainError("checks_notice_required")
     return event

@@ -99,7 +99,9 @@ async def due(factory):
         for event in await session.scalars(
             select(GroupCheckEvent).where(GroupCheckEvent.state == "WAITING")
         ):
-            event.available_at = now() - timedelta(seconds=1)
+            event.notice_sent_at = now() - timedelta(seconds=16)
+            event.execute_after = event.notice_sent_at + timedelta(seconds=15)
+            event.available_at = event.execute_after
         await session.commit()
 
 
@@ -450,3 +452,19 @@ async def test_native_timeout_does_not_publish_fabricated_success(database):
     await process_checks(database, bot)
     assert (await events(database))[0].state == "UNCERTAIN"
     assert "baigtis nepatvirtinta" in bot.edits[-1][0]
+
+
+async def test_queue_availability_cannot_bypass_the_persisted_notice_grace(database):
+    bot = await prepared(database, "BAN")
+    await observe(database, bot, CHAT, bot.person())
+    await process_checks(database, bot)
+    async with database() as session:
+        event = await session.scalar(select(GroupCheckEvent))
+        event.available_at = now() - timedelta(seconds=1)
+        await session.commit()
+    await process_checks(database, bot)
+    async with database() as session:
+        assert await session.scalar(select(func.count()).select_from(GroupSanction)) == 0
+    row = (await events(database))[0]
+    assert row.state == "WAITING" and row.available_at == row.execute_after
+    assert not bot.calls

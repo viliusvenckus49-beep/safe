@@ -189,6 +189,10 @@ async def _process(sessions, bot, identifier):
                 ):
                     raise DomainError("group_moderation_bot_rights")
                 if event.state == "WAITING":
+                    if event.execute_after is not None and utc(event.execute_after) > now():
+                        event.available_at = event.execute_after
+                        await session.commit()
+                        return
                     await session.commit()
                     await GroupModerationService(session, bot).submit(
                         event.chat_id,
@@ -196,7 +200,7 @@ async def _process(sessions, bot, identifier):
                         event.telegram_id,
                         event.action,
                         until_date=(
-                            utc(event.available_at) + timedelta(seconds=policy.mute_seconds)
+                            utc(event.execute_after) + timedelta(seconds=policy.mute_seconds)
                         ).replace(microsecond=0)
                         if event.action == "MUTE"
                         else None,
@@ -234,8 +238,12 @@ async def _process(sessions, bot, identifier):
                             event.state, event.result = "FAILED", "NOTICE_NOT_CONFIRMED"
                         else:
                             event.notice_message_id = result.message_id
+                            event.notice_sent_at = now()
+                            event.execute_after = event.notice_sent_at + timedelta(
+                                seconds=GRACE_SECONDS
+                            )
                             event.state = "DONE" if event.action == "ADVISE" else "WAITING"
-                            event.available_at = now() + timedelta(seconds=GRACE_SECONDS)
+                            event.available_at = event.execute_after
                             event.result = (
                                 "ADVISED" if event.action == "ADVISE" else "NOTICE_DELIVERED"
                             )

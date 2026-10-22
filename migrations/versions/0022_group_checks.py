@@ -55,6 +55,8 @@ def upgrade():
         sa.Column("sanction_id", sa.Integer(), sa.ForeignKey("group_sanctions.id")),
         sa.Column("message_id", sa.BigInteger()),
         sa.Column("notice_message_id", sa.BigInteger()),
+        sa.Column("notice_sent_at", sa.DateTime(timezone=True)),
+        sa.Column("execute_after", sa.DateTime(timezone=True)),
         sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("available_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("result", sa.String(80)),

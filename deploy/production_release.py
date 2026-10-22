@@ -27,7 +27,7 @@ PINS = {
     "0019_linked_sanction_replacements.py": "34bb8d7b7c0acfb769e2a5cda05876b4a617501a3149a385ebcc94b1ab768747",
     "0020_unified_auto_ads.py": "66b92eb3ad9521adc564f18489081e9387a9afebbf38736489e8d08cbf50e98b",
     "0021_group_warning_settings.py": "3ebc12ee1495c08e0a032a77cc0cf8bc2afd598d9c2370285a7035be4c5e13a6",
-    "0022_group_checks.py": "c52b7b4b21809ea3fe090d5fa0f76659e6f079f556deb7d6dd362fe009cb4dc6",
+    "0022_group_checks.py": "4e88c33720339b02cbc82ae57ca86f6a603caae58fe0eb0246b0812fad9e1783",
 }
 
 

@@ -26,7 +26,8 @@ corresponding moderation module; configuration does not silently enable it.
 Each confirmed violation episode creates a durable event. The bot first sends a
 REDSAFE SECURITY notice, using the actual display name and numeric ID. Native
 WARN/KICK/MUTE/BAN can only be queued **15 seconds after confirmed notice delivery**.
-The deadline and notice ID persist across worker and bot restarts. No coroutine
+The confirmed notice timestamp, immutable execution deadline and notice ID persist
+across worker and bot restarts. Queue polling time cannot shorten that deadline. No coroutine
 sleeps holding SQL locks or waits out the grace period. An unconfirmed notice
 cannot authorize a native sanction. RetryAfter is retried only after Telegram's
 explicit rejection; ambiguous delivery is retained as uncertain and not replayed.

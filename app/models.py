@@ -433,6 +433,8 @@ class GroupCheckEvent(Base):
     sanction_id: Mapped[int | None] = mapped_column(ForeignKey("group_sanctions.id"))
     message_id: Mapped[int | None] = mapped_column(BigInteger)
     notice_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    notice_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    execute_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(default=0, server_default="0")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     result: Mapped[str | None] = mapped_column(String(80))
