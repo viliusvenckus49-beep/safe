@@ -45,6 +45,11 @@ jobs:
               print(name+'"'"'='"'"'+json.dumps(value,default=str,sort_keys=True))
           
           async def main():
+              from app.bot.commands import LOCAL_COMMANDS
+              from app.bot.group_help import register_group_help
+              assert '"'"'warns'"'"' in LOCAL_COMMANDS and '"'"'warnings'"'"' not in LOCAL_COMMANDS
+              assert callable(register_group_help)
+              emit('"'"'GroupHelpRuntime'"'"',{'"'"'group_first'"'"':True,'"'"'warning_history_command'"'"':'"'"'warns'"'"'})
               state=snapshot()
               emit('"'"'RuntimeHeartbeat'"'"',state)
               if not state['"'"'healthy'"'"']:
@@ -54,13 +59,13 @@ jobs:
                   async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
                       revision=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
                       emit('"'"'ChecksSchema'"'"',revision)
-                      if revision!='"'"'0022'"'"':
+                      if revision!='"'"'0023'"'"':
                           raise RuntimeError('"'"'Expected Checks schema'"'"')
-                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds FROM group_check_settings ORDER BY chat_id'"'"')
+                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds,words_action,words_delete,json_array_length(banned_words) AS banned_word_count FROM group_check_settings ORDER BY chat_id'"'"')
                       emit('"'"'ChecksPolicies'"'"',[dict(r) for r in rows])
                       states=await db.fetch('"'"'SELECT state,count(*) AS count FROM group_check_events GROUP BY state ORDER BY state'"'"')
                       emit('"'"'ChecksEvents'"'"',[dict(r) for r in states])
-                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+interval '"'"'15 seconds'"'"' OR j.created_at<e.execute_after)")
+                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+make_interval(secs=>e.grace_seconds) OR e.grace_seconds<>CASE WHEN e.kick_attempt>=4 THEN 0 WHEN e.kick_attempt>=2 THEN 5 ELSE 15 END OR j.created_at<e.execute_after)")
                       emit('"'"'EarlyOrUnannouncedCheckActions'"'"',invalid)
                       if invalid:
                           raise RuntimeError('"'"'Notice grace invariant failed'"'"')
