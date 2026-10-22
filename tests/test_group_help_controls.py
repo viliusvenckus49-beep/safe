@@ -491,15 +491,10 @@ async def test_command_defaults_allow_permanent_without_overwriting_explicit_dur
     bot = CheckBot()
     await setup_groups(database, bot)
     async with database() as session:
-        session.add(
-            GroupModerationSettings(
-                chat_id=CHAT,
-                updated_by=42 if explicit else None,
-                allow_permanent_bans=False,
-                allow_permanent_mutes=False,
-                max_duration_seconds=604800,
-            )
-        )
+        policy = await session.get(GroupModerationSettings, CHAT)
+        policy.updated_by = 42 if explicit else None
+        policy.allow_permanent_bans = policy.allow_permanent_mutes = False
+        policy.max_duration_seconds = 604800
         await session.commit()
         await GroupModerationService(session, bot).ensure_commands(CHAT, 42)
         policy = await session.get(GroupModerationSettings, CHAT)
