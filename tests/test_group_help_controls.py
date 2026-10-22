@@ -126,15 +126,15 @@ async def test_words_delete_notice_then_optional_native_action(database, action)
     await observe_words(database, bot, CHAT, user, 701, "filtered")
     await process_checks(database, bot)
     assert len(bot.deletions) == len(bot.notices) == 1
+    with use_language("lt"):
+        assert text == (
+            "🛡 <b>REDSAFE SECURITY</b>\n\n"
+            "👤 <b>Real &lt;&amp;&gt; Name</b> [<code>51</code>]\n\n"
+            "⚠️ <b>Pranešimas pašalintas:</b> Aptiktas filtruojamas raktažodis.\n\n"
+            "<i>Prašome naudoti savus terminus arba alternatyvius pavadinimus, kad pranešimai nebūtų automatiškai šalinami.</i>"
+        )
     if action == "OFF":
         assert e.state == "DONE"
-        with use_language("lt"):
-            assert text == (
-                "🛡 <b>REDSAFE SECURITY</b>\n\n"
-                "👤 <b>Real &lt;&amp;&gt; Name</b> [<code>51</code>]\n\n"
-                "⚠️ <b>Pranešimas pašalintas:</b> Aptiktas filtruojamas raktažodis.\n\n"
-                "<i>Prašome naudoti savus terminus arba alternatyvius pavadinimus, kad pranešimai nebūtų automatiškai šalinami.</i>"
-            )
         return
     await due(database)
     await process_checks(database, bot)
@@ -143,6 +143,7 @@ async def test_words_delete_notice_then_optional_native_action(database, action)
     await LocalModerationExecutor(database, bot).process(limit=2, sanction_id=e.sanction_id)
     await process_checks(database, bot)
     assert (await events(database))[0].state == "DONE"
+    assert not bot.edits  # The exact removal card stays unchanged after native punishment.
 
 
 async def test_deletion_failure_never_claims_removed_or_punishes(database):

@@ -107,7 +107,7 @@ async def _edit_notice(bot, event, text):
     return False
 
 
-def words_text(event, *, completed=False):
+def words_text(event):
     text = (
         "🛡 <b>REDSAFE SECURITY</b>"
         f"\n\n👤 <b>{escape(event.display_name)}</b> [<code>{event.telegram_id}</code>]"
@@ -117,18 +117,11 @@ def words_text(event, *, completed=False):
         + t("bw.hint")
         + "</i>"
     )
-    if event.action != "DELETE":
-        text += (
-            "\n\n🚫 <b>"
-            + t("checks.action" if completed else "checks.planned")
-            + ":</b> <b>"
-            + ACTION_NAMES[event.action]
-            + "</b>"
-        )
     return text
 
 
 async def _finish_notice(session, bot, event, policy):
+    update_notice = policy.notify_result and event.rule != "words"
     sanction = await session.get(GroupSanction, event.sanction_id)
     release_failed = (
         sanction is not None
@@ -146,13 +139,13 @@ async def _finish_notice(session, bot, event, policy):
     if sanction is not None and (sanction.status == "UNCERTAIN" or release_failed):
         event.state, event.result = "UNCERTAIN", "NATIVE_OUTCOME_UNCONFIRMED"
         await session.commit()
-        if policy.notify_result:
+        if update_notice:
             await _edit_notice(bot, event, t("checks.uncertain"))
         return
     if sanction is None or sanction.status in {"CANCELLED", "FAILED", "UNCERTAIN"}:
         event.state, event.result = "FAILED", sanction.status if sanction else "NO_SANCTION"
         await session.commit()
-        if policy.notify_result:
+        if update_notice:
             await _edit_notice(bot, event, t("checks.cancelled"))
         return
     success = (
@@ -163,7 +156,7 @@ async def _finish_notice(session, bot, event, policy):
     if sanction.status in {"REVOKED", "EXPIRED"}:
         event.state, event.result = "DONE", "ALREADY_RELEASED"
         await session.commit()
-        if policy.notify_result:
+        if update_notice:
             await _edit_notice(bot, event, t("checks.released"))
         return
     if not success:
@@ -172,12 +165,8 @@ async def _finish_notice(session, bot, event, policy):
         return
     event.state, event.result = "DONE", "CONFIRMED"
     await session.commit()
-    if policy.notify_result:
-        done = await _edit_notice(
-            bot,
-            event,
-            words_text(event, completed=True) if event.rule == "words" else security_text(event),
-        )
+    if update_notice:
+        done = await _edit_notice(bot, event, security_text(event))
         event.result = "CONFIRMED_NOTICE_UPDATED" if done else "CONFIRMED_NOTICE_UPDATE_FAILED"
         await session.commit()
 
@@ -198,9 +187,10 @@ async def _process(sessions, bot, identifier):
                     "NOW_COMPLIANT",
                     "SETTINGS_CHANGED",
                 }:
-                    event.result += ":NOTICE_CLOSED"
+                    retained = event.rule == "words" and event.message_deleted
+                    event.result += ":NOTICE_RETAINED" if retained else ":NOTICE_CLOSED"
                     await session.commit()
-                    if policy.notify_result:
+                    if policy.notify_result and not retained:
                         await _edit_notice(bot, event, t("checks.cancelled"))
                 return
             if event.state == "QUEUED":
@@ -375,6 +365,7 @@ async def _process(sessions, bot, identifier):
                 if (
                     event.notice_message_id
                     and policy.notify_result
+                    and not (event.rule == "words" and event.message_deleted)
                     and event.state in {"SKIPPED", "FAILED"}
                 ):
                     await _edit_notice(bot, event, t("checks.cancelled"))
