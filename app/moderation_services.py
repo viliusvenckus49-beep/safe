@@ -198,6 +198,10 @@ class GroupModerationService:
                 "warnings_enabled",
                 "kicks_enabled",
             )
+            # Backfilled, never-configured policies must behave like a freshly
+            # added group. Preserve deliberate administrator duration choices.
+            if policy.updated_by is None and not policy.local_auto_enabled:
+                policy.allow_permanent_bans = policy.allow_permanent_mutes = True
             if any(not getattr(policy, field) for field in fields) or not policy.local_auto_enabled:
                 for field in fields:
                     setattr(policy, field, True)

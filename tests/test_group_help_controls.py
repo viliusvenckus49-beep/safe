@@ -479,3 +479,30 @@ async def test_postgres_concurrent_first_commands_enrol_one_local_group(
         assert (await session.get(ObservedMember, (chat, 51))).username == "target_user"
         await GroupService(settings, session).disable_group(chat)
         assert not (await session.get(GroupModerationSettings, chat)).local_auto_enabled
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_command_defaults_allow_permanent_without_overwriting_explicit_duration_limits(
+    database, explicit
+):
+    from app.models import GroupModerationSettings
+    from app.moderation_services import GroupModerationService
+
+    bot = CheckBot()
+    await setup_groups(database, bot)
+    async with database() as session:
+        session.add(
+            GroupModerationSettings(
+                chat_id=CHAT,
+                updated_by=42 if explicit else None,
+                allow_permanent_bans=False,
+                allow_permanent_mutes=False,
+                max_duration_seconds=604800,
+            )
+        )
+        await session.commit()
+        await GroupModerationService(session, bot).ensure_commands(CHAT, 42)
+        policy = await session.get(GroupModerationSettings, CHAT)
+        assert policy.allow_permanent_bans is (not explicit)
+        assert policy.allow_permanent_mutes is (not explicit)
+        assert policy.max_duration_seconds == 604800
