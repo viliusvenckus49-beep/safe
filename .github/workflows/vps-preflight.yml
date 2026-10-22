@@ -58,7 +58,7 @@ jobs:
               try:
                   async with connection.transaction(readonly=True, isolation="repeatable_read"):
                       groups = [dict(row) for row in await connection.fetch("SELECT chat_id,title,approved,enabled FROM managed_groups ORDER BY chat_id")]
-                      relevant = [g for g in groups if "siaul" in unicodedata.normalize("NFKD",g["title"].lower()).encode("ascii","ignore").decode()]
+                      relevant = groups
                       emit("RelevantGroups", relevant)
                       emit("Identity", [dict(r) for r in await connection.fetch("SELECT id,telegram_id,username FROM users WHERE telegram_id=8896102663 OR lower(username)='"'"'redsafeads'"'"'")])
                       emit("Sanctions", [dict(r) for r in await connection.fetch("SELECT id,chat_id,telegram_id,kind,status,owned,actor_id,until_date,created_at,updated_at,replaces_sanction_id FROM group_sanctions WHERE telegram_id=8896102663 ORDER BY id DESC LIMIT 30")])
