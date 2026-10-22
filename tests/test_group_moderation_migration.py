@@ -17,6 +17,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config, create_async_engine
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_TABLES = {
+    "group_check_settings",
+    "group_check_members",
+    "group_check_events",
     "ad_client_invitations",
     "group_warning_escalations",
     "group_warning_resets",
@@ -170,6 +173,10 @@ async def test_postgres_actual_migration_preserves_legacy_data(monkeypatch):
         await asyncio.to_thread(migrate, "check")
         assert await snapshot() == before
         async with engine.connect() as connection:
+            for table in ("group_check_settings", "group_check_members", "group_check_events"):
+                assert (
+                    await connection.execute(text(f'SELECT count(*) FROM "{table}"'))
+                ).scalar() == 0
             rows = (
                 await connection.execute(
                     text(
