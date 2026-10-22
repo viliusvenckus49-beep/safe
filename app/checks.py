@@ -331,7 +331,26 @@ async def observe(sessions, bot, chat, user, *, message_id=None, joined_at=None,
                 )
                 if rule not in bad:
                     if previous and previous.state != "RESOLVED":
-                        previous.state, previous.result = "RESOLVED", "NOW_COMPLIANT"
+                        # Compliance ends the episode, but never undoes or rewrites
+                        # a confirmed or already executing native punishment.
+                        can_cancel = previous.state in {"PENDING", "WAITING", "SKIPPED"}
+                        if previous.state == "QUEUED" and previous.sanction_id:
+                            sanction = await session.get(GroupSanction, previous.sanction_id)
+                            busy = await session.scalar(
+                                select(GroupSanctionJob.id)
+                                .where(
+                                    GroupSanctionJob.sanction_id == previous.sanction_id,
+                                    GroupSanctionJob.status.in_({"PROCESSING", "UNCERTAIN"}),
+                                )
+                                .limit(1)
+                            )
+                            can_cancel = (
+                                sanction is not None
+                                and sanction.status == "PENDING"
+                                and busy is None
+                            )
+                        if can_cancel:
+                            previous.state, previous.result = "RESOLVED", "NOW_COMPLIANT"
                         episodes[rule] = episodes.get(rule, 0) + 1
                     continue
                 if previous is None:

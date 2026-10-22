@@ -12,7 +12,7 @@ from app.checks import API_TIMEOUT, evidence, is_member, observe, policy_for_eve
 from app.errors import DomainError
 from app.group_authorization import GroupAuthorizer
 from app.i18n import t, use_language
-from app.models import GroupCheckEvent, GroupCheckSettings, GroupSanction, now
+from app.models import GroupCheckEvent, GroupCheckSettings, GroupSanction, GroupSanctionJob, now
 from app.moderation_services import GroupModerationService, audit, lock_group, utc
 
 GRACE_SECONDS = 15
@@ -92,6 +92,25 @@ async def _edit_notice(bot, event, text):
 
 async def _finish_notice(session, bot, event, policy):
     sanction = await session.get(GroupSanction, event.sanction_id)
+    release_failed = (
+        sanction is not None
+        and sanction.kind == "KICK"
+        and await session.scalar(
+            select(GroupSanctionJob.id)
+            .where(
+                GroupSanctionJob.sanction_id == sanction.id,
+                GroupSanctionJob.operation == "RELEASE",
+                GroupSanctionJob.status.in_({"FAILED", "CANCELLED", "UNCERTAIN"}),
+            )
+            .limit(1)
+        )
+    )
+    if sanction is not None and (sanction.status == "UNCERTAIN" or release_failed):
+        event.state, event.result = "UNCERTAIN", "NATIVE_OUTCOME_UNCONFIRMED"
+        await session.commit()
+        if policy.notify_result:
+            await _edit_notice(bot, event, t("checks.uncertain"))
+        return
     if sanction is None or sanction.status in {"CANCELLED", "FAILED", "UNCERTAIN"}:
         event.state, event.result = "FAILED", sanction.status if sanction else "NO_SANCTION"
         await session.commit()

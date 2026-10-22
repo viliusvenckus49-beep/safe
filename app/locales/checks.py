@@ -166,3 +166,12 @@ for entries in CATALOGS.values():
 CATALOGS["lt"]["checks.released"] = "Sankcija jau pasibaigusi arba panaikinta."
 CATALOGS["en"]["checks.released"] = "The sanction has already expired or been lifted."
 CATALOGS["ru"]["checks.released"] = "Срок санкции истёк или она уже отменена."
+CATALOGS["lt"]["checks.uncertain"] = (
+    "⚠️ <b>Veiksmo baigtis nepatvirtinta.</b> Patikrinkite moderavimo istoriją. Veiksmo nekartokite nepatikrinę Telegram būsenos."
+)
+CATALOGS["en"]["checks.uncertain"] = (
+    "⚠️ <b>Action outcome is unconfirmed.</b> Check moderation history and the actual Telegram state before repeating the action."
+)
+CATALOGS["ru"]["checks.uncertain"] = (
+    "⚠️ <b>Результат действия не подтверждён.</b> Проверьте историю модерации и фактическое состояние в Telegram перед повтором."
+)

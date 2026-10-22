@@ -404,3 +404,49 @@ async def test_postgres_two_deadline_workers_submit_one_sanction(postgres_contra
         LocalModerationExecutor(factory, bot).process(),
     )
     assert len(bot.calls) == 1
+
+
+async def test_later_compliance_never_claims_a_completed_warn_was_cancelled(database):
+    bot = await prepared(database, "WARN")
+    await observe(database, bot, CHAT, bot.person())
+    await process_checks(database, bot)
+    await due(database)
+    await process_checks(database, bot)
+    await process_checks(database, bot)
+    assert (await events(database))[0].state == "DONE"
+    original_edits = len(bot.edits)
+    user = bot.person(username="fixed_name")
+    await observe(database, bot, CHAT, user)
+    await process_checks(database, bot)
+    assert (await events(database))[0].state == "DONE"
+    assert len(bot.edits) == original_edits
+
+
+async def test_partial_kick_is_never_reported_as_success_or_cancellation(database):
+    bot = await prepared(database, "KICK")
+    await observe(database, bot, CHAT, bot.person())
+    await process_checks(database, bot)
+    await due(database)
+    await process_checks(database, bot)
+    worker = LocalModerationExecutor(database, bot)
+    row = (await events(database))[0]
+    await worker.process(limit=1, sanction_id=row.sanction_id)
+    bot.api_false = True
+    await worker.process(limit=1, sanction_id=row.sanction_id)
+    await process_checks(database, bot)
+    assert (await events(database))[0].state == "UNCERTAIN"
+    assert "baigtis nepatvirtinta" in bot.edits[-1][0]
+    assert "<b>KICKED</b>" not in bot.edits[-1][0]
+
+
+async def test_native_timeout_does_not_publish_fabricated_success(database):
+    bot = await prepared(database, "BAN")
+    await observe(database, bot, CHAT, bot.person())
+    await process_checks(database, bot)
+    await due(database)
+    await process_checks(database, bot)
+    bot.error = TimeoutError()
+    await LocalModerationExecutor(database, bot).process()
+    await process_checks(database, bot)
+    assert (await events(database))[0].state == "UNCERTAIN"
+    assert "baigtis nepatvirtinta" in bot.edits[-1][0]
