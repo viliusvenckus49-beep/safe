@@ -1,4 +1,4 @@
-name: SAFECheck VPS preflight
+name: SAFECheck reviewed ADS79 closure
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: safecheck-vps-readonly-diagnostics
+  group: safecheck-vps
   cancel-in-progress: false
 jobs:
   inspect:
@@ -27,70 +27,124 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Inspect existing deployment without changing it
+      - name: Backup and close owner-reviewed attempt 79 without retry
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
-          sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
+          set -eu
+          review_root="$HOME/safecheck-releases/35787658fd8389a43487f4aa25f7ea22f4f16b68"
+          umask 077
+          cat > "$HOME/safecheck-ops-review-ads79.sql" <<'REVIEW_SQL'
+          BEGIN;
+          SET LOCAL lock_timeout = '5s';
+          SET LOCAL statement_timeout = '15s';
+          DO $review$
+          DECLARE
+            attempt ad_publication_attempts%ROWTYPE;
+            sched ad_schedules%ROWTYPE;
+            part ad_publication_parts%ROWTYPE;
+            evidence json;
+          BEGIN
+            PERFORM id FROM identity_lock WHERE id=1 FOR SHARE;
+            IF NOT FOUND THEN RAISE EXCEPTION 'Missing ADS ACL lock'; END IF;
+            PERFORM id FROM ad_campaigns WHERE id=2 AND internal_name='pranashas' FOR SHARE;
+            IF NOT FOUND THEN RAISE EXCEPTION 'Campaign identity changed'; END IF;
+            SELECT * INTO STRICT sched FROM ad_schedules WHERE id=5 FOR UPDATE;
+            SELECT * INTO STRICT attempt FROM ad_publication_attempts WHERE id=79 FOR UPDATE;
+            IF sched.campaign_id IS DISTINCT FROM 2 OR sched.chat_id IS DISTINCT FROM -1004395482317 OR sched.version IS DISTINCT FROM 6 OR sched.status IS DISTINCT FROM 'PAUSED' OR sched.next_run_at IS NOT NULL THEN
+              RAISE EXCEPTION 'Schedule changed; manual review required';
+            END IF;
+            IF attempt.status='CANCELLED' AND attempt.error='HUMAN_REVIEW_NOT_OBSERVED' AND EXISTS(
+              SELECT 1 FROM audit_events WHERE action='ads_publication_manual_closed' AND details->>'attempt_id'='79' AND details->>'review_key'='owner-20261022-ads79-not-observed'
+            ) THEN
+              RAISE NOTICE 'ADS79_MANUAL_CLOSE_ALREADY_RECORDED';
+              RETURN;
+            END IF;
+            IF attempt.status IS DISTINCT FROM 'UNCERTAIN' OR attempt.error IS DISTINCT FROM 'TelegramNetworkError' OR attempt.schedule_id IS DISTINCT FROM 5 OR attempt.content_version_id IS DISTINCT FROM 4 OR attempt.chat_id IS DISTINCT FROM -1004395482317 OR attempt.schedule_version IS DISTINCT FROM 6 OR attempt.fence IS DISTINCT FROM 1 OR attempt.due_at IS DISTINCT FROM '2026-10-22 16:19:00+00'::timestamptz OR attempt.lease_until IS NOT NULL OR attempt.retry_at IS NOT NULL OR attempt.completed_at IS NULL THEN
+              RAISE EXCEPTION 'Attempt changed; manual review required';
+            END IF;
+            IF (SELECT count(*) FROM ad_publication_parts WHERE attempt_id=79) IS DISTINCT FROM 1 THEN
+              RAISE EXCEPTION 'Part set changed; manual review required';
+            END IF;
+            SELECT * INTO STRICT part FROM ad_publication_parts WHERE attempt_id=79 FOR UPDATE;
+            IF part.id IS DISTINCT FROM 79 OR part.position IS DISTINCT FROM 0 OR part.kind IS DISTINCT FROM 'PHOTO' OR part.status IS DISTINCT FROM 'UNCERTAIN' OR part.tries IS DISTINCT FROM 1 OR part.error IS DISTINCT FROM 'TelegramNetworkError' OR part.message_ids::jsonb IS DISTINCT FROM '[]'::jsonb THEN
+              RAISE EXCEPTION 'Part evidence changed; manual review required';
+            END IF;
+            evidence := json_build_object(
+              'review_key','owner-20261022-ads79-not-observed',
+              'attempt_id',79,'campaign_id',2,'schedule_id',5,'chat_id',attempt.chat_id,
+              'content_version_id',attempt.content_version_id,'fence',attempt.fence,
+              'previous_status',attempt.status,'previous_error',attempt.error,
+              'previous_completed_at',attempt.completed_at,'part_id',part.id,
+              'part_status',part.status,'message_ids',part.message_ids,
+              'resolution','CANCELLED','delivery_outcome','UNKNOWN',
+              'evidence_source','project owner checked Telegram group',
+              'owner_report','nepasirode','automatic_retry',false,'schedule_remains','PAUSED'
+            );
+            INSERT INTO audit_events(actor_id,action,target_id,details,created_at)
+              VALUES(0,'ads_publication_manual_closed',NULL,evidence,CURRENT_TIMESTAMP);
+            UPDATE ad_publication_attempts SET status='CANCELLED',error='HUMAN_REVIEW_NOT_OBSERVED'
+              WHERE id=79 AND status='UNCERTAIN' AND fence=1;
+            IF NOT FOUND THEN RAISE EXCEPTION 'Attempt fence changed'; END IF;
+            -- Keep the PHOTO part UNCERTAIN and its original error/receipts untouched.
+            -- This is a human closure, never a claim of a Telegram-confirmed failure.
+            RAISE NOTICE 'ADS79_MANUAL_CLOSED_NO_RETRY';
+          END
+          $review$;
+          COMMIT;
+          REVIEW_SQL
+          sudo -n python3 -c '"""One-shot human closure; never send/retry, keep unknown delivery evidence."""
+          import hashlib
+          import importlib.util
           import json
-          import re
-          import asyncpg
-          from app.config import Settings
+          import os
+          import subprocess
+          import sys
+          from datetime import UTC, datetime
+          from pathlib import Path
+          from uuid import uuid4
           
-          
-          def emit(name, value):
-              print(name + '"'"'='"'"' + json.dumps(value, default=str, sort_keys=True))
-          
-          
-          def safe_error(value):
-              if value is None:
-                  return None
-              return value if re.fullmatch(r'"'"'[A-Za-z_][A-Za-z0-9_]{0,79}'"'"', value) else '"'"'DETAILS_WITHHELD'"'"'
-          
-          
-          async def main():
-              db = await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"', '"'"'postgresql:'"'"'))
-              try:
-                  async with db.transaction(readonly=True, isolation='"'"'repeatable_read'"'"'):
-                      row = await db.fetchrow('"'"''"'"''"'"'SELECT a.id,a.schedule_id,a.content_version_id,a.chat_id,a.schedule_version,a.due_at,a.status,a.fence,a.lease_until,a.retry_at,a.error,a.notified,a.created_at,a.completed_at,s.campaign_id,s.status AS schedule_status,s.version AS current_schedule_version,s.next_run_at,s.updated_at AS schedule_updated_at,c.internal_name,g.title AS group_title FROM ad_publication_attempts a JOIN ad_schedules s ON s.id=a.schedule_id JOIN ad_campaigns c ON c.id=s.campaign_id LEFT JOIN managed_groups g ON g.chat_id=a.chat_id WHERE a.id=79'"'"''"'"''"'"')
-                      if row is None:
-                          emit('"'"'Attempt79'"'"', None)
-                          return
-                      data = dict(row)
-                      data['"'"'error'"'"'] = safe_error(data['"'"'error'"'"'])
-                      emit('"'"'Attempt79'"'"', data)
-                      parts = await db.fetch('"'"'SELECT id,position,kind,status,message_ids,tries,error FROM ad_publication_parts WHERE attempt_id=79 ORDER BY position'"'"')
-                      values = []
-                      for part in parts:
-                          value = dict(part)
-                          value['"'"'error'"'"'] = safe_error(value['"'"'error'"'"'])
-                          values.append(value)
-                      emit('"'"'Attempt79Parts'"'"', values)
-                      audit = await db.fetch("SELECT id,action,created_at,details FROM audit_events WHERE action LIKE '"'"'ads_publication_%'"'"' AND details->>'"'"'attempt_id'"'"'='"'"'79'"'"' ORDER BY id")
-                      values = []
-                      keys = {'"'"'campaign_id'"'"','"'"'attempt_id'"'"','"'"'schedule_id'"'"','"'"'chat_id'"'"','"'"'content_version_id'"'"','"'"'fence'"'"','"'"'part_id'"'"','"'"'position'"'"','"'"'status'"'"','"'"'message_ids'"'"'}
-                      for entry in audit:
-                          value = dict(entry)
-                          details = value.pop('"'"'details'"'"')
-                          if isinstance(details, str):
-                              details = json.loads(details)
-                          value['"'"'details'"'"'] = {k: v for k, v in details.items() if k in keys}
-                          value['"'"'error'"'"'] = safe_error(details.get('"'"'error'"'"'))
-                          values.append(value)
-                      emit('"'"'Attempt79Audit'"'"', values)
-              finally:
-                  await db.close()
-          
-          try:
-              asyncio.run(main())
-          except Exception as error:
-              emit('"'"'ReadOnlyAttemptInspectionFailed'"'"', {'"'"'type'"'"': type(error).__name__})
-              raise SystemExit(1) from None
-          '
+          root = Path(sys.argv[1])
+          sql = Path(sys.argv[3]).read_bytes()
+          expected_sql_sha = sys.argv[2]
+          if hashlib.sha256(sql).hexdigest() != expected_sql_sha:
+              raise SystemExit('"'"'Reconciliation SQL checksum mismatch'"'"')
+          spec = importlib.util.spec_from_file_location('"'"'release_probe'"'"', root / '"'"'deploy/production_release.py'"'"')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          release = module.Release(root, root.name)
+          with release.original.lock():
+              # Private full backup precedes the only database mutation.
+              backup_dir = Path('"'"'/var/backups/safecheck'"'"') / ('"'"'manual-ads79-'"'"' + uuid4().hex)
+              backup_dir.mkdir(mode=0o700)
+              archive = backup_dir / '"'"'before.dump'"'"'
+              with os.fdopen(os.open(archive, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), '"'"'wb'"'"') as handle:
+                  subprocess.run(['"'"'docker'"'"','"'"'exec'"'"','"'"'safecheck-postgres-1'"'"','"'"'pg_dump'"'"','"'"'-U'"'"','"'"'safecheck'"'"','"'"'-d'"'"','"'"'safecheck'"'"','"'"'-Fc'"'"'], stdout=handle, stderr=subprocess.PIPE, check=True, timeout=120)
+              if archive.stat().st_size < 1024:
+                  raise RuntimeError('"'"'Backup is unexpectedly small'"'"')
+              digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+              checksum = backup_dir / '"'"'before.dump.sha256'"'"'
+              checksum.write_text(digest + '"'"'  before.dump\n'"'"')
+              checksum.chmod(0o600)
+              with archive.open('"'"'rb'"'"') as handle:
+                  subprocess.run(['"'"'docker'"'"','"'"'exec'"'"','"'"'-i'"'"','"'"'safecheck-postgres-1'"'"','"'"'pg_restore'"'"','"'"'--list'"'"'], stdin=handle, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True, timeout=120)
+              if hashlib.sha256(archive.read_bytes()).hexdigest() != digest:
+                  raise RuntimeError('"'"'Backup changed'"'"')
+              print('"'"'ManualReviewBackup=PASS'"'"', flush=True)
+              subprocess.run(['"'"'docker'"'"','"'"'exec'"'"','"'"'-i'"'"','"'"'safecheck-postgres-1'"'"','"'"'psql'"'"','"'"'-X'"'"','"'"'-q'"'"','"'"'-U'"'"','"'"'safecheck'"'"','"'"'-d'"'"','"'"'safecheck'"'"','"'"'-v'"'"','"'"'ON_ERROR_STOP=1'"'"','"'"'-f'"'"','"'"'-'"'"'], input=sql, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=30)
+              record = {'"'"'attempt_id'"'"':79,'"'"'resolution'"'"':'"'"'CANCELLED'"'"','"'"'delivery_outcome'"'"':'"'"'UNKNOWN'"'"','"'"'owner_report'"'"':'"'"'nepasirode'"'"','"'"'retry'"'"':False,'"'"'source_sha'"'"':root.name,'"'"'sql_sha256'"'"':expected_sql_sha,'"'"'backup_sha256'"'"':digest,'"'"'recorded_at'"'"':datetime.now(UTC).isoformat()}
+              receipt = backup_dir / '"'"'review.json'"'"'
+              receipt.write_text(json.dumps(record, sort_keys=True) + '"'"'\n'"'"')
+              receipt.chmod(0o600)
+              print('"'"'ADS79ManualReview='"'"' + json.dumps(record, sort_keys=True), flush=True)
+              release.preserve_services()
+              release.idle()
+              print('"'"'ProductionReleaseIdle=PASS'"'"', flush=True)
+          ' "$review_root" 7ad647c96bdfb143e596b4d2f162068b0a3806f8715b3b1fa0acaa1a9e650cf7 "$HOME/safecheck-ops-review-ads79.sql"
+          sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           REMOTE
       - name: Remove runner key
         if: always()
