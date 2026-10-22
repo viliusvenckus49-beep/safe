@@ -461,9 +461,7 @@ async def test_mute_unmute_allows_another_native_action(database, next_kind, per
 
 
 @pytest.mark.parametrize("variant", ["defaults", "stricter", "timed", "unknown", "departed"])
-async def test_default_shaped_legacy_unmute_is_distinguished_from_foreign_restriction(
-    database, variant
-):
+async def test_full_mute_handles_legacy_defaults_and_partial_restrictions(database, variant):
     bot = NativeBot()
     await setup_groups(database, bot)
     flags = {
@@ -481,12 +479,17 @@ async def test_default_shaped_legacy_unmute_is_distinguished_from_foreign_restri
         until_date=now() + timedelta(hours=1) if variant == "timed" else None,
         **flags,
     )
+    if variant == "departed":
+        with pytest.raises(DomainError, match="target_not_member"):
+            await submit(database, bot, kind="MUTE")
+        assert not bot.calls
+        return
     sanction = await submit(database, bot, kind="MUTE")
     await LocalModerationExecutor(database, bot).process(sanction_id=sanction.id)
     async with database() as session:
         row = await session.get(GroupSanction, sanction.id)
-        assert row.status == ("ACTIVE" if variant == "defaults" else "CANCELLED")
-    assert len(bot.calls) == (1 if variant == "defaults" else 0)
+        assert row.status == ("CANCELLED" if variant == "stricter" else "ACTIVE")
+    assert len(bot.calls) == (0 if variant == "stricter" else 1)
 
 
 async def concurrency_contract(sessions):
