@@ -41,35 +41,37 @@ jobs:
           from app.config import Settings
           from app.health import snapshot
           
-          def emit(name, value):
-              print(name + "=" + json.dumps(value, default=str, sort_keys=True))
+          def emit(name,value):
+              print(name+'"'"'='"'"'+json.dumps(value,default=str,sort_keys=True))
           
           async def main():
-              state = snapshot()
-              emit("RuntimeHeartbeat", state)
-              if not state["healthy"]:
-                  raise RuntimeError("Runtime heartbeat unhealthy")
-              settings = Settings()
-              db = await asyncpg.connect(settings.database_url.replace("postgresql+asyncpg:", "postgresql:"))
+              state=snapshot()
+              emit('"'"'RuntimeHeartbeat'"'"',state)
+              if not state['"'"'healthy'"'"']:
+                  raise RuntimeError('"'"'Runtime unhealthy'"'"')
+              db=await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
               try:
-                  async with db.transaction(readonly=True, isolation="repeatable_read"):
-                      schema = await db.fetchval("SELECT version_num FROM alembic_version")
-                      emit("WarningSchema", schema)
-                      if schema != "0021":
-                          raise RuntimeError("Expected warning settings schema")
-                      rows = await db.fetch("SELECT chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version FROM group_moderation_settings ORDER BY chat_id")
-                      emit("WarningPolicies", [dict(row) for row in rows])
-                      invalid = await db.fetchval("SELECT count(*) FROM group_moderation_settings WHERE warning_limit NOT BETWEEN 2 AND 6 OR warning_action NOT IN ('"'"'OFF'"'"','"'"'KICK'"'"','"'"'MUTE'"'"','"'"'BAN'"'"') OR warning_mute_seconds NOT BETWEEN 60 AND 31536000 OR warning_version<1")
-                      emit("InvalidWarningPolicies", invalid)
+                  async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
+                      revision=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
+                      emit('"'"'ChecksSchema'"'"',revision)
+                      if revision!='"'"'0022'"'"':
+                          raise RuntimeError('"'"'Expected Checks schema'"'"')
+                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds FROM group_check_settings ORDER BY chat_id'"'"')
+                      emit('"'"'ChecksPolicies'"'"',[dict(r) for r in rows])
+                      states=await db.fetch('"'"'SELECT state,count(*) AS count FROM group_check_events GROUP BY state ORDER BY state'"'"')
+                      emit('"'"'ChecksEvents'"'"',[dict(r) for r in states])
+                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+interval '"'"'15 seconds'"'"' OR j.created_at<e.execute_after)")
+                      emit('"'"'EarlyOrUnannouncedCheckActions'"'"',invalid)
                       if invalid:
-                          raise RuntimeError("Invalid warning policy")
+                          raise RuntimeError('"'"'Notice grace invariant failed'"'"')
+                      policies=await db.fetch('"'"'SELECT chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version FROM group_moderation_settings ORDER BY chat_id'"'"')
+                      emit('"'"'WarningPolicies'"'"',[dict(r) for r in policies])
               finally:
                   await db.close()
-          
           try:
               asyncio.run(main())
           except Exception as error:
-              emit("ReadOnlyWarningVerificationFailed", {"type": type(error).__name__})
+              emit('"'"'ReadOnlyChecksVerificationFailed'"'"',{'"'"'type'"'"':type(error).__name__})
               raise SystemExit(1) from None
           '
           REMOTE
