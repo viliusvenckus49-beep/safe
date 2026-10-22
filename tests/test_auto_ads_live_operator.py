@@ -42,7 +42,7 @@ def session(*args,**kwargs):
 def test_payload_is_pinned_reviewed_current_runtime_not_new_dependencies():
     base = op.predecessor()
     patches = op.incoming(base)
-    assert len(patches) == 46
+    assert len(patches) == 54
     for name in op.PAYLOAD:
         assert patches[name] == (ROOT / name).read_bytes()
         assert (
@@ -216,7 +216,7 @@ def test_migration_task_selects_only_named_rehearsal_database_and_private_stdin(
 
     def docker(args, **kwargs):
         calls.append((args, kwargs))
-        return "" if args[0] == "ps" else "ADS_MIGRATION21=PASS; ExistingRowsVerified=True"
+        return "" if args[0] == "ps" else "ADS_MIGRATION22=PASS; ExistingRowsVerified=True"
 
     kit = SimpleNamespace(
         ROOT=tmp_path,
@@ -242,7 +242,7 @@ def test_migration_task_selects_only_named_rehearsal_database_and_private_stdin(
     assert env["DATABASE_URL"].endswith("/safecheck_staging")
 
 
-@pytest.mark.parametrize("revision", ["0016", "0019", "0020", "0021"])
+@pytest.mark.parametrize("revision", ["0016", "0019", "0020", "0021", "0022"])
 async def test_real_migration_operator_retains_legacy_rows_and_policy_history(revision):
     import asyncpg
 
@@ -275,14 +275,19 @@ async def test_real_migration_operator_retains_legacy_rows_and_policy_history(re
                 INSERT INTO audit_events(actor_id,action,details,created_at)
                 VALUES(900,'preserve','{}',now());
             """
-            if revision in {"0020", "0021"}:
+            if revision in {"0020", "0021", "0022"}:
                 seed = seed.replace("'FUTURE'", "'EXISTING'")
-            if revision == "0021":
+            if revision in {"0021", "0022"}:
                 seed += """
                     INSERT INTO managed_groups(chat_id,chat_type,title,enabled,approved,can_restrict_members,updated_at)
                     VALUES(-100,'supergroup','Keep policy',true,true,true,now());
                     INSERT INTO group_moderation_settings(chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version,updated_at)
                     VALUES(-100,5,'BAN',3600,4,now());
+                """
+            if revision == "0022":
+                seed += """
+                    INSERT INTO group_check_settings(chat_id,actions,spam_terms,updated_by,updated_at)
+                    VALUES(-100,'{\"username\":\"OFF\"}','[]',900,now());
                 """
             await db.execute(seed)
         finally:
@@ -299,7 +304,7 @@ async def test_real_migration_operator_retains_legacy_rows_and_policy_history(re
             timeout=50,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "ADS_MIGRATION21=PASS; ExistingRowsVerified=True" in result.stdout
+        assert "ADS_MIGRATION22=PASS; ExistingRowsVerified=True" in result.stdout
     finally:
         await admin.execute('DROP DATABASE "' + name + '" WITH (FORCE)')
         await admin.close()
@@ -522,3 +527,21 @@ def test_previous_auto_ads_runtime_is_verified_without_widening_client_scope(tmp
     assert op.verify_runtime(base, kit, context) == path.read_text()
     with pytest.raises(RuntimeError, match="Unreviewed"):
         op.verify_runtime(base, kit, {**context, "auto_ads_client_id": 43})
+
+
+def test_checks_notice_work_blocks_operator_without_deleting_state():
+    state = dict(
+        schema="0022",
+        groups=1,
+        active_ads=0,
+        publications=0,
+        ambiguous_sanctions=0,
+        jobs=0,
+        active_sanctions=0,
+    )
+
+    def read(kit, sql):
+        return {"checks_pending": 1} if "checks_pending" in sql else dict(state)
+
+    with pytest.raises(RuntimeError, match="no state deleted"):
+        op.idle(SimpleNamespace(database_json=read), None)
