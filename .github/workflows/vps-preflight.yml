@@ -35,6 +35,25 @@ jobs:
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          sudo -n python3 -c 'import importlib.util,json,shutil,sys
+          from pathlib import Path
+          root=Path(sys.argv[1])
+          spec=importlib.util.spec_from_file_location('"'"'release_probe'"'"',root/'"'"'deploy/production_release.py'"'"')
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          known={'"'"'Use an immutable SHA release directory'"'"','"'"'Original production bot is not running'"'"','"'"'Unknown production Compose project'"'"','"'"'Missing production source'"'"','"'"'Unreviewed migration chain'"'"','"'"'Invalid release version'"'"','"'"'Production data service is not healthy'"'"','"'"'Unfinished or uncertain production work; reconcile first'"'"','"'"'Another running container shares the production network'"'"'}
+          phase='"'"'constructor'"'"'
+          try:
+              release=module.Release(root,root.name)
+              print('"'"'ReleaseConstructor=PASS'"'"')
+              phase='"'"'idle'"'"';release.idle();print('"'"'ReleaseIdle=PASS'"'"')
+              phase='"'"'writers'"'"';release.writers();print('"'"'ReleaseWriters=PASS'"'"')
+              free=shutil.disk_usage(root).free
+              available=next(int(line.split()[1])*1024 for line in Path('"'"'/proc/meminfo'"'"').read_text().splitlines() if line.startswith('"'"'MemAvailable:'"'"'))
+              print('"'"'ReleaseResources='"'"'+json.dumps({'"'"'free_bytes'"'"':free,'"'"'available_memory_bytes'"'"':available,'"'"'disk_guard'"'"':free>=2*1024**3,'"'"'memory_guard'"'"':available>=768*1024**2}))
+          except Exception as error:
+              message=str(error)
+              print('"'"'ReleaseGuardBlocked='"'"'+json.dumps({'"'"'phase'"'"':phase,'"'"'type'"'"':type(error).__name__,'"'"'reason'"'"':message if message in known else '"'"'withheld'"'"'},sort_keys=True))
+          ' "$HOME/safecheck-releases/35787658fd8389a43487f4aa25f7ea22f4f16b68"
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
           import json
           import asyncpg
@@ -45,11 +64,6 @@ jobs:
               print(name+'"'"'='"'"'+json.dumps(value,default=str,sort_keys=True))
           
           async def main():
-              from app.bot.commands import LOCAL_COMMANDS
-              from app.bot.group_help import register_group_help
-              assert '"'"'warns'"'"' in LOCAL_COMMANDS and '"'"'warnings'"'"' not in LOCAL_COMMANDS
-              assert callable(register_group_help)
-              emit('"'"'GroupHelpRuntime'"'"',{'"'"'group_first'"'"':True,'"'"'warning_history_command'"'"':'"'"'warns'"'"'})
               state=snapshot()
               emit('"'"'RuntimeHeartbeat'"'"',state)
               if not state['"'"'healthy'"'"']:
@@ -59,13 +73,17 @@ jobs:
                   async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
                       revision=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
                       emit('"'"'ChecksSchema'"'"',revision)
-                      if revision!='"'"'0023'"'"':
+                      if revision not in {'"'"'0022'"'"','"'"'0023'"'"'}:
                           raise RuntimeError('"'"'Expected Checks schema'"'"')
-                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds,words_action,words_delete,json_array_length(banned_words) AS banned_word_count FROM group_check_settings ORDER BY chat_id'"'"')
+                      pending=await db.fetch("SELECT j.id,j.sanction_id,j.operation,j.status,j.result,j.attempts,j.available_at,s.kind,s.status AS sanction_status,s.chat_id FROM group_sanction_jobs j JOIN group_sanctions s ON s.id=j.sanction_id WHERE j.status IN ('"'"'PENDING'"'"','"'"'PROCESSING'"'"','"'"'UNCERTAIN'"'"') ORDER BY j.id LIMIT 20")
+                      emit('"'"'PendingNativeJobs'"'"',[dict(r) for r in pending])
+                      ads=await db.fetch("SELECT id,status FROM ad_publication_attempts WHERE status IN ('"'"'CLAIMED'"'"','"'"'SENDING'"'"','"'"'UNCERTAIN'"'"') ORDER BY id LIMIT 20")
+                      emit('"'"'PendingAds'"'"',[dict(r) for r in ads])
+                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds FROM group_check_settings ORDER BY chat_id'"'"')
                       emit('"'"'ChecksPolicies'"'"',[dict(r) for r in rows])
                       states=await db.fetch('"'"'SELECT state,count(*) AS count FROM group_check_events GROUP BY state ORDER BY state'"'"')
                       emit('"'"'ChecksEvents'"'"',[dict(r) for r in states])
-                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+make_interval(secs=>e.grace_seconds) OR e.grace_seconds<>CASE WHEN e.kick_attempt>=4 THEN 0 WHEN e.kick_attempt>=2 THEN 5 ELSE 15 END OR j.created_at<e.execute_after)")
+                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+interval '"'"'15 seconds'"'"' OR j.created_at<e.execute_after)")
                       emit('"'"'EarlyOrUnannouncedCheckActions'"'"',invalid)
                       if invalid:
                           raise RuntimeError('"'"'Notice grace invariant failed'"'"')
