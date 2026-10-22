@@ -37,51 +37,39 @@ jobs:
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
           import json
-          import unicodedata
-          
           import asyncpg
-          from aiogram import Bot
-          
-          from app.bot.session import telegram_session
           from app.config import Settings
           from app.health import snapshot
           
-          
           def emit(name, value):
-              print(name + "=" + json.dumps(value, default=str, ensure_ascii=False, sort_keys=True))
-          
+              print(name + "=" + json.dumps(value, default=str, sort_keys=True))
           
           async def main():
+              state = snapshot()
+              emit("RuntimeHeartbeat", state)
+              if not state["healthy"]:
+                  raise RuntimeError("Runtime heartbeat unhealthy")
               settings = Settings()
-              emit("RuntimeHeartbeat", snapshot())
-              connection = await asyncpg.connect(settings.database_url.replace("postgresql+asyncpg:", "postgresql:"))
+              db = await asyncpg.connect(settings.database_url.replace("postgresql+asyncpg:", "postgresql:"))
               try:
-                  async with connection.transaction(readonly=True, isolation="repeatable_read"):
-                      groups = [dict(row) for row in await connection.fetch("SELECT chat_id,title,approved,enabled FROM managed_groups ORDER BY chat_id")]
-                      relevant = groups
-                      emit("RelevantGroups", relevant)
-                      emit("Identity", [dict(r) for r in await connection.fetch("SELECT id,telegram_id,username FROM users WHERE telegram_id=8896102663 OR lower(username)='"'"'redsafeads'"'"'")])
-                      emit("Sanctions", [dict(r) for r in await connection.fetch("SELECT id,chat_id,telegram_id,kind,status,owned,actor_id,until_date,created_at,updated_at,replaces_sanction_id FROM group_sanctions WHERE telegram_id=8896102663 ORDER BY id DESC LIMIT 30")])
-                      emit("Jobs", [dict(r) for r in await connection.fetch("SELECT j.id,j.sanction_id,j.operation,j.status,j.result,j.actor_id,j.automatic,j.attempts,j.available_at,j.updated_at FROM group_sanction_jobs j JOIN group_sanctions s ON s.id=j.sanction_id WHERE s.telegram_id=8896102663 ORDER BY j.id DESC LIMIT 40")])
-                      emit("ScamStatus", [dict(r) for r in await connection.fetch("SELECT s.id,s.status,s.created_at,s.removed_at FROM scam_records s JOIN users u ON u.id=s.target_id WHERE u.telegram_id=8896102663 OR lower(u.username)='"'"'redsafeads'"'"'")])
-                      emit("ScamBanJobs", [dict(r) for r in await connection.fetch("SELECT id,chat_id,scam_record_id,status,attempts,result_type,completed_at FROM ban_actions WHERE telegram_id=8896102663 ORDER BY id DESC LIMIT 20")])
-                      emit("RecentModerationAudit", [dict(r) for r in await connection.fetch("SELECT id,actor_id,action,created_at,details->>'"'"'chat_id'"'"' AS chat_id,details->>'"'"'sanction_id'"'"' AS sanction_id,details->>'"'"'result'"'"' AS result FROM audit_events WHERE details->>'"'"'user_id'"'"'='"'"'8896102663'"'"' AND action LIKE '"'"'group_moderation_%'"'"' ORDER BY id DESC LIMIT 25")])
+                  async with db.transaction(readonly=True, isolation="repeatable_read"):
+                      schema = await db.fetchval("SELECT version_num FROM alembic_version")
+                      emit("WarningSchema", schema)
+                      if schema != "0021":
+                          raise RuntimeError("Expected warning settings schema")
+                      rows = await db.fetch("SELECT chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version FROM group_moderation_settings ORDER BY chat_id")
+                      emit("WarningPolicies", [dict(row) for row in rows])
+                      invalid = await db.fetchval("SELECT count(*) FROM group_moderation_settings WHERE warning_limit NOT BETWEEN 2 AND 6 OR warning_action NOT IN ('"'"'OFF'"'"','"'"'KICK'"'"','"'"'MUTE'"'"','"'"'BAN'"'"') OR warning_mute_seconds NOT BETWEEN 60 AND 31536000 OR warning_version<1")
+                      emit("InvalidWarningPolicies", invalid)
+                      if invalid:
+                          raise RuntimeError("Invalid warning policy")
               finally:
-                  await connection.close()
-              async with Bot(settings.bot_token.get_secret_value(), session=telegram_session(settings)) as bot:
-                  for group in relevant:
-                      for target in (8896102663, bot.id):
-                          try:
-                              member = await bot.get_chat_member(group["chat_id"], target)
-                              emit("TelegramState", {"chat_id":group["chat_id"],"telegram_id":target,"status":member.status,"until_date":getattr(member,"until_date",None),"is_member":getattr(member,"is_member",None),"can_restrict_members":getattr(member,"can_restrict_members",None),"can_send_messages":getattr(member,"can_send_messages",None)})
-                          except Exception as error:
-                              emit("TelegramState", {"chat_id":group["chat_id"],"telegram_id":target,"error_type":type(error).__name__})
-          
+                  await db.close()
           
           try:
               asyncio.run(main())
           except Exception as error:
-              emit("ReadOnlyAuditFailed", {"type":type(error).__name__})
+              emit("ReadOnlyWarningVerificationFailed", {"type": type(error).__name__})
               raise SystemExit(1) from None
           '
           REMOTE
