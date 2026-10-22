@@ -23,6 +23,7 @@ from app.models import (
     User,
     now,
 )
+from app.repositories import Repository
 
 LIVE = ("PENDING", "ACTIVE", "REVOKING", "UNCERTAIN")
 
@@ -96,8 +97,15 @@ async def lock_group(session: AsyncSession, chat_id: int) -> ManagedGroup:
         update(ManagedGroup)
         .where(
             ManagedGroup.chat_id == chat_id,
-            ManagedGroup.approved.is_(True),
-            ManagedGroup.enabled.is_(True),
+            (
+                (ManagedGroup.approved.is_(True) & ManagedGroup.enabled.is_(True))
+                | select(GroupModerationSettings.chat_id)
+                .where(
+                    GroupModerationSettings.chat_id == ManagedGroup.chat_id,
+                    GroupModerationSettings.local_auto_enabled.is_(True),
+                )
+                .exists()
+            ),
             ~GroupService.removed_group(ManagedGroup.chat_id),
         )
         .values(updated_at=ManagedGroup.updated_at)
@@ -142,10 +150,36 @@ class GroupModerationService:
         Enabling adds capabilities only, so existing pending policy snapshots remain
         valid. Duration limits and explicit permanent-action restrictions are retained.
         """
+        known = await self.session.get(ManagedGroup, chat_id)
+        await self.session.commit()
         await self.authorization.actor(chat_id, actor_id)
         await self.authorization.bot_rights(chat_id)
+        chat_info = None
+        if known is None:
+            chat_info = await asyncio.wait_for(self.bot.get_chat(chat_id), 5)
+            if chat_info.id != chat_id or chat_info.type not in {"group", "supergroup"}:
+                raise DomainError("group_moderation_group_unavailable")
         try:
-            await lock_group(self.session, chat_id)
+            # Local commands must also work in a newly added group. Enrol only
+            # the native moderation capability; never approve global SCAM/ADS.
+            await Repository(self.session).lock_identity_metadata()
+            if await self.session.scalar(select(GroupService.removed_group(chat_id))):
+                raise DomainError("group_moderation_group_unavailable")
+            group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
+            if group is None:
+                if chat_info is None:
+                    raise DomainError("group_moderation_group_unavailable")
+                group = ManagedGroup(
+                    chat_id=chat_id,
+                    title=(getattr(chat_info, "title", None) or str(chat_id))[:256],
+                    chat_type=chat_info.type,
+                    approved=False,
+                    enabled=False,
+                    can_restrict_members=True,
+                )
+                self.session.add(group)
+                await self.session.flush()
+            await serialize_group(self.session, chat_id)
             policy = await self.session.get(
                 GroupModerationSettings, chat_id, populate_existing=True
             )
@@ -164,9 +198,10 @@ class GroupModerationService:
                 "warnings_enabled",
                 "kicks_enabled",
             )
-            if any(not getattr(policy, field) for field in fields):
+            if any(not getattr(policy, field) for field in fields) or not policy.local_auto_enabled:
                 for field in fields:
                     setattr(policy, field, True)
+                policy.local_auto_enabled = True
                 policy.updated_by, policy.updated_at = actor_id, now()
                 audit(self.session, "commands_available", actor_id, chat_id)
             await self.session.commit()

@@ -10,6 +10,12 @@ depends_on = None
 
 
 def upgrade():
+    op.add_column(
+        "group_moderation_settings",
+        sa.Column(
+            "local_auto_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
+    )
     for table, columns in (
         (
             "group_check_settings",
@@ -45,6 +51,28 @@ def upgrade():
 
 
 def downgrade():
-    raise RuntimeError(
-        "Retain word-filter settings and KICK history; use a reviewed forward rollback"
-    )
+    bind = op.get_bind()
+    if (
+        any(
+            bind.execute(sa.text("SELECT count(*) FROM " + table)).scalar()
+            for table in (
+                "group_check_settings",
+                "group_check_members",
+                "group_check_events",
+            )
+        )
+        or bind.execute(
+            sa.text("SELECT count(*) FROM group_moderation_settings WHERE local_auto_enabled=true")
+        ).scalar()
+    ):
+        raise RuntimeError(
+            "Retain word-filter settings, local command access and KICK history; use a reviewed forward rollback"
+        )
+    for table, columns in {
+        "group_check_events": ("message_deleted", "matched_word", "kick_attempt", "grace_seconds"),
+        "group_check_members": ("kick_join", "kick_attempts"),
+        "group_check_settings": ("words_delete", "words_action", "banned_words"),
+        "group_moderation_settings": ("local_auto_enabled",),
+    }.items():
+        for column in columns:
+            op.drop_column(table, column)

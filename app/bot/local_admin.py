@@ -197,7 +197,13 @@ async def command_error(
 
 
 async def access(
-    service: Service, bot: Any, chat: int, actor: int, *, configure: bool = False
+    service: Service,
+    bot: Any,
+    chat: int,
+    actor: int,
+    *,
+    configure: bool = False,
+    initialize: bool = False,
 ) -> GroupModerationService:
     local = GroupModerationService(
         service.session,
@@ -206,7 +212,10 @@ async def access(
             service.settings.group_help_enabled or service.settings.moderation_mtproto_enabled
         ),
     )
-    await local._check_group(chat)
+    if initialize:
+        await local.ensure_commands(chat, actor)
+    else:
+        await local._check_group(chat)
     await local.authorization.actor(chat, actor, configure=configure)
     return local
 
@@ -713,8 +722,7 @@ def register_local_handlers(router: Router) -> None:
                 return
             first = args[0].split(maxsplit=1)[0] if args and args[0].strip() else ""
             username = first if first.startswith("@") else None
-            local = await access(service, bound_bot(message), int(chat), actor)
-            await local.ensure_commands(int(chat), actor)
+            local = await access(service, bound_bot(message), int(chat), actor, initialize=True)
             target, until, reason = await parse_target_input(
                 local, int(chat), actor, args[0] if args else "", message.reply_to_message, kind
             )

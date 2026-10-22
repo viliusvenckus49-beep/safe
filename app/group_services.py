@@ -313,13 +313,28 @@ class GroupService:
                     .values(status="PENDING", attempts=0, next_attempt_at=now(), completed_at=None)
                     .execution_options(synchronize_session=False)
                 )
+        if not can_restrict_members:
+            from app.models import GroupModerationSettings
+
+            await self.session.execute(
+                update(GroupModerationSettings)
+                .where(GroupModerationSettings.chat_id == chat_id)
+                .values(local_auto_enabled=False)
+            )
         await self.session.commit()
 
     async def disable_group(self, chat_id: int) -> None:
+        from app.models import GroupModerationSettings
+
         await self.session.execute(
             update(ManagedGroup)
             .where(ManagedGroup.chat_id == chat_id)
             .values(enabled=False, can_restrict_members=False)
+        )
+        await self.session.execute(
+            update(GroupModerationSettings)
+            .where(GroupModerationSettings.chat_id == chat_id)
+            .values(local_auto_enabled=False)
         )
         await self.session.commit()
 
@@ -327,7 +342,14 @@ class GroupService:
         self, chat_id: int, tg_id: int, username: str | None, name: str
     ) -> None:
         group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if tg_id <= 0 or group is None or not group.approved:
+        from app.models import GroupModerationSettings
+
+        local = await self.session.get(GroupModerationSettings, chat_id) if group else None
+        if (
+            tg_id <= 0
+            or group is None
+            or (not group.approved and not (local and local.local_auto_enabled))
+        ):
             return
         await self.core.observe(tg_id, username, name)
         await self.core.repo.lock_identity_metadata()

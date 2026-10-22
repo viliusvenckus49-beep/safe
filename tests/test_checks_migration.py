@@ -38,12 +38,16 @@ def test_sqlite_0022_preserves_all_original_rows_and_durable_deadline(tmp_path):
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('alembic_version','sqlite_sequence')"
             )
         ]
+        columns = {
+            name: [r[1] for r in db.execute(f'PRAGMA table_info("{name}")')] for name in tables
+        }
         before = {name: db.execute(f'SELECT * FROM "{name}"').fetchall() for name in tables}
     migrate(path, "upgrade", "head")
     migrate(path, "check")
     with sqlite3.connect(path) as db:
         assert all(
-            db.execute(f'SELECT * FROM "{name}"').fetchall() == before[name] for name in tables
+            db.execute(f'SELECT {",".join(columns[name])} FROM "{name}"').fetchall() == before[name]
+            for name in tables
         )
         assert all(
             db.execute("SELECT count(*) FROM " + name).fetchone() == (0,)
@@ -72,6 +76,10 @@ async def test_real_postgres_0022_tables_constraints_and_models_match(postgres_c
     async with factory.kw["bind"].begin() as connection:
         for name in ("group_check_events", "group_check_members", "group_check_settings"):
             await connection.execute(text("DROP TABLE " + name))
+
+        await connection.execute(
+            text("ALTER TABLE group_moderation_settings DROP COLUMN local_auto_enabled")
+        )
 
         def run(sync):
             with Operations.context(MigrationContext.configure(sync)):

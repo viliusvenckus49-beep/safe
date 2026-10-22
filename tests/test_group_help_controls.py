@@ -372,3 +372,110 @@ async def test_add_help_cancel_and_remove_prompts_match_the_actual_list(
     await journey.send("ONE", actor=42)
     async with database() as session:
         assert (await session.get(GroupCheckSettings, CHAT)).banned_words == ["two"]
+
+
+@pytest.mark.parametrize("command", ["ban", "mute", "warn", "kick", "warns"])
+async def test_first_command_in_new_group_needs_no_group_selection_or_global_approval(
+    local_journey, database, command
+):
+    from app.models import GroupModerationSettings, ManagedGroup
+
+    journey, native = local_journey
+    chat = -1009988776655
+    native.admin(chat, 42)
+    native.members[chat, native.id] = native.peer(
+        native.id, "administrator", is_bot=True, can_restrict_members=True, can_change_info=True
+    )
+    await journey.send(
+        "/" + command + " 51" + (" 1h" if command in {"ban", "mute"} else ""), actor=42, chat=chat
+    )
+    async with database() as session:
+        group = await session.get(ManagedGroup, chat)
+        assert group is not None and group.approved is False and group.enabled is False
+        policy = await session.get(GroupModerationSettings, chat)
+        assert policy.enabled is True and policy.local_auto_enabled is True
+        sanctions = list(
+            await session.scalars(select(GroupSanction).where(GroupSanction.chat_id == chat))
+        )
+        assert len(sanctions) == (0 if command == "warns" else 1)
+    assert all(
+        c.chat_id == chat or c.chat_id == 42
+        for c in journey.transport.calls
+        if isinstance(c, SendMessage)
+    )
+    assert not any(
+        isinstance(c, (SendMessage, EditMessageText))
+        and c.reply_markup
+        and any(
+            (b.callback_data or "").startswith("gh|group|")
+            for r in c.reply_markup.inline_keyboard
+            for b in r
+        )
+        for c in journey.transport.calls
+    )
+
+
+async def test_unauthorized_new_group_cannot_be_enrolled_and_removal_is_respected(
+    local_journey, database
+):
+    from app.models import GroupModerationSettings, ManagedGroup
+
+    journey, native = local_journey
+    chat = -1009988776655
+    for actor in (1, 900):
+        await journey.send("/ban 51 1h", actor=actor, chat=chat)
+    async with database() as session:
+        assert await session.get(ManagedGroup, chat) is None
+        assert await session.get(GroupModerationSettings, chat) is None
+    assert not native.calls
+
+
+async def test_local_only_group_rights_loss_stops_pending_native_work(database, settings):
+    from app.group_services import GroupService
+    from app.models import GroupModerationSettings, ManagedGroup
+    from app.moderation_services import GroupModerationService
+
+    bot = CheckBot()
+    await setup_groups(database, bot)
+    async with database() as session:
+        group = await session.get(ManagedGroup, CHAT)
+        group.approved = group.enabled = False
+        await session.commit()
+        local = GroupModerationService(session, bot)
+        await local.ensure_commands(CHAT, 42)
+        await GroupService(settings, session).note_group_permissions(CHAT, False)
+        assert (await session.get(GroupModerationSettings, CHAT)).local_auto_enabled is False
+        with pytest.raises(DomainError, match="group_unavailable"):
+            await local._check_group(CHAT)
+
+
+async def test_postgres_concurrent_first_commands_enrol_one_local_group(
+    postgres_contract, settings
+):
+    import asyncio
+
+    from app.group_services import GroupService
+    from app.models import GroupModerationSettings, ManagedGroup, ObservedMember
+    from app.moderation_services import GroupModerationService
+
+    factory = postgres_contract[0]
+    bot = CheckBot()
+    chat = -1009988776655
+    bot.admin(chat, 42)
+    bot.members[chat, bot.id] = bot.peer(
+        bot.id, "administrator", is_bot=True, can_restrict_members=True, can_change_info=True
+    )
+
+    async def enrol():
+        async with factory() as session:
+            await GroupModerationService(session, bot).ensure_commands(chat, 42)
+
+    await asyncio.gather(enrol(), enrol())
+    async with factory() as session:
+        group = await session.get(ManagedGroup, chat)
+        assert not group.approved and not group.enabled
+        assert (await session.get(GroupModerationSettings, chat)).local_auto_enabled
+        await GroupService(settings, session).observe_member(chat, 51, "target_user", "Actual name")
+        assert (await session.get(ObservedMember, (chat, 51))).username == "target_user"
+        await GroupService(settings, session).disable_group(chat)
+        assert not (await session.get(GroupModerationSettings, chat)).local_auto_enabled

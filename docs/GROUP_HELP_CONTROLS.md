@@ -11,8 +11,12 @@ The public warning history command is `/warns`; `/warnings` is no longer registe
 or advertised. Existing numeric-ID and verified-username rules still apply.
 Commands initialize/enable their capability flags when a live authorized group
 administrator invokes a command, or enters group settings. The bot must have
-restriction rights, the managed group must remain approved/enabled, existing
+restriction rights, a new group is enrolled for native moderation only after live group and bot
+authorization, existing
 maximum durations and explicit permanent-action restrictions remain intact.
+No group selection or global approval is needed for a command issued inside its
+own group. This does not approve a group for global SCAM protection or AUTO ADS.
+Explicit owner removal and bot rights loss remain blocking conditions.
 No member action is taken by opening settings. Native sanctions still use the
 existing durable executor, SCAM guards, identity checks and audit history.
 
@@ -55,7 +59,7 @@ deletions for the same message.
 ## Migration and validation
 
 0023 adds columns to the existing Checks tables, retains every existing column
-and row, and refuses destructive downgrade. Existing deadlines keep their original
+and row, and refuses downgrade once Checks or local command state is in use. Existing deadlines keep their original
 15-second minimum; new episode records store the exact immutable 15/5/0 delay.
 Production release tooling pins the new migration and verifies all original
 columns using both an online rehearsal and a frozen backup before migration.

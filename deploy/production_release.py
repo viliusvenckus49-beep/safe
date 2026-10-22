@@ -15,7 +15,7 @@ from pathlib import Path
 from uuid import uuid4
 
 PINS = {
-    "0023_group_help_controls.py": "16de6295ca0170f77d6f5e4ea17fdc527d2c1a160f74f4c298a5aaf5850942b3",
+    "0023_group_help_controls.py": "90ee738c1aafc75f3d6192a0a130d68fa39d9eebdd489f2f09e64f5460244a76",
     "0010_redsafe_profile.py": "47431ef8207005336c163c73c611ecadf70dafdeb03597f7aedc76df5e2ae214",
     "0011_group_moderation.py": "9e8e28f9842dee7990043ddc42ce95ee6dc3ab1a3fff3dab0949be7f70249b8d",
     "0012_group_commands.py": "9f4c0fd8f71f1b693d6fb656d26d076784cc721a4a9f4db4bfd31dc4d9ce9ccd",

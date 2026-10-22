@@ -19,7 +19,7 @@ from app.errors import DomainError
 from app.group_authorization import GroupAuthorizer
 from app.group_services import GroupService
 from app.i18n import t
-from app.models import AdCampaign, AdSchedule, ManagedGroup
+from app.models import AdCampaign, AdSchedule, GroupModerationSettings, ManagedGroup
 
 
 def cb(name="groups", chat=0, page=0):
@@ -31,8 +31,15 @@ async def groups(message, service, actor, page=0):
         await service.session.scalars(
             select(ManagedGroup)
             .where(
-                ManagedGroup.approved.is_(True),
-                ManagedGroup.enabled.is_(True),
+                (
+                    (ManagedGroup.approved.is_(True) & ManagedGroup.enabled.is_(True))
+                    | select(GroupModerationSettings.chat_id)
+                    .where(
+                        GroupModerationSettings.chat_id == ManagedGroup.chat_id,
+                        GroupModerationSettings.local_auto_enabled.is_(True),
+                    )
+                    .exists()
+                ),
                 ~GroupService.removed_group(ManagedGroup.chat_id),
             )
             .order_by(ManagedGroup.chat_id)

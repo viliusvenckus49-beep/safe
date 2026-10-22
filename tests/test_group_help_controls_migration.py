@@ -72,6 +72,7 @@ async def test_real_postgres_additive_0023_matches_models(postgres_contract):
     factory, _ = postgres_contract
     async with factory.kw["bind"].begin() as connection:
         for table, columns in {
+            "group_moderation_settings": ("local_auto_enabled",),
             "group_check_settings": ("banned_words", "words_action", "words_delete"),
             "group_check_members": ("kick_attempts", "kick_join"),
             "group_check_events": (

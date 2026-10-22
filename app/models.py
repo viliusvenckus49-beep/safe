@@ -357,6 +357,7 @@ class GroupModerationSettings(Base):
 
     __tablename__ = "group_moderation_settings"
     chat_id: Mapped[int] = mapped_column(ForeignKey("managed_groups.chat_id"), primary_key=True)
+    local_auto_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     bans_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     mutes_enabled: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
