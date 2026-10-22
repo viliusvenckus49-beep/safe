@@ -21,7 +21,7 @@ from aiogram.types import (
 from app.errors import DomainError
 from app.i18n import t
 
-COMMANDS = {"warn", "unwarn", "warns", "ban", "mute", "kick", "unban", "unmute", "warnings"}
+COMMANDS = {"warn", "unwarn", "warns", "ban", "mute", "kick", "unban", "unmute"}
 
 
 def command_name(value: str) -> str:

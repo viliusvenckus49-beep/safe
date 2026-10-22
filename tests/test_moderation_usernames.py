@@ -51,7 +51,7 @@ async def no_sanctions(factory):
         assert await session.scalar(select(func.count()).select_from(GroupModerationDraft)) == 0
 
 
-@pytest.mark.parametrize("kind", ["BAN", "UNBAN", "MUTE", "UNMUTE", "WARN", "KICK", "WARNINGS"])
+@pytest.mark.parametrize("kind", ["BAN", "UNBAN", "MUTE", "UNMUTE", "WARN", "KICK", "WARNS"])
 async def test_username_commands_pin_numeric_target(username_journey, database, kind):
     journey, native = username_journey
     await known(database, native)
@@ -64,7 +64,7 @@ async def test_username_commands_pin_numeric_target(username_journey, database, 
     duration = " 30m" if kind in {"BAN", "MUTE"} else ""
     await journey.send(f"/{kind.lower()} @TaRgEt_UsEr{duration}", actor=42, chat=CHAT)
     async with database() as session:
-        if kind == "WARNINGS":
+        if kind == "WARNS":
             assert "51" in journey.text()
             assert await session.scalar(select(func.count()).select_from(GroupSanction)) == 0
         else:

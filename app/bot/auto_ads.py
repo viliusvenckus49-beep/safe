@@ -262,7 +262,7 @@ async def panel(message, ads, actor, cid, *, edit=True):
         rows.append([(t("ua.resume"), cb("start", cid, version))])
     if await pending(ads, actor, cid):
         rows.append([(t("ads.drafts"), cb("drafts", cid))])
-    rows += [[(t("ua.delete"), cb("delete", cid, version))], [(t("ua.to_list"), cb("list"))]]
+    rows += [[(t("ua.delete"), cb("delete", cid, version))], [(t("ua.to_list"), cb("return"))]]
     await ads.session.commit()
     return await display(message, text, keyboard(rows), edit=edit)
 
@@ -688,8 +688,16 @@ def register_auto_ads_handlers(router: Router):
             await callback.answer()
             acknowledged = True
             if name == "root":
-                await state.update_data(ua_query="", ua_filter="all")
+                await state.update_data(ua_query="", ua_filter="all", gh_ads_chat=None)
                 await root(message, ads, actor)
+            elif name == "return":
+                origin = (await state.get_data()).get("gh_ads_chat")
+                if origin:
+                    from app.bot.group_help import ads_panel
+
+                    await ads_panel(message, service, actor, int(origin), 0)
+                else:
+                    await listing(message, ads, actor, state)
             elif name in {"list", "filter"}:
                 if name == "filter":
                     await state.update_data(ua_query="")

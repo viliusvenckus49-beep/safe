@@ -375,7 +375,7 @@ async def test_warn_receipt_confirmation_and_history_are_localized(
         prompt.parse_mode == "HTML" and prompt.ephemeral_message_parameters.receiver_user_id == 42
     )
     await click(journey, prompt.reply_markup.inline_keyboard[0][0].callback_data, message_id=0)
-    await journey.send("/warnings 51", actor=42, chat=CHAT)
+    await journey.send("/warns 51", actor=42, chat=CHAT)
     with use_language(lang):
         assert t("lm.control.warn_cancelled") in journey.text()
 

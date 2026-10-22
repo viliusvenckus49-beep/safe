@@ -9,15 +9,11 @@ from app.bot.callbacks import (
     AdminAccess,
     AdminHelp,
     AdminRepStep,
-    AdsAction,
-    CheckSettings,
     CustomerAd,
     Language,
-    LocalAction,
     Moderation,
     ReportStep,
     ReputationModeration,
-    WarningSettings,
 )
 from app.bot.group_keyboards import GroupAction
 from app.i18n import t
@@ -146,19 +142,6 @@ def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
 
 def admin(owner: bool = False) -> InlineKeyboardMarkup:
     return keyboard([*_admin_rows(owner), [(t("button.home"), action("home"))]])
-
-
-def group_help(owner: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [(t("ads.title"), AdsAction(action="root").pack())],
-        [(t("ws.button"), WarningSettings(action="groups").pack())],
-        [(t("checks.title"), CheckSettings(action="groups").pack())],
-        [(t("group_help.moderation"), LocalAction(action="groups").pack())],
-    ]
-    if owner:
-        rows.append([(t("button.groups"), GroupAction(action="list").pack())])
-    rows.append([(t("button.back"), action("admin"))])
-    return keyboard(rows)
 
 
 def moderation(reference: str) -> InlineKeyboardMarkup:

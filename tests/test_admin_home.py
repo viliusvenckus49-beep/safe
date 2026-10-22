@@ -16,7 +16,7 @@ from test_telegram import journey as telegram_journey
 from app.admin_services import AdminService
 from app.bot import group_keyboards
 from app.bot import keyboards as kb
-from app.bot.callbacks import AdminAccess, AdminHelp, AdsAction, Language, LocalAction
+from app.bot.callbacks import AdminAccess, AdminHelp, AdsAction, Language
 from app.bot.group_keyboards import GroupAction
 from app.bot.handlers import ADMIN_ACTIONS
 from app.bot.screens import send_screen
@@ -79,21 +79,11 @@ async def test_private_start_exposes_only_existing_role_permissions(
     assert (AdminAccess(action="list").pack() in routes) is (actor == OWNER)
     await journey.click(kb.action("group_help"), actor=actor)
     with use_language(lang):
-        assert last_screen(journey).reply_markup == kb.group_help(actor == OWNER)
-        assert last_screen(journey).text == t("group_help.title")
+        assert last_screen(journey).text == t("gh.title") + "\n\n" + t("lm.empty")
     routes = values(last_screen(journey).reply_markup)
-    assert AdsAction(action="root").pack() in routes
-    assert LocalAction(action="groups").pack() in routes
+    assert not any(value.startswith("lm2|") for value in routes)
+    assert AdsAction(action="root").pack() not in routes
     assert (GroupAction(action="list").pack() in routes) is (actor == OWNER)
-    entries = [AdsAction(action="root").pack(), LocalAction(action="groups").pack()]
-    if actor == OWNER:
-        entries.append(GroupAction(action="list").pack())
-    for entry in entries:
-        await journey.click(entry, actor=actor)
-        assert kb.action("group_help") in values(last_screen(journey).reply_markup)
-        await journey.click(kb.action("group_help"), actor=actor)
-        with use_language(lang):
-            assert last_screen(journey).reply_markup == kb.group_help(actor == OWNER)
     await journey.click(kb.action("admin"), actor=actor)
     with use_language(lang):
         assert last_screen(journey).reply_markup == kb.admin(actor == OWNER)

@@ -17,6 +17,7 @@ from app.locales.button_icons import CATALOGS as BUTTON_ICONS
 from app.locales.checks import CATALOGS as CHECKS
 from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
+from app.locales.group_help import DATA as GROUP_HELP
 from app.locales.local_moderation import CATALOGS as LOCAL_MODERATION
 from app.locales.moderation_control import CATALOGS as MODERATION_CONTROL
 from app.locales.presentation import CATALOGS as PRESENTATION
@@ -61,6 +62,7 @@ CATALOGS = {
         **AUTO_ADS[lang],
         **WARNINGS[lang],
         **CHECKS[lang],
+        **GROUP_HELP[lang],
     }
     for lang in LANGUAGES
 }

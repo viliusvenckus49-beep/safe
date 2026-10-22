@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import re
 import unicodedata
 from typing import Any
 
@@ -28,6 +29,52 @@ NAME_BLOCKS = ("arabic", "han", "cyrillic", "spam")
 RULES = OBLIGATIONS + NAME_BLOCKS
 ACTIONS = ("OFF", "ADVISE", "WARN", "KICK", "MUTE", "BAN")
 API_TIMEOUT = 5
+
+
+def word_match(content, terms):
+    value = normalized(content or "")
+    return next(
+        (
+            term
+            for term in terms
+            if re.search(r"(?<!\w)" + re.escape(normalized(term)) + r"(?!\w)", value)
+        ),
+        None,
+    )
+
+
+def expected_grace(event):
+    return 0 if event.kick_attempt >= 4 else 5 if event.kick_attempt >= 2 else 15
+
+
+def effective_action(policy, event):
+    if event.rule == "words":
+        return policy.words_action if policy.words_action != "OFF" else "DELETE"
+    action = policy.actions.get(event.rule, "OFF")
+    return "BAN" if action == "KICK" and event.kick_attempt >= 4 else action
+
+
+async def cancel_unclaimed(session, event, result="NOW_COMPLIANT"):
+    if event.state not in {"PENDING", "WAITING", "QUEUED"}:
+        return
+    if event.sanction_id:
+        sanction = await session.get(GroupSanction, event.sanction_id, populate_existing=True)
+        jobs = list(
+            await session.scalars(
+                select(GroupSanctionJob).where(GroupSanctionJob.sanction_id == event.sanction_id)
+            )
+        )
+        if (
+            not sanction
+            or sanction.status != "PENDING"
+            or any(j.status in {"PROCESSING", "UNCERTAIN", "SUCCEEDED"} for j in jobs)
+        ):
+            return
+        sanction.status = "CANCELLED"
+        for job in jobs:
+            if job.status == "PENDING":
+                job.status, job.result = "CANCELLED", result
+    event.state, event.result = "RESOLVED", result
 
 
 def normalized(value: str) -> str:
@@ -66,6 +113,9 @@ async def configure(session, bot, chat, actor, version, **changes):
         "notify_result",
         "mute_seconds",
         "spam_terms",
+        "banned_words",
+        "words_action",
+        "words_delete",
     }
     if not changes.keys() <= allowed:
         raise DomainError("checks_invalid")
@@ -85,6 +135,9 @@ async def configure(session, bot, chat, actor, version, **changes):
                 delete_messages=False,
                 notify_result=True,
                 mute_seconds=86400,
+                banned_words=[],
+                words_action="OFF",
+                words_delete=True,
             )
         values = {field: changes.get(field, getattr(policy, field)) for field in allowed}
         actions = values["actions"]
@@ -96,7 +149,7 @@ async def configure(session, bot, chat, actor, version, **changes):
             raise DomainError("checks_invalid")
         if any(
             type(values[k]) is not bool
-            for k in ("check_on_join", "delete_messages", "notify_result")
+            for k in ("check_on_join", "delete_messages", "notify_result", "words_delete")
         ):
             raise DomainError("checks_invalid")
         if type(values["mute_seconds"]) is not int or not 300 <= values["mute_seconds"] <= 2592000:
@@ -110,12 +163,27 @@ async def configure(session, bot, chat, actor, version, **changes):
             raise DomainError("checks_invalid")
         if actions.get("spam", "OFF") != "OFF" and not terms:
             raise DomainError("checks_terms_required")
+        if (
+            values["words_action"] not in {"OFF", "WARN", "KICK", "MUTE", "BAN"}
+            or not isinstance(values["banned_words"], list)
+            or len(values["banned_words"]) > 100
+            or any(
+                not isinstance(s, str) or not 1 <= len(s.strip()) <= 100
+                for s in values["banned_words"]
+            )
+        ):
+            raise DomainError("checks_invalid")
         rights = await GroupAuthorizer(bot).member(chat, bot.id)
         if rights.status != "administrator" or (
-            values["delete_messages"] and getattr(rights, "can_delete_messages", False) is not True
+            (values["delete_messages"] or (values["banned_words"] and values["words_delete"]))
+            and getattr(rights, "can_delete_messages", False) is not True
         ):
             raise DomainError("group_moderation_bot_rights")
         native = {v for v in actions.values() if v in {"WARN", "KICK", "MUTE", "BAN"}}
+        if values["words_action"] != "OFF":
+            native.add(values["words_action"])
+        if "KICK" in actions.values():
+            native.add("BAN")  # Fourth noncompliant entry is a 24h BAN.
         moderation = await session.get(GroupModerationSettings, chat)
         if any(moderation is None or not module_enabled(moderation, v) for v in native):
             raise DomainError("checks_modules")
@@ -220,9 +288,22 @@ async def policy_for_event(session, event):
         policy is None
         or policy.version != event.version
         or (
-            not policy.delete_messages or policy.actions.get(event.rule, "OFF") == "OFF"
-            if event.action == "DELETE"
-            else policy.actions.get(event.rule, "OFF") != event.action
+            event.rule == "words"
+            and (
+                not event.message_id
+                or not event.matched_word
+                or event.matched_word not in policy.banned_words
+                or (policy.words_action == "OFF" and not policy.words_delete)
+                or effective_action(policy, event) != event.action
+            )
+        )
+        or (
+            event.rule != "words"
+            and (
+                not policy.delete_messages or policy.actions.get(event.rule, "OFF") == "OFF"
+                if event.action == "DELETE"
+                else effective_action(policy, event) != event.action
+            )
         )
         or event.state not in {"PENDING", "WAITING", "QUEUED"}
     ):
@@ -241,7 +322,9 @@ async def guard_request(session, event_id, chat, target, kind):
         or event.execute_after is None
         or event.state not in {"WAITING", "QUEUED"}
         or utc(event.execute_after) > now()
-        or (utc(event.execute_after) - utc(event.notice_sent_at)).total_seconds() < 15
+        or event.grace_seconds != expected_grace(event)
+        or (utc(event.execute_after) - utc(event.notice_sent_at)).total_seconds()
+        < event.grace_seconds
     ):
         raise DomainError("checks_notice_required")
     return event
@@ -254,6 +337,8 @@ async def guard_job(session, bot, sanction, member):
     if event is None:
         return
     policy = await policy_for_event(session, event)
+    if event.rule == "words":
+        return  # Authenticated message evidence, tied to this event and policy version.
     bad, unknown = await evidence(session, bot, policy, member.user, member, only=event.rule)
     if unknown or event.rule not in bad:
         raise DomainError("checks_unconfirmed")
@@ -303,6 +388,15 @@ async def observe(sessions, bot, chat, user, *, message_id=None, joined_at=None,
                 session.add(tracked)
                 await session.flush()
             elif joined_at and utc(joined_at) > utc(tracked.joined_at):
+                for old in await session.scalars(
+                    select(GroupCheckEvent).where(
+                        GroupCheckEvent.chat_id == chat,
+                        GroupCheckEvent.telegram_id == user.id,
+                        GroupCheckEvent.rule != "words",
+                        GroupCheckEvent.state.in_({"PENDING", "WAITING", "QUEUED"}),
+                    )
+                ):
+                    await cancel_unclaimed(session, old)
                 tracked.joined_at, tracked.episodes = joined_at, {}
             await session.commit()
             if check_join and not policy.check_on_join:
@@ -318,6 +412,15 @@ async def observe(sessions, bot, chat, user, *, message_id=None, joined_at=None,
             episodes = dict(tracked.episodes)
             priority = {"ADVISE": 1, "WARN": 2, "MUTE": 3, "KICK": 4, "BAN": 5}
             selected = max(bad, key=lambda r: priority[policy.actions[r]], default=None)
+            kick_rules = [r for r in RULES if policy.actions.get(r) == "KICK"]
+            if kick_rules and not any(r in bad or r in unknown for r in kick_rules):
+                tracked.kick_attempts, tracked.kick_join = 0, None
+            kick_attempt = 0
+            if selected and policy.actions[selected] == "KICK":
+                if tracked.kick_join is None or utc(tracked.kick_join) != utc(tracked.joined_at):
+                    tracked.kick_attempts = min(4, tracked.kick_attempts + 1)
+                    tracked.kick_join = tracked.joined_at
+                kick_attempt = tracked.kick_attempts
             for rule in RULES:
                 if policy.actions.get(rule, "OFF") == "OFF" or rule in unknown:
                     continue
@@ -363,7 +466,15 @@ async def observe(sessions, bot, chat, user, *, message_id=None, joined_at=None,
                             telegram_id=user.id,
                             display_name=user.full_name[:256],
                             rule=rule,
-                            action=policy.actions[rule],
+                            action="BAN"
+                            if rule == selected and kick_attempt >= 4
+                            else policy.actions[rule],
+                            kick_attempt=kick_attempt if rule == selected else 0,
+                            grace_seconds=0
+                            if rule == selected and kick_attempt >= 4
+                            else 5
+                            if rule == selected and kick_attempt >= 2
+                            else 15,
                             version=version,
                             request_key=request,
                             message_id=message_id,
@@ -415,5 +526,62 @@ async def observe(sessions, bot, chat, user, *, message_id=None, joined_at=None,
             await session.commit()
             return bool(bad)
         except (TelegramAPIError, DomainError, TimeoutError, OSError):
+            await session.rollback()
+            return False
+
+
+async def observe_words(sessions, bot, chat, user, message_id, content):
+    """Evidence comes from an authenticated Telegram update, never callback text."""
+    if user.is_bot:
+        return False
+    async with sessions() as session:
+        try:
+            policy = await session.get(GroupCheckSettings, chat)
+            if (
+                not policy
+                or not policy.banned_words
+                or (policy.words_action == "OFF" and not policy.words_delete)
+            ):
+                return False
+            await lock_group(session, chat)
+            await session.commit()
+            member = await GroupAuthorizer(bot).member(chat, user.id)
+            if (
+                not is_member(member)
+                or member.status in {"administrator", "creator"}
+                or member.user.is_bot
+            ):
+                return False
+            await lock_group(session, chat)
+            policy = await session.get(GroupCheckSettings, chat, populate_existing=True)
+            matched = word_match(content, policy.banned_words)
+            request = key("words", chat, message_id)
+            previous = await session.scalar(
+                select(GroupCheckEvent).where(GroupCheckEvent.request_key == request)
+            )
+            if previous:
+                # An edited clean message cancels only unclaimed punishment.
+                if not matched:
+                    await cancel_unclaimed(session, previous)
+                await session.commit()
+                return bool(matched)
+            if not matched or (policy.words_action == "OFF" and not policy.words_delete):
+                return False
+            session.add(
+                GroupCheckEvent(
+                    chat_id=chat,
+                    telegram_id=user.id,
+                    display_name=member.user.full_name[:256],
+                    rule="words",
+                    action=policy.words_action if policy.words_action != "OFF" else "DELETE",
+                    version=policy.version,
+                    request_key=request,
+                    message_id=message_id,
+                    matched_word=matched,
+                )
+            )
+            await session.commit()
+            return True
+        except (DomainError, TelegramAPIError, TimeoutError, OSError):
             await session.rollback()
             return False
