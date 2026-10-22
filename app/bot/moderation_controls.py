@@ -391,6 +391,17 @@ def register_control_handlers(router: Router) -> None:
                     reason="",
                     request=f"control:{row.id}:{actor}",
                 )
+                from app.external_releases import intent as external_release_intent
+
+                if await external_release_intent(service.session, release) is not None:
+                    from app.bot.external_releases import confirmation
+
+                    release.original_command = called
+                    await service.session.commit()
+                    assert isinstance(callback.message, Message)
+                    await confirmation(callback.message, service, release)
+                    await acknowledge(callback)
+                    return
                 await local.revoke(
                     row.chat_id, actor, row.id, key="local:" + release.id, draft_id=release.id
                 )

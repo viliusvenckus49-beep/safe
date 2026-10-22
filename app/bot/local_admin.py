@@ -585,6 +585,10 @@ async def show_draft(
             text += "\n\n" + t("lm.reason", reason=escape(draft.reason))
         if draft.kind == "KICK":
             text += "\n\n" + t("lm.kick_notice")
+        from app.external_releases import intent as external_release_intent
+
+        if await external_release_intent(service.session, draft) is not None:
+            text += "\n\n" + t("lm.control.external_confirm", action=draft.kind)
     buttons = [
         [
             (t("lm.confirm"), cb("confirm", value=draft.id)),
@@ -597,6 +601,10 @@ async def show_draft(
         message, text, keyboard(buttons) if draft.status == "PENDING" else None, edit=edit
     )
     draft.panel_chat_id, draft.panel_message_id = result.chat.id, result.message_id
+    from app.external_releases import intent as external_release_intent
+
+    if await external_release_intent(service.session, draft) is not None:
+        draft.receipt_visibility = "PRIVATE"
     draft.language = language.get()
     draft.receipt_hash = hashlib.sha256(text.encode()).hexdigest()
     draft.receipt_done = False
@@ -650,8 +658,10 @@ async def publish_receipts(sessions: Any, bot: Any, *, limit: int = 10) -> None:
 
 
 def register_local_handlers(router: Router) -> None:
+    from app.bot.external_releases import register_external_release_handlers
     from app.bot.moderation_controls import register_control_handlers
 
+    register_external_release_handlers(router)
     register_control_handlers(router)
 
     @router.message(Command("moderation"))
@@ -749,7 +759,15 @@ def register_local_handlers(router: Router) -> None:
                 request=f"local:{message.chat.id}:{message.message_id}:{actor}",
             )
             draft.original_command = called
+            draft.language = language.get()
             await service.session.commit()
+            from app.external_releases import intent as external_release_intent
+
+            if await external_release_intent(service.session, draft) is not None:
+                from app.bot.external_releases import confirmation
+
+                await confirmation(message, service, draft)
+                return
             # Explicit textual commands are the administrator's direct instruction.
             # Menu-selected actions instead require a durable confirmation below.
             verified_people = await observed_users(
@@ -886,19 +904,42 @@ def register_local_handlers(router: Router) -> None:
                 called = "/" + draft.kind.lower()
                 target_id = draft.telegram_id
                 chat = draft.chat_id
+                if action == "confirm":
+                    from app.external_releases import intent as external_release_intent
+
+                    if await external_release_intent(service.session, draft) is not None and (
+                        draft.receipt_visibility != "PRIVATE"
+                        or (draft.panel_chat_id, draft.panel_message_id)
+                        != (message.chat.id, message.message_id)
+                    ):
+                        raise DomainError("group_moderation_invalid_draft")
             if action != "groups":
                 local = await access(service, callback.bot, chat, actor)
-            if action not in {"confirm", "refresh"}:
+            if action not in {"confirm", "refresh", "cancel"}:
                 # Navigating away retires background edits of this shared panel.
-                await service.session.execute(
+                cancelled = await service.session.execute(
                     update(GroupModerationDraft)
                     .where(
                         GroupModerationDraft.panel_chat_id == message.chat.id,
                         GroupModerationDraft.panel_message_id == message.message_id,
-                        GroupModerationDraft.status != "CONFIRMED",
+                        GroupModerationDraft.status == "PENDING",
+                        GroupModerationDraft.actor_id == actor,
                     )
-                    .values(receipt_done=True)
+                    .values(receipt_done=True, status="CANCELLED")
+                    .returning(GroupModerationDraft.id, GroupModerationDraft.chat_id)
                 )
+                for cancelled_id, cancelled_chat in cancelled:
+                    service.session.add(
+                        AuditEvent(
+                            actor_id=actor,
+                            action="group_moderation_draft_cancelled",
+                            details={
+                                "chat_id": cancelled_chat,
+                                "draft_id": cancelled_id,
+                                "reason": "navigation",
+                            },
+                        )
+                    )
                 await service.session.commit()
             await callback.answer()
             acknowledged = True

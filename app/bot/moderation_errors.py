@@ -63,6 +63,7 @@ def basic_kind(error: Exception) -> str | None:
             "group_moderation_uncertain": "uncertain",
             "group_moderation_invalid_draft": "stale",
             "group_moderation_stale_control": "stale",
+            "group_moderation_restriction_changed": "changed",
             "group_moderation_request_conflict": "stale",
             "group_moderation_no_warnings": "no_warnings",
             "group_moderation_supergroup_required": "supergroup",
@@ -120,6 +121,10 @@ async def diagnose_state(local: Any, chat: int, actor: int, target: int, command
                 return "restriction"
             return "check_unavailable"
         if requested in {"/unmute", "/unban"}:
+            if requested == "/unmute" and member.status == "kicked":
+                return "already_banned"
+            if requested == "/unban" and member.status == "restricted":
+                return "already_unbanned"
             expected = "restricted" if requested == "/unmute" else "kicked"
             if member.status == expected:
                 return "foreign"
