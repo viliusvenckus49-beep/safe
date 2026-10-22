@@ -11,6 +11,7 @@ from app.ads_services import AdsService
 from app.bot.ads import cb as old_cb
 from app.bot.auto_ads import cb
 from app.bot.callbacks import AdPublication, GlobalAd
+from app.bot.keyboards import action
 from app.errors import DomainError
 from app.i18n import CATALOGS, t
 from app.models import AdCampaign, AdContentDraft
@@ -36,6 +37,7 @@ async def test_root_list_and_individual_ui_have_no_duplicate_navigation(
     await journey.send("/ads", actor=900)
     assert "AUTO ADS" in last_screen(journey).text
     assert t("ua.mine", lang) in [b.text for b in buttons(journey)]
+    assert action("group_help") in [b.callback_data for b in buttons(journey)]
     await journey.click(cb("list"), actor=900)
     assert "Partner &lt;private&gt;" in last_screen(journey).text
     await journey.click(cb("panel", cid), actor=900)

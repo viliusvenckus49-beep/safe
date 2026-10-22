@@ -12,6 +12,7 @@ from app.bot.callbacks import (
     AdsAction,
     CustomerAd,
     Language,
+    LocalAction,
     Moderation,
     ReportStep,
     ReputationModeration,
@@ -133,17 +134,27 @@ def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
         [(t("button.users"), action("users", "0")), (t("button.stats"), action("stats"))],
         [(t("button.audit"), action("audit"))],
         [(t("button.status"), action("status"))],
-        [(t("ads.title"), AdsAction(action="root").pack())],
+        [(t("group_help.button"), action("group_help"))],
         [(t("admin_help.button"), AdminHelp().pack())],
     ]
     if owner:
-        rows.append([(t("button.groups"), GroupAction(action="list").pack())])
         rows.append([(t("admin_access.button"), AdminAccess(action="list").pack())])
     return rows
 
 
 def admin(owner: bool = False) -> InlineKeyboardMarkup:
     return keyboard([*_admin_rows(owner), [(t("button.home"), action("home"))]])
+
+
+def group_help(owner: bool = False) -> InlineKeyboardMarkup:
+    rows = [
+        [(t("ads.title"), AdsAction(action="root").pack())],
+        [(t("group_help.moderation"), LocalAction(action="groups").pack())],
+    ]
+    if owner:
+        rows.append([(t("button.groups"), GroupAction(action="list").pack())])
+    rows.append([(t("button.back"), action("admin"))])
+    return keyboard(rows)
 
 
 def moderation(reference: str) -> InlineKeyboardMarkup:

@@ -18,6 +18,7 @@ from aiogram.types import User as TelegramUser
 from sqlalchemy import BigInteger, cast, or_, select, update
 
 from app.bot.callbacks import LocalAction
+from app.bot.keyboards import action as menu_action
 from app.bot.keyboards import keyboard
 from app.bot.local_moderation import LocalModerationExecutor
 from app.bot.moderation_errors import (
@@ -328,9 +329,13 @@ async def groups_panel(
             rows.append([(t("lm.back"), cb("groups", value=str(page - 1)))])
         if len(allowed) > page * 10 + 10:
             rows.append([(t("lm.next"), cb("groups", value=str(page + 1)))])
+    has_groups = bool(rows)
+    rows.append(
+        [(t("lm.back"), menu_action("group_help" if await service.is_admin(actor) else "home"))]
+    )
     await display(
         message,
-        t("lm.title") + "\n\n" + t("lm.groups" if rows else "lm.empty"),
+        t("lm.title") + "\n\n" + t("lm.groups" if has_groups else "lm.empty"),
         keyboard(rows),
         edit=edit,
     )
