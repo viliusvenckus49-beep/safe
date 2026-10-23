@@ -160,7 +160,7 @@ def standardize(catalogs):
         "⚙️": "⚙",
     }
     controls = {
-        "button.check_profile": "👤",
+        "button.check_profile": "🪪",
         "button.positive": "＋",
         "button.negative": "−",
         "admin_help.section.basics": "ⓘ",
