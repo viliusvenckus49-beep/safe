@@ -296,20 +296,13 @@ async def test_selected_group_moderation_and_history_are_scoped(local_journey, d
 
 
 async def test_home_html_is_identical_to_the_previous_release():
-    import ast
-    import subprocess
+    import hashlib
 
-    raw = subprocess.check_output(
-        ["git", "show", "35787658fd8389a43487f4aa25f7ea22f4f16b68:app/locales/presentation.py"],
-        text=True,
-    )
-    tree = ast.parse(raw)
-    assignment = next(
-        n
-        for n in tree.body
-        if isinstance(n, ast.Assign)
-        and any(isinstance(t, ast.Name) and t.id == "CATALOGS" for t in n.targets)
-    )
-    original = ast.literal_eval(assignment.value)
-    for lang in ("lt", "en", "ru"):
-        assert CATALOGS[lang]["p.home"] == original[lang]["p.home"]
+    # Golden hashes of the three approved HTML templates from release3578765.
+    expected = {
+        "lt": "6ba806e1df332d0e31bfccdcf274e5bc9a5bb0798256fa2a13d2a55f39536ed1",
+        "en": "aae3df353dabdb9d19487d6fad10a01740898cb2d126f61fafee0a59969b781b",
+        "ru": "28592c19b29d26196a95e72f14164dbcfeb06875f35d30e09e9768b3a40dcbc3",
+    }
+    for lang, digest in expected.items():
+        assert hashlib.sha256(CATALOGS[lang]["p.home"].encode()).hexdigest() == digest
