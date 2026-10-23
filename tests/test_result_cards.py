@@ -225,7 +225,7 @@ async def test_checked_profile_keeps_numeric_target_after_username_change(
         if isinstance(call, (SendMessage, EditMessageText))
     )
     assert [[button.text for button in row] for row in result.reply_markup.inline_keyboard] == [
-        ["👤 REDSAFE PROFILIS"],
+        ["🪪 REDSAFE PROFILIS"],
         ["🔎 Tikrinti kitą"],
     ]
     profile_callback = result.reply_markup.inline_keyboard[0][0].callback_data

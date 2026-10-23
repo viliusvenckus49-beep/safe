@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.bot.moderation_errors import basic_kind, diagnose_state, error_message
 from app.errors import DomainError
-from app.models import GroupModerationDraft, GroupSanction, GroupSanctionJob
+from app.models import GroupModerationDraft, GroupSanction, GroupSanctionJob, GroupWarningEscalation
 from app.moderation_services import GroupModerationService
 
 
@@ -16,6 +16,11 @@ async def diagnostic(session: Any, bot: Any, draft: GroupModerationDraft) -> str
     key = "check_unavailable"
     if row is not None:
         if row.kind == "WARN" and row.status in {"RECORDED", "CANCELLED", "COMPLETED"}:
+            event = await session.scalar(
+                select(GroupWarningEscalation).where(GroupWarningEscalation.trigger_id == row.id)
+            )
+            if event is not None and event.state == "PENDING":
+                return error_message(command, "queued", fallback="")
             return None
         jobs = list(
             await session.scalars(

@@ -459,3 +459,10 @@ CONTROLS["ru"].update(
 )
 for _lang, _labels in CONTROLS.items():
     CATALOGS[_lang].update({"lm.control." + key: value for key, value in _labels.items()})
+
+for _lang, _text in {
+    "lt": "Botas (automatiškai; inicijavo {initiator})",
+    "en": "Bot (automatic; initiated by {initiator})",
+    "ru": "Бот (автоматически; инициатор: {initiator})",
+}.items():
+    CATALOGS[_lang]["lm.notice.automatic_admin"] = _text

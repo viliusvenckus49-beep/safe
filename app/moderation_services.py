@@ -532,9 +532,17 @@ class GroupModerationService:
             await self.session.flush()
             if check_event is not None:
                 check_event.sanction_id, check_event.state = sanction.id, "QUEUED"
+            warning_facts = {}
             if kind == "WARN":
                 from app.warning_services import schedule_warning_action
+                from app.warning_snapshots import current_counts
 
+                count, limit = await current_counts(self.session, chat_id, target_id)
+                warning_facts = {
+                    "warning_count": count,
+                    "warning_limit": limit,
+                    "warning_action": policy.warning_action,
+                }
                 await schedule_warning_action(self.session, sanction, policy, group)
             if draft is not None:
                 draft.status, draft.sanction_id = "CONFIRMED", sanction.id
@@ -560,6 +568,7 @@ class GroupModerationService:
                 sanction_id=sanction.id,
                 kind=kind,
                 request_key=key,
+                **warning_facts,
             )
             await self.session.commit()
             return sanction

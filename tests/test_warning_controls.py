@@ -4,7 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.methods import AnswerCallbackQuery, EditMessageText, RestrictChatMember, SendMessage
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    EditMessageReplyMarkup,
+    EditMessageText,
+    RestrictChatMember,
+    SendMessage,
+)
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 from sqlalchemy import func, select
 from test_group_moderation_foundation import CHAT, OTHER, NativeBot
@@ -218,7 +224,7 @@ async def test_public_warn_button_private_confirmation_and_double_click(username
     edits = [
         call
         for call in journey.transport.calls
-        if isinstance(call, EditMessageText) and call.message_id == mid
+        if isinstance(call, EditMessageReplyMarkup) and call.message_id == mid
     ]
     assert edits and edits[-1].reply_markup.inline_keyboard[0][0].callback_data.startswith(
         "mc3|history|"
@@ -255,9 +261,13 @@ async def test_release_buttons_are_scoped_authorized_and_idempotent(
     edits = [
         c
         for c in journey.transport.calls
-        if isinstance(c, EditMessageText) and c.chat_id == CHAT and c.message_id == mid
+        if isinstance(c, EditMessageReplyMarkup) and c.chat_id == CHAT and c.message_id == mid
     ]
     assert edits[-1].reply_markup is None
+    assert not any(
+        isinstance(c, EditMessageText) and c.chat_id == CHAT and c.message_id == mid
+        for c in journey.transport.calls
+    )
 
 
 async def test_three_public_warnings_publish_one_automatic_mute_with_release_control(

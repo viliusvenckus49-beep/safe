@@ -7,14 +7,13 @@ from typing import Any
 
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from aiogram.types import User as TelegramUser
-from sqlalchemy import BigInteger, cast, func, select
+from sqlalchemy import BigInteger, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.i18n import language, t
 from app.models import (
     AuditEvent,
     GroupModerationDraft,
-    GroupModerationSettings,
     GroupSanction,
     GroupSanctionJob,
     GroupWarningEscalation,
@@ -203,7 +202,11 @@ async def success_message(
         if release is not None:
             reversed_kind = "UNBAN" if draft.kind == "BAN" else "UNMUTE"
             reversed_actor = release.actor_id
-    elif draft.kind == "WARN" and sanction.status == "CANCELLED":
+    elif (
+        draft.kind == "WARN"
+        and sanction.status == "CANCELLED"
+        and draft.original_command == "/unwarn"
+    ):
         events = await session.scalars(
             select(AuditEvent)
             .where(
@@ -238,50 +241,39 @@ async def success_message(
     warnings = None
     warning_limit, warning_action = 3, "MUTE"
     if draft.kind == "WARN":
-        policy = await session.get(GroupModerationSettings, draft.chat_id)
-        if policy is not None:
-            warning_limit, warning_action = policy.warning_limit, policy.warning_action
-        # Stable count at this warning, isolated to this group and numeric user.
-        # Only active warnings count; cleared and consumed history is retained.
-        warnings = await session.scalar(
-            select(func.count())
-            .select_from(GroupSanction)
-            .where(
-                GroupSanction.chat_id == draft.chat_id,
-                GroupSanction.telegram_id == draft.telegram_id,
-                GroupSanction.kind == "WARN",
-                GroupSanction.status == "RECORDED",
-                GroupSanction.id <= sanction.id,
-            )
-        )
+        from app.warning_snapshots import warning_snapshot
+
+        warnings, warning_limit, warning_action = await warning_snapshot(session, sanction)
     seconds = (
         max(0, round((utc(sanction.until_date) - utc(draft.created_at)).total_seconds()))
         if sanction.until_date is not None
+        else None
+    )
+    automatic = (
+        await session.scalar(
+            select(GroupWarningEscalation).where(GroupWarningEscalation.sanction_id == sanction.id)
+        )
+        if draft.kind in {"MUTE", "BAN", "KICK"}
         else None
     )
     text = format_success(
         draft.kind,
         draft.telegram_id,
         user=labels[draft.telegram_id],
-        admin=labels[draft.actor_id],
+        admin=t("lm.notice.automatic_admin", initiator=labels[draft.actor_id])
+        if automatic is not None
+        else labels[draft.actor_id],
         reason=draft.reason,
         duration_seconds=seconds,
         warnings=warnings,
         warning_limit=warning_limit,
     )
 
-    if draft.kind == "WARN" and sanction.status in {"CANCELLED", "COMPLETED"}:
-        text += "\n\n" + t(
-            "lm.control.warn_cancelled"
-            if sanction.status == "CANCELLED"
-            else "lm.control.warn_consumed"
-        )
     if draft.kind == "WARN" and warning_action != "OFF" and (warnings or 0) >= warning_limit:
         event = await session.scalar(
             select(GroupWarningEscalation)
             .where(
-                GroupWarningEscalation.chat_id == sanction.chat_id,
-                GroupWarningEscalation.telegram_id == sanction.telegram_id,
+                GroupWarningEscalation.trigger_id == sanction.id,
             )
             .order_by(GroupWarningEscalation.id.desc())
             .limit(1)
@@ -317,13 +309,6 @@ async def success_message(
         )
         if replacement is not None:
             text += "\n\n" + t("lm.control.replaced", kind=replacement.kind)
-    automatic = (
-        await session.scalar(
-            select(GroupWarningEscalation).where(GroupWarningEscalation.sanction_id == sanction.id)
-        )
-        if draft.kind in {"MUTE", "BAN", "KICK"}
-        else None
-    )
     if automatic is not None:
         text += "\n\n" + t("lm.control.auto_reason", limit=automatic.warning_limit)
     return text

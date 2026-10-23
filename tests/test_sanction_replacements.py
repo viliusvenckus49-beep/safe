@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
-from aiogram.methods import BanChatMember, EditMessageText
+from aiogram.methods import BanChatMember, EditMessageReplyMarkup, EditMessageText
 from sqlalchemy import select
 from test_group_moderation_foundation import CHAT, NativeBot
 from test_integration_contracts import postgres_contract as postgres_contract
@@ -280,8 +280,13 @@ async def test_old_unmute_button_and_repeated_ban_cannot_change_new_ban(username
         for m in journey.transport.calls
         if isinstance(m, EditMessageText) and m.message_id == message_id
     ]
-    assert edits and t("lm.control.replaced", kind="BAN") in edits[-1].text
-    assert edits[-1].reply_markup is None
+    assert not edits
+    controls = [
+        m
+        for m in journey.transport.calls
+        if isinstance(m, EditMessageReplyMarkup) and m.message_id == message_id
+    ]
+    assert controls and controls[-1].reply_markup is None
     count = len(native.calls)
     await click(
         journey, ModerationControl(action="release", sanction=mid).pack(), message_id=message_id

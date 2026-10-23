@@ -84,6 +84,41 @@ async def public_receipt(
 
     if draft.receipt_available_at is not None and utc(draft.receipt_available_at) > now():
         return
+    # Published moderation history is immutable. Only withdraw stale controls.
+    if (
+        draft.panel_chat_id == draft.chat_id
+        and draft.panel_message_id
+        and draft.receipt_visibility != "PRIVATE"
+    ):
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=draft.chat_id,
+                message_id=draft.panel_message_id,
+                reply_markup=await receipt_markup(session, draft),
+            )
+        except TelegramBadRequest as error:
+            if "message is not modified" not in error.message.lower():
+                raise
+        draft.receipt_done = True
+        row = await session.get(GroupSanction, draft.sanction_id)
+        draft.receipt_checked_at = row.updated_at if row else now()
+        await session.commit()
+        return
+    if draft.kind == "WARN":
+        escalation = await session.scalar(
+            select(GroupWarningEscalation).where(
+                GroupWarningEscalation.trigger_id == draft.sanction_id
+            )
+        )
+        if escalation is not None and escalation.state == "SUCCEEDED":
+            if draft.receipt_visibility == "PRIVATE" and draft.panel_chat_id is not None:
+                await dismiss_stored(
+                    bot, draft.panel_chat_id, draft.actor_id, draft.panel_message_id
+                )
+                draft.panel_chat_id, draft.panel_message_id = None, None
+            draft.receipt_done, draft.receipt_checked_at = True, now()
+            await session.commit()
+            return
     text, done = await receipt_text(session, draft, observed=observed, bot=bot)
     from app.bot.moderation_outcomes import diagnostic
     from app.bot.private_panels import show as show_private
@@ -152,40 +187,6 @@ async def public_receipt(
     if draft.receipt_visibility == "PRIVATE" and draft.panel_chat_id is not None:
         await dismiss_stored(bot, draft.panel_chat_id, draft.actor_id, draft.panel_message_id)
         draft.panel_chat_id, draft.panel_message_id = None, None
-    if draft.kind in {"UNBAN", "UNMUTE"}:
-        from app.models import GroupSanctionJob
-
-        confirmed = await session.scalar(
-            select(GroupSanctionJob.id).where(
-                GroupSanctionJob.sanction_id == draft.sanction_id,
-                GroupSanctionJob.operation == "RELEASE",
-                GroupSanctionJob.status == "SUCCEEDED",
-                GroupSanctionJob.result == "RELEASED",
-            )
-        )
-        if confirmed is not None:
-            origin = await session.scalar(
-                select(GroupModerationDraft)
-                .where(
-                    GroupModerationDraft.sanction_id == draft.sanction_id,
-                    GroupModerationDraft.kind == ("BAN" if draft.kind == "UNBAN" else "MUTE"),
-                    GroupModerationDraft.status == "CONFIRMED",
-                    GroupModerationDraft.panel_chat_id == draft.chat_id,
-                    GroupModerationDraft.panel_message_id.is_not(None),
-                    or_(
-                        GroupModerationDraft.receipt_visibility == "PUBLIC",
-                        GroupModerationDraft.receipt_visibility.is_(None),
-                    ),
-                )
-                .order_by(GroupModerationDraft.created_at)
-                .limit(1)
-            )
-            if origin is not None and not draft.original_command:
-                draft.panel_chat_id, draft.panel_message_id = (
-                    origin.panel_chat_id,
-                    origin.panel_message_id,
-                )
-                draft.receipt_visibility = "PUBLIC"
     markup = await receipt_markup(session, draft)
     if (
         draft.panel_chat_id == draft.chat_id
@@ -406,8 +407,8 @@ def register_control_handlers(router: Router) -> None:
                     row.chat_id, actor, row.id, key="local:" + release.id, draft_id=release.id
                 )
                 draft.receipt_done = True
-                # Track pending/error feedback privately; borrow the original
-                # public receipt only after a confirmed successful RELEASE.
+                # Track pending/error feedback privately; publish a separate
+                # receipt only after a confirmed successful RELEASE.
                 release.receipt_visibility = "PRIVATE"
                 await service.session.commit()
                 await callback.answer()
@@ -453,10 +454,6 @@ async def publish_warning_announcements(sessions: Any, bot: Any) -> None:
         events = list(
             await session.scalars(
                 select(GroupWarningEscalation)
-                .join(
-                    GroupModerationDraft,
-                    GroupModerationDraft.sanction_id == GroupWarningEscalation.trigger_id,
-                )
                 .join(announcement, announcement.id == GroupWarningEscalation.draft_id)
                 .where(
                     announcement.panel_message_id.is_(None),
@@ -466,8 +463,16 @@ async def publish_warning_announcements(sessions: Any, bot: Any) -> None:
                         announcement.receipt_available_at <= now(),
                     ),
                     GroupWarningEscalation.state == "SUCCEEDED",
-                    GroupModerationDraft.panel_chat_id == GroupWarningEscalation.chat_id,
-                    GroupModerationDraft.panel_message_id.is_not(None),
+                    or_(
+                        announcement.receipt_visibility == "PUBLIC",
+                        select(GroupModerationDraft.id)
+                        .where(
+                            GroupModerationDraft.sanction_id == GroupWarningEscalation.trigger_id,
+                            GroupModerationDraft.panel_chat_id == GroupWarningEscalation.chat_id,
+                            GroupModerationDraft.panel_message_id.is_not(None),
+                        )
+                        .exists(),
+                    ),
                 )
                 .limit(10)
             )

@@ -280,7 +280,7 @@ async def test_command_receipts_have_no_keyboard_and_keep_profile_separate(
     ]
     if kind in {"UNBAN", "UNMUTE"}:
         assert len([c for c in notices if isinstance(c, SendMessage)]) == 1
-        assert any(isinstance(c, EditMessageText) for c in notices)
+        assert not any(isinstance(c, EditMessageText) for c in notices)
     else:
         assert len(notices) == 1
     notice = notices[-1]
