@@ -58,6 +58,8 @@ remain for data compatibility. No destructive migration or row deletion is requi
 `ObservedMember` remains: SCAM protection and identity resolution share it.
 Group registration/approval/removal, native sanctions, checks and SCAM workers remain.
 Operational queue age no longer counts the retired delivery queue.
+The operations monitor and bounded history reader use the remaining aggregate
+metrics, without requiring the removed recovery counter.
 
 The release guard retains untouched automatic expiry jobs scheduled more than 30
 minutes ahead, only for ACTIVE owned BAN/MUTE with a confirmed successful APPLY.

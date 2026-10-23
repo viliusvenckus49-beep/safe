@@ -12,7 +12,6 @@ from pathlib import Path
 
 METRICS = {
     "ban_terminal",
-    "recovery_terminal",
     "oldest_pending_seconds",
     "pending_reports",
     "pending_rep",
