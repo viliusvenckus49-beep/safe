@@ -43,7 +43,7 @@ async def cancelled_warning_receipt_and_history(factory, settings, target):
             sanction = await session.get(GroupSanction, sid)
             assert sanction.status == "CANCELLED"
             rendered = await success_message(session, draft, sanction)
-            assert rendered.startswith(HEADINGS["WARN"])
+            assert rendered.startswith(f"<b>{HEADINGS['WARN']}</b>")
             assert "1/3" in rendered
             assert str(target) in rendered
             message = Message(
