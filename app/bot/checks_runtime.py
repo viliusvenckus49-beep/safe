@@ -5,14 +5,26 @@ from datetime import timedelta
 from html import escape
 
 import structlog
-from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
-from sqlalchemy import and_, or_, select, update
+from aiogram.exceptions import (
+    TelegramAPIError,
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramRetryAfter,
+)
+from sqlalchemy import BigInteger, and_, cast, or_, select, update
 
 from app.checks import API_TIMEOUT, evidence, is_member, observe, observe_words, policy_for_event
 from app.errors import DomainError
 from app.group_authorization import GroupAuthorizer
 from app.i18n import t, use_language
-from app.models import GroupCheckEvent, GroupCheckSettings, GroupSanction, GroupSanctionJob, now
+from app.models import (
+    AuditEvent,
+    GroupCheckEvent,
+    GroupCheckSettings,
+    GroupSanction,
+    GroupSanctionJob,
+    now,
+)
 from app.moderation_services import GroupModerationService, audit, lock_group, utc
 
 GRACE_SECONDS = 15
@@ -25,13 +37,25 @@ ACTION_NAMES = {
 }
 
 
+def security_identity(event, user=None):
+    name = (
+        (
+            getattr(user, "full_name", None)
+            if getattr(user, "id", None) == event.telegram_id
+            else None
+        )
+        or event.display_name
+        or str(event.telegram_id)
+    )
+    return f'<a href="tg://user?id={event.telegram_id}"><b>{escape(name)}</b></a> [<code>{event.telegram_id}</code>]'
+
+
 def security_text(event, user=None, *, planned=False):
-    name = escape(getattr(user, "full_name", None) or event.display_name or str(event.telegram_id))
     label = t("checks.planned" if planned else "checks.action")
     action = ACTION_NAMES[event.action]
     text = (
         "🛡 <b>REDSAFE SECURITY</b>"
-        f"\n\n👤 <b>{name}</b> [<code>{event.telegram_id}</code>]"
+        f"\n\n👤 {security_identity(event, user)}"
         f"\n\n⚠️ <b>{t('checks.reason_label')}:</b> {escape(t('checks.reason.' + event.rule))}"
         f"\n🚫 <b>{label}:</b> <b>{action}</b>"
     )
@@ -89,7 +113,7 @@ async def inspect_join(event, sessions):
     )
 
 
-async def _edit_notice(bot, event, text):
+async def _edit_notice(bot, event, text, *, strict_retry=False):
     if event.notice_message_id:
         try:
             await asyncio.wait_for(
@@ -102,22 +126,73 @@ async def _edit_notice(bot, event, text):
                 API_TIMEOUT,
             )
             return True
+        except TelegramRetryAfter:
+            if strict_retry:
+                raise
+        except TelegramBadRequest as error:
+            if "message is not modified" in error.message.lower():
+                return True
+            if strict_retry:
+                raise
+        except TelegramForbiddenError:
+            if strict_retry:
+                raise
         except (TelegramAPIError, TimeoutError, OSError):
             pass
     return False
 
 
-def words_text(event):
+def words_text(event, *, warnings=None, warning_limit=None):
     text = (
         "🛡 <b>REDSAFE SECURITY</b>"
-        f"\n\n👤 <b>{escape(event.display_name)}</b> [<code>{event.telegram_id}</code>]"
+        f"\n\n👤 {security_identity(event)}"
         "\n\n⚠️ "
         + t("bw.removed" if event.message_deleted else "bw.detected")
+        + (
+            f"\n\n⚠️ <b>{t('lm.notice.warnings')}:</b> {warnings}/{warning_limit}"
+            if warnings is not None and warning_limit is not None
+            else ""
+        )
         + "\n\n<i>"
         + t("bw.hint")
         + "</i>"
     )
     return text
+
+
+async def words_counts(session, event):
+    from app.warning_snapshots import current_counts, warning_snapshot
+
+    if event.sanction_id:
+        sanction = await session.get(GroupSanction, event.sanction_id)
+        if sanction is not None and sanction.kind == "WARN":
+            count, limit, _ = await warning_snapshot(session, sanction)
+            return count, limit
+    snapshot = await session.scalar(
+        select(AuditEvent)
+        .where(
+            AuditEvent.action == "group_moderation_check_warning_snapshot",
+            cast(AuditEvent.details["event_id"].as_string(), BigInteger) == event.id,
+        )
+        .order_by(AuditEvent.id)
+        .limit(1)
+    )
+    if snapshot is not None:
+        return snapshot.details["warning_count"], snapshot.details["warning_limit"]
+    await lock_group(session, event.chat_id)
+    count, limit = await current_counts(session, event.chat_id, event.telegram_id)
+    audit(
+        session,
+        "check_warning_snapshot",
+        0,
+        event.chat_id,
+        event_id=event.id,
+        user_id=event.telegram_id,
+        warning_count=count,
+        warning_limit=limit,
+    )
+    await session.commit()  # No group lock is held across Telegram I/O.
+    return count, limit
 
 
 async def _finish_notice(session, bot, event, policy):
@@ -142,14 +217,18 @@ async def _finish_notice(session, bot, event, policy):
         if update_notice:
             await _edit_notice(bot, event, t("checks.uncertain"))
         return
-    if sanction is None or sanction.status in {"CANCELLED", "FAILED", "UNCERTAIN"}:
+    if (
+        sanction is None
+        or sanction.status in {"FAILED", "UNCERTAIN"}
+        or (sanction.status == "CANCELLED" and sanction.kind != "WARN")
+    ):
         event.state, event.result = "FAILED", sanction.status if sanction else "NO_SANCTION"
         await session.commit()
         if update_notice:
             await _edit_notice(bot, event, t("checks.cancelled"))
         return
     success = (
-        sanction.status in {"RECORDED", "COMPLETED"}
+        sanction.status in {"RECORDED", "COMPLETED", "CANCELLED"}
         if sanction.kind == "WARN"
         else sanction.status == ("COMPLETED" if sanction.kind == "KICK" else "ACTIVE")
     )
@@ -163,6 +242,36 @@ async def _finish_notice(session, bot, event, policy):
         event.available_at = now() + timedelta(seconds=5)
         await session.commit()
         return
+    if event.rule == "words" and sanction.kind == "WARN":
+        count, limit = await words_counts(session, event)
+        await session.commit()
+        try:
+            done = await _edit_notice(
+                bot,
+                event,
+                words_text(event, warnings=count, warning_limit=limit),
+                strict_retry=True,
+            )
+        except TelegramRetryAfter as error:
+            event.result = "COUNTER_RETRY_AFTER"
+            event.attempts += 1
+            if event.attempts >= 5:
+                event.state = "DONE"
+            event.available_at = now() + timedelta(seconds=max(1, error.retry_after))
+            await session.commit()
+            return
+        except (TelegramBadRequest, TelegramForbiddenError):
+            event.state, event.result = "DONE", "CONFIRMED_NOTICE_UNAVAILABLE"
+            await session.commit()
+            return
+        if not done:
+            event.attempts += 1
+            if event.attempts >= 5:
+                event.state = "DONE"
+            event.result = "COUNTER_UPDATE_PENDING"
+            event.available_at = now() + timedelta(seconds=30)
+            await session.commit()
+            return
     event.state, event.result = "DONE", "CONFIRMED"
     await session.commit()
     if update_notice:
@@ -263,8 +372,13 @@ async def _process(sessions, bot, identifier):
                                 raise DomainError("checks_delete_unconfirmed")
                             event.message_deleted = True
                             await session.commit()
+                        count, limit = await words_counts(session, event)
                         result = await asyncio.wait_for(
-                            bot.send_message(event.chat_id, words_text(event), parse_mode="HTML"),
+                            bot.send_message(
+                                event.chat_id,
+                                words_text(event, warnings=count, warning_limit=limit),
+                                parse_mode="HTML",
+                            ),
                             API_TIMEOUT,
                         )
                         if not getattr(result, "message_id", None):

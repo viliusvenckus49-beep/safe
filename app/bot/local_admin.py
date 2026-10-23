@@ -492,6 +492,20 @@ async def receipt_text(
     row = await session.get(GroupSanction, draft.sanction_id, populate_existing=True)
     if row is None:
         return t("lm.failed"), True
+    escalation = None
+    if draft.kind == "WARN":
+        from app.models import GroupWarningEscalation
+
+        escalation = await session.scalar(
+            select(GroupWarningEscalation).where(GroupWarningEscalation.trigger_id == row.id)
+        )
+        if escalation is not None and escalation.state == "SUCCEEDED":
+            automatic = await session.get(GroupSanction, escalation.sanction_id)
+            announcement = await session.get(GroupModerationDraft, escalation.draft_id)
+            if automatic is not None and announcement is not None:
+                return await success_message(
+                    session, announcement, automatic, observed=observed, bot=bot
+                ), True
     jobs = list(
         await session.scalars(
             select(GroupSanctionJob)
@@ -504,6 +518,8 @@ async def receipt_text(
     key, done = "queued", False
     if row.kind == "WARN" and row.status in {"RECORDED", "CANCELLED", "COMPLETED"}:
         key, done = "recorded", True
+        if escalation is not None and escalation.state == "PENDING":
+            done = False
     elif row.status == "UNCERTAIN":
         key, done = "uncertain", True
     elif draft.kind in {"UNBAN", "UNMUTE"} or row.kind == "KICK":

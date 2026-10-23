@@ -129,8 +129,9 @@ async def test_words_delete_notice_then_optional_native_action(database, action)
     with use_language("lt"):
         assert text == (
             "🛡 <b>REDSAFE SECURITY</b>\n\n"
-            "👤 <b>Real &lt;&amp;&gt; Name</b> [<code>51</code>]\n\n"
+            '👤 <a href="tg://user?id=51"><b>Real &lt;&amp;&gt; Name</b></a> [<code>51</code>]\n\n'
             "⚠️ <b>Pranešimas pašalintas:</b> Aptiktas filtruojamas raktažodis.\n\n"
+            "⚠️ <b>Įspėjimai:</b> 0/3\n\n"
             "<i>Prašome naudoti savus terminus arba alternatyvius pavadinimus, kad pranešimai nebūtų automatiškai šalinami.</i>"
         )
     if action == "OFF":
@@ -143,7 +144,10 @@ async def test_words_delete_notice_then_optional_native_action(database, action)
     await LocalModerationExecutor(database, bot).process(limit=2, sanction_id=e.sanction_id)
     await process_checks(database, bot)
     assert (await events(database))[0].state == "DONE"
-    assert not bot.edits  # The exact removal card stays unchanged after native punishment.
+    if action == "WARN":
+        assert len(bot.edits) == 1 and "1/3" in bot.edits[0][0]
+    else:
+        assert not bot.edits  # Other punishments do not change the removal event count.
 
 
 async def test_deletion_failure_never_claims_removed_or_punishes(database):

@@ -162,7 +162,7 @@ async def test_exact_requested_lithuanian_kicked_card_uses_real_escaped_identity
     with use_language("lt"):
         assert security_text(event) == (
             "🛡 <b>REDSAFE SECURITY</b>\n\n"
-            "👤 <b>yiye &lt;&amp;&gt;</b> [<code>8733410106</code>]\n\n"
+            '👤 <a href="tg://user?id=8733410106"><b>yiye &lt;&amp;&gt;</b></a> [<code>8733410106</code>]\n\n'
             "⚠️ <b>Priežastis:</b> Nenustatytas @username.\n"
             "🚫 <b>Veiksmas:</b> <b>KICKED</b>\n\n"
             "<i>Norėdami prisijungti, pirmiausia nustatykite Telegram naudotojo vardą.</i>"

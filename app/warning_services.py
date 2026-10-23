@@ -274,6 +274,7 @@ async def schedule_warning_action(
         request_key=key,
         expires_at=now() + timedelta(minutes=10),
         language=language.get(),
+        receipt_visibility="PUBLIC",
     )
     session.add(draft)
     await session.flush()

@@ -42,6 +42,7 @@ class NativeBot:
     def __init__(self):
         self.members = {}
         self.calls = []
+        self.messages = []
         self.error = None
         self.api_false = False
         self.defaults = ChatPermissions(can_send_messages=True, can_send_photos=False)
@@ -75,6 +76,15 @@ class NativeBot:
 
     async def get_chat(self, chat_id):
         return SimpleNamespace(id=chat_id, type="supergroup", permissions=self.defaults)
+
+    async def send_message(self, chat_id, text, **kwargs):
+        self.messages.append((chat_id, text, kwargs))
+        return SimpleNamespace(
+            message_id=10000 + len(self.messages), chat=SimpleNamespace(id=chat_id)
+        )
+
+    async def edit_message_reply_markup(self, **kwargs):
+        return True
 
     async def ban_chat_member(self, **kwargs):
         self.calls.append(("ban", kwargs))

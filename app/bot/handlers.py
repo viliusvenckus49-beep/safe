@@ -554,6 +554,32 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         ):
             await callback.answer(t("p.lookup_profile_unavailable"), show_alert=True)
             return
+        if name in {"profile", "redsafe_check"}:
+            from sqlalchemy import select
+
+            from app.models import GroupModerationDraft
+
+            historical = await service.session.scalar(
+                select(GroupModerationDraft.id)
+                .where(
+                    GroupModerationDraft.status == "CONFIRMED",
+                    GroupModerationDraft.panel_chat_id == message.chat.id,
+                    GroupModerationDraft.panel_message_id == message.message_id,
+                    GroupModerationDraft.receipt_visibility.is_distinct_from("PRIVATE"),
+                )
+                .limit(1)
+            )
+            moderation_controls = bool(
+                message.reply_markup
+                and any(
+                    (button.callback_data or "").startswith("mc3|")
+                    for row in message.reply_markup.inline_keyboard
+                    for button in row
+                )
+            )
+            if historical is not None or moderation_controls:
+                await callback.answer(t("p.lookup_profile_unavailable"), show_alert=True)
+                return
         await callback.answer()
         # The check card no longer has a home button to mark it as chat history.
         check_source = bool(
@@ -580,7 +606,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 for button in row
             )
         )
-        if receipt or check_source:
+        if receipt or (check_source and name not in {"profile", "redsafe_check"}):
             preserved_source.set(message.message_id)
         if name in {"home", "admin", "pending"} and value == "receipt":
             preserved_source.set(message.message_id)
@@ -642,12 +668,20 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         elif name == "profile":
             await clear_flow(state)
             data = await rp.profile_data(service, message.bot, value or str(actor))
-            await render(message, rp.profile_text(data), reply_markup=rp.controls(data["user"].id))
+            await render(
+                message,
+                rp.profile_text(data),
+                reply_markup=rp.controls(data["user"].id),
+                interactive=True,
+            )
         elif name == "redsafe_check":
             await clear_flow(state)
             data = await service.profile(value)
             await render(
-                message, p.profile(data), reply_markup=kb.check_result(data["user"].telegram_id)
+                message,
+                p.profile(data),
+                reply_markup=kb.check_result(data["user"].telegram_id),
+                interactive=True,
             )
         elif name == "redsafe_names":
             await clear_flow(state)

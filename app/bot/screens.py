@@ -1,6 +1,8 @@
 """Move navigation panels to the chat bottom and retire their predecessors."""
 
+import re
 from contextvars import ContextVar
+from html import unescape
 from pathlib import Path
 
 from aiogram.exceptions import TelegramBadRequest
@@ -38,7 +40,13 @@ def _unavailable(error: TelegramBadRequest) -> bool:
     reason = error.message.lower()
     return any(
         value in reason
-        for value in ("message to edit not found", "message can't be edited", "message_id_invalid")
+        for value in (
+            "message to edit not found",
+            "message can't be edited",
+            "message_id_invalid",
+            "there is no text in the message to edit",
+            "message caption is too long",
+        )
     )
 
 
@@ -49,8 +57,14 @@ async def render(
     reply_markup: InlineKeyboardMarkup | None = None,
     edit: bool = True,
     home_photo: bool = False,
+    interactive: bool = False,
 ) -> Message | bool:
     state = panel_state.get()
+    media = any(
+        getattr(message, kind, None)
+        for kind in ("photo", "video", "animation", "document", "audio", "voice")
+    )
+    caption_fits = len(unescape(re.sub(r"<[^>]+>", "", text)).encode("utf-16-le")) // 2 <= 1024
     previous = (
         (await state.get_data()).get("screen_message_id")
         if state is not None and message.message_id == preserved_source.get()
@@ -58,14 +72,17 @@ async def render(
     )
     if (
         edit
-        and navigation_edit.get()
+        and (navigation_edit.get() or interactive)
         and not home_photo
-        and message.chat.type == "private"
+        and (message.chat.type == "private" or interactive)
         and message.message_id != preserved_source.get()
-        and not message.photo
+        and (not media or (interactive and caption_fits))
     ):
         try:
-            result = await message.edit_text(text, reply_markup=reply_markup)
+            if interactive and media:
+                result = await message.edit_caption(caption=text, reply_markup=reply_markup)
+            else:
+                result = await message.edit_text(text, reply_markup=reply_markup)
             if state is not None:
                 await state.update_data(screen_message_id=message.message_id)
             return result
