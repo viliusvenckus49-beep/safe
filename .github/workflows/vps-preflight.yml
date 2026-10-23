@@ -1,4 +1,4 @@
-name: SAFECheck authorized test bot retirement
+name: SAFECheck retirement verification and disk inventory
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -27,117 +27,42 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Remove verified test bot resources and inspect remaining disk usage
+      - name: Verify test retirement, unchanged production and remaining disk usage
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
-          sudo -n python3 -c '"""Delete only the inventoried RedTrustBot sandbox; preserve every other container."""
-          import fcntl,hashlib,json,os,shutil,stat,subprocess
+          sudo -n python3 -c 'import json,os,shutil,subprocess
           from pathlib import Path
-          ROOT=Path('"'"'/home/ubuntu/safecheck-redtrust-mtproto-test-20261020'"'"')
-          PREFIX=ROOT.name
-          SCOPE='"'"'redtrust-mtproto-test'"'"'
-          EXPECTED={
-           PREFIX+'"'"'-bot'"'"':'"'"'8e8969a7a8cd45fecbdc3eb3cc5909dd789e538307181402641aad6f7eef0962'"'"',
-           PREFIX+'"'"'-postgres'"'"':'"'"'10d8ef65834a462721e54169629eeef51f4d014b4d920e116cf4e0f177a2e396'"'"',
-           PREFIX+'"'"'-redis'"'"':'"'"'da8ea95a9c565a09d164afb76f83c57a2b456eb65c0a8c4e54b6c07ff7d04afb'"'"'}
-          PROTECTED={'"'"'safecheck-bot-1'"'"':'"'"'b9fcdac162e7860ea6e56136a8955a5370a22b03eec7956a6fae2f36fc1f0dac'"'"','"'"'safecheck-postgres-1'"'"':'"'"'66aafc7f4afe51ba0ecc246932e9a7bdea3ef81c0d06c1f6818450595692c334'"'"','"'"'safecheck-redis-1'"'"':'"'"'6b2a1d17f3ec0a0b017a6af6baedd496234f378ac82bc4d801e7b0d0c599e747'"'"'}
-          VOLUMES={PREFIX+'"'"'-pgdata'"'"',PREFIX+'"'"'-redisdata'"'"'}
-          NETWORK=PREFIX+'"'"'-data'"'"'
-          NETWORK_ID='"'"'0b1738efcd0d8fbcb71f7bf764fa7bdcf1869e862d4fe505b6b863f0047511e8'"'"'
-          HELPERS=['"'"'SAFECHECK_AUTO_ADS_LIVE_TEST.py'"'"','"'"'SAFECHECK_EPHEMERAL_STAGING.py'"'"','"'"'SAFECHECK_MODERATION_TEST_FIX.py'"'"','"'"'SAFECHECK_MTPROTO_LOOKUP_ONLY.py'"'"','"'"'SAFECHECK_MTPROTO_TEST_SETUP.py'"'"','"'"'SAFECHECK_WARN_CONTROLS_TEST.py'"'"']
           D=['"'"'docker'"'"','"'"'--host=unix:///var/run/docker.sock'"'"']
+          PREFIX='"'"'safecheck-redtrust-mtproto-test-20261020'"'"'
+          EXPECTED={'"'"'safecheck-bot-1'"'"':'"'"'b9fcdac162e7860ea6e56136a8955a5370a22b03eec7956a6fae2f36fc1f0dac'"'"','"'"'safecheck-postgres-1'"'"':'"'"'66aafc7f4afe51ba0ecc246932e9a7bdea3ef81c0d06c1f6818450595692c334'"'"','"'"'safecheck-redis-1'"'"':'"'"'6b2a1d17f3ec0a0b017a6af6baedd496234f378ac82bc4d801e7b0d0c599e747'"'"'}
           ENV=dict(os.environ)
           for key in ('"'"'DOCKER_HOST'"'"','"'"'DOCKER_CONTEXT'"'"','"'"'DOCKER_TLS'"'"','"'"'DOCKER_TLS_VERIFY'"'"','"'"'DOCKER_CERT_PATH'"'"'):ENV.pop(key,None)
-          FMT='"'"'{"id":{{json .Id}},"name":{{json .Name}},"image_id":{{json .Image}},"mounts":{{json .Mounts}},"labels":{{json .Config.Labels}},"state":{{json .State.Status}},"started":{{json .State.StartedAt}},"health":{{if index .State "Health"}}{{json (index .State "Health" "Status")}}{{else}}null{{end}}}'"'"'
-          def run(args,timeout=90):return subprocess.check_output(args,text=True,timeout=timeout,env=ENV)
+          def run(args):return subprocess.check_output(args,text=True,timeout=60,env=ENV)
           def emit(name,value):print(name+'"'"'='"'"'+json.dumps(value,ensure_ascii=True,sort_keys=True),flush=True)
-          def inspect(name):return json.loads(run(D+['"'"'inspect'"'"','"'"'--format'"'"',FMT,name]))
-          def memory():return {l.split('"'"':'"'"')[0]:int(l.split()[1])*1024 for l in Path('"'"'/proc/meminfo'"'"').read_text().splitlines() if l.startswith(('"'"'MemTotal:'"'"','"'"'MemAvailable:'"'"'))}
-          def disk():return dict(zip(('"'"'total'"'"','"'"'used'"'"','"'"'free'"'"'),shutil.disk_usage('"'"'/home/ubuntu'"'"')))
-          def intersects(a,b):
-           a,b=Path(a).resolve(),Path(b).resolve()
-           return a==b or a in b.parents or b in a.parents
           assert os.geteuid()==0
-          assert str(ROOT.resolve())==str(ROOT) and not ROOT.is_symlink() and ROOT.stat().st_uid==0
-          assert stat.S_IMODE(ROOT.stat().st_mode)==0o700
-          lock=os.open(ROOT/'"'"'.warning-upgrade.lock'"'"',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
-          fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-          rows=[inspect(cid) for cid in run(D+['"'"'ps'"'"','"'"'-aq'"'"']).split()]
-          byname={r['"'"'name'"'"'].lstrip('"'"'/'"'"'):r for r in rows}
+          assert not (Path('"'"'/home/ubuntu'"'"')/PREFIX).exists()
+          for args in (['"'"'ps'"'"','"'"'-a'"'"','"'"'--format'"'"','"'"'{{.Names}}'"'"'],['"'"'volume'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"'],['"'"'network'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"']):assert PREFIX not in run(D+args)
+          emit('"'"'TestRetirementVerified'"'"',True)
+          FMT='"'"'{"id":{{json .Id}},"started":{{json .State.StartedAt}},"image":{{json .Config.Image}},"health":{{json .State.Health.Status}},"mounts":{{json .Mounts}}}'"'"'
           for name,cid in EXPECTED.items():
-           assert byname[name]['"'"'id'"'"']==cid and byname[name]['"'"'labels'"'"'].get('"'"'safecheck.scope'"'"')==SCOPE
-          for name,cid in PROTECTED.items():
-           assert byname[name]['"'"'id'"'"']==cid and byname[name]['"'"'health'"'"']=='"'"'healthy'"'"'
-          protected_before={n:byname[n] for n in PROTECTED}
-          for row in rows:
-           if row['"'"'id'"'"'] in EXPECTED.values():continue
-           for mount in row['"'"'mounts'"'"']:
-            assert mount.get('"'"'Name'"'"') not in VOLUMES,'"'"'Test volume is shared'"'"'
-            if mount.get('"'"'Source'"'"'):assert not intersects(ROOT,mount['"'"'Source'"'"']),'"'"'Sandbox path overlaps another container'"'"'
-          for name in VOLUMES:
-           value=json.loads(run(D+['"'"'volume'"'"','"'"'inspect'"'"',name]))[0]
-           assert value['"'"'Labels'"'"'].get('"'"'safecheck.scope'"'"')==SCOPE
-          network=json.loads(run(D+['"'"'network'"'"','"'"'inspect'"'"',NETWORK]))[0]
-          assert network['"'"'Id'"'"']==NETWORK_ID and network['"'"'Labels'"'"'].get('"'"'safecheck.scope'"'"')==SCOPE
-          assert set(network.get('"'"'Containers'"'"',{})).issubset(set(EXPECTED.values()))
-          helper_paths=[]
-          for name in HELPERS:
-           p=Path('"'"'/home/ubuntu'"'"')/name
-           assert p.is_file() and not p.is_symlink()
-           data=p.read_bytes()
-           assert b'"'"'8986848376'"'"' in data or PREFIX.encode() in data
-           assert p.stat().st_uid in (0,1000)
-           helper_paths.append((p,hashlib.sha256(data).hexdigest()))
-          markers=[str(ROOT).encode(),PREFIX.encode(),*[name.encode() for name in HELPERS]]
-          for directory in ('"'"'/etc/systemd/system'"'"','"'"'/etc/cron.d'"'"','"'"'/var/spool/cron/crontabs'"'"'):
-           root=Path(directory)
-           if root.exists():
-            for p in root.rglob('"'"'*'"'"'):
-             if p.is_file() and not p.is_symlink() and p.stat().st_size<1024*1024:
-              assert not any(marker in p.read_bytes() for marker in markers),'"'"'Autostart reference needs review: '"'"'+str(p)
-          emit('"'"'BeforeMemory'"'"',memory());emit('"'"'BeforeDisk'"'"',disk())
-          emit('"'"'AuthorizedRemovalPlan'"'"',{'"'"'containers'"'"':list(EXPECTED),'"'"'volumes'"'"':sorted(VOLUMES),'"'"'network'"'"':NETWORK,'"'"'directory'"'"':str(ROOT),'"'"'helper_files'"'"':[str(p) for p,_ in helper_paths]})
-          for name,cid in EXPECTED.items():
-           assert inspect(name)['"'"'id'"'"']==cid
-           run(D+['"'"'update'"'"','"'"'--restart=no'"'"',cid])
-           run(D+['"'"'stop'"'"','"'"'--time'"'"','"'"'30'"'"',cid],timeout=60)
-           run(D+['"'"'rm'"'"',cid])
-           emit('"'"'TestContainerRemoved'"'"',name)
-          for name in VOLUMES:
-           assert not run(D+['"'"'ps'"'"','"'"'-aq'"'"','"'"'--filter'"'"','"'"'volume='"'"'+name]).strip()
-           assert json.loads(run(D+['"'"'volume'"'"','"'"'inspect'"'"',name]))[0]['"'"'Labels'"'"'].get('"'"'safecheck.scope'"'"')==SCOPE
-           run(D+['"'"'volume'"'"','"'"'rm'"'"',name]);emit('"'"'TestVolumeRemoved'"'"',name)
-          assert not json.loads(run(D+['"'"'network'"'"','"'"'inspect'"'"',NETWORK]))[0].get('"'"'Containers'"'"')
-          run(D+['"'"'network'"'"','"'"'rm'"'"',NETWORK]);emit('"'"'TestNetworkRemoved'"'"',NETWORK)
-          for p,digest in helper_paths:
-           assert p.is_file() and not p.is_symlink() and hashlib.sha256(p.read_bytes()).hexdigest()==digest
-           p.unlink();emit('"'"'TestHelperRemoved'"'"',str(p))
-           cache=p.parent/'"'"'__pycache__'"'"'
-           if cache.is_dir() and not cache.is_symlink():
-            for pyc in cache.glob(p.stem+'"'"'.*.pyc'"'"'):
-             if pyc.is_file() and not pyc.is_symlink():pyc.unlink()
-          assert ROOT.stat().st_uid==0 and not ROOT.is_symlink()
-          shutil.rmtree(ROOT);emit('"'"'TestDirectoryRemoved'"'"',str(ROOT))
-          assert not ROOT.exists()
-          remaining=[inspect(cid) for cid in run(D+['"'"'ps'"'"','"'"'-aq'"'"']).split()]
-          assert not any(r['"'"'name'"'"'].lstrip('"'"'/'"'"').startswith(PREFIX) for r in remaining)
-          for name,before in protected_before.items():
-           after=inspect(name)
-           assert after==before,'"'"'Production container changed: '"'"'+name
-           emit('"'"'ProductionPreserved'"'"',{'"'"'name'"'"':name,'"'"'id'"'"':after['"'"'id'"'"'],'"'"'health'"'"':after['"'"'health'"'"'],'"'"'started'"'"':after['"'"'started'"'"']})
-          emit('"'"'AfterTestRemovalMemory'"'"',memory());emit('"'"'AfterTestRemovalDisk'"'"',disk())
+           value=json.loads(run(D+['"'"'inspect'"'"','"'"'--format'"'"',FMT,name]))
+           value['"'"'mounts'"'"']=sorted(value['"'"'mounts'"'"'],key=lambda m:m['"'"'Destination'"'"'])
+           emit('"'"'ProductionStatus'"'"',dict(name=name,**value))
+           assert value['"'"'id'"'"']==cid and value['"'"'health'"'"']=='"'"'healthy'"'"'
+           assert value['"'"'started'"'"']<'"'"'2026-10-23T15:36:24'"'"'
+          emit('"'"'BotRuntimeHealth'"'"',run(D+['"'"'exec'"'"','"'"'safecheck-bot-1'"'"','"'"'python'"'"','"'"'/run/configs/secret_entrypoint.py'"'"','"'"'python'"'"','"'"'-c'"'"','"'"'import json;from app.health import snapshot;s=snapshot();print(json.dumps(s,sort_keys=True));assert s["healthy"]'"'"']).strip())
+          emit('"'"'HostMemory'"'"',{l.split('"'"':'"'"')[0]:int(l.split()[1])*1024 for l in Path('"'"'/proc/meminfo'"'"').read_text().splitlines() if l.startswith(('"'"'MemTotal:'"'"','"'"'MemAvailable:'"'"'))})
+          emit('"'"'DiskUsage'"'"',dict(zip(('"'"'total'"'"','"'"'used'"'"','"'"'free'"'"'),shutil.disk_usage('"'"'/home/ubuntu'"'"'))))
           emit('"'"'DockerDiskSummary'"'"',run(D+['"'"'system'"'"','"'"'df'"'"']).strip())
           for directory in ('"'"'/home/ubuntu/safecheck-releases'"'"','"'"'/var/lib/safecheck'"'"','"'"'/var/backups/safecheck'"'"','"'"'/var/cache/apt/archives'"'"','"'"'/root/.cache/pip'"'"','"'"'/home/ubuntu/.cache/pip'"'"','"'"'/var/log/journal'"'"'):
            p=Path(directory)
            if p.is_dir() and not p.is_symlink():emit('"'"'KnownDirectoryBytes'"'"',{'"'"'path'"'"':directory,'"'"'bytes'"'"':int(run(['"'"'du'"'"','"'"'-sx'"'"','"'"'-B1'"'"',directory]).split()[0])})
-          for line in run(D+['"'"'image'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{json .}}'"'"']).splitlines():
-           value=json.loads(line)
-           emit('"'"'ImageInventory'"'"',{k:value.get(k) for k in ('"'"'ID'"'"','"'"'Repository'"'"','"'"'Tag'"'"','"'"'Size'"'"','"'"'CreatedAt'"'"')})
-          emit('"'"'TestRetirement'"'"','"'"'COMPLETE'"'"')'
+          for line in run(D+['"'"'image'"'"','"'"'ls'"'"','"'"'--no-trunc'"'"','"'"'--format'"'"','"'"'{{json .}}'"'"']).splitlines():
+           row=json.loads(line);emit('"'"'ImageInventory'"'"',{k:row.get(k) for k in ('"'"'ID'"'"','"'"'Repository'"'"','"'"'Tag'"'"','"'"'Size'"'"','"'"'CreatedAt'"'"')})'
           REMOTE
       - name: Remove runner key
         if: always()
