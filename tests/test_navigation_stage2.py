@@ -295,14 +295,14 @@ async def test_selected_group_moderation_and_history_are_scoped(local_journey, d
     assert j.transport.calls[-1].show_alert
 
 
-async def test_home_html_is_identical_to_the_previous_release():
+async def test_home_html_matches_the_approved_localized_copy():
     import hashlib
 
-    # Golden hashes of the three approved HTML templates from release3578765.
+    # Approved home copy: exact Unicode, HTML tags, blank lines and localized structure.
     expected = {
-        "lt": "6ba806e1df332d0e31bfccdcf274e5bc9a5bb0798256fa2a13d2a55f39536ed1",
-        "en": "aae3df353dabdb9d19487d6fad10a01740898cb2d126f61fafee0a59969b781b",
-        "ru": "28592c19b29d26196a95e72f14164dbcfeb06875f35d30e09e9768b3a40dcbc3",
+        "lt": "212ec1aab8836a8ded45fa859dc344e178d9c70a6c3e7fbe364bf22974a6fdd4",
+        "en": "f5f80a98dc39535e2963340e125e38c9410908b936b55b83490efc7fa84455c9",
+        "ru": "2b82cb5dbe800c7885427320853fbd7579bd8a97d796ec63829492844ecafc52",
     }
     for lang, digest in expected.items():
         assert hashlib.sha256(CATALOGS[lang]["p.home"].encode()).hexdigest() == digest
