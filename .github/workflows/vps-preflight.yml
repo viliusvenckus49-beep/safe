@@ -1,4 +1,4 @@
-name: SAFECheck VPS preflight
+name: SAFECheck navigation read-only verification
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -36,47 +36,63 @@ jobs:
           set -eu
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
+          import importlib.util
           import json
           import asyncpg
           from app.config import Settings
           from app.health import snapshot
           
+          
           def emit(name,value):
-              print(name+'"'"'='"'"'+json.dumps(value,default=str,sort_keys=True))
+              print(name+'"'"'='"'"'+json.dumps(value,sort_keys=True,default=str))
+          
           
           async def main():
-              from app.bot.commands import LOCAL_COMMANDS
-              from app.bot.group_help import register_group_help
-              assert '"'"'warns'"'"' in LOCAL_COMMANDS and '"'"'warnings'"'"' not in LOCAL_COMMANDS
-              assert callable(register_group_help)
-              emit('"'"'GroupHelpRuntime'"'"',{'"'"'group_first'"'"':True,'"'"'warning_history_command'"'"':'"'"'warns'"'"'})
-              state=snapshot()
-              emit('"'"'RuntimeHeartbeat'"'"',state)
-              if not state['"'"'healthy'"'"']:
-                  raise RuntimeError('"'"'Runtime unhealthy'"'"')
+              healthy=snapshot()
+              emit('"'"'RuntimeHeartbeat'"'"',healthy)
+              if not healthy['"'"'healthy'"'"']:
+                  raise RuntimeError('"'"'Unhealthy runtime'"'"')
+              upgraded=importlib.util.find_spec('"'"'app.bot.admin_navigation'"'"') is not None
+              if upgraded:
+                  from app.bot import keyboards,states
+                  from app.group_services import GroupService
+                  from app.i18n import CATALOGS,use_language
+                  from app.locales.button_icons import CATALOGS as icons
+                  for lang in ('"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"'):
+                      assert '"'"'command.recovery'"'"' not in CATALOGS[lang]
+                      with use_language(lang):
+                          buttons=[b for row in keyboards.home(True,owner=True).inline_keyboard for b in row]
+                          assert all(b.icon_custom_emoji_id is None for b in buttons)
+                          assert all(len(b.callback_data.encode())<=64 for b in buttons)
+                          assert not any(b.callback_data.startswith('"'"'sg|'"'"') for b in buttons)
+                          assert icons[lang]=={}
+                  assert not hasattr(states,'"'"'RecoveryFlow'"'"')
+                  assert not any(hasattr(GroupService,name) for name in ('"'"'queue_recovery'"'"','"'"'subscribe'"'"','"'"'export_members'"'"','"'"'claim_deliveries'"'"'))
+                  emit('"'"'NavigationStage2Runtime'"'"',{'"'"'state'"'"':'"'"'AFTER'"'"','"'"'unicode_labels'"'"':True,'"'"'legacy_recovery_runtime_removed'"'"':True,'"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
+              else:
+                  emit('"'"'NavigationStage2Runtime'"'"',{'"'"'state'"'"':'"'"'BEFORE'"'"'})
               db=await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
               try:
                   async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
-                      revision=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
-                      emit('"'"'ChecksSchema'"'"',revision)
-                      if revision!='"'"'0023'"'"':
-                          raise RuntimeError('"'"'Expected Checks schema'"'"')
-                      rows=await db.fetch('"'"'SELECT chat_id,version,actions,check_on_join,delete_messages,notify_result,mute_seconds,words_action,words_delete,json_array_length(banned_words) AS banned_word_count FROM group_check_settings ORDER BY chat_id'"'"')
-                      emit('"'"'ChecksPolicies'"'"',[dict(r) for r in rows])
-                      states=await db.fetch('"'"'SELECT state,count(*) AS count FROM group_check_events GROUP BY state ORDER BY state'"'"')
-                      emit('"'"'ChecksEvents'"'"',[dict(r) for r in states])
-                      invalid=await db.fetchval("SELECT count(*) FROM group_check_events e JOIN group_sanction_jobs j ON j.sanction_id=e.sanction_id WHERE j.operation='"'"'APPLY'"'"' AND (e.notice_message_id IS NULL OR e.notice_sent_at IS NULL OR e.execute_after IS NULL OR e.execute_after<e.notice_sent_at+make_interval(secs=>e.grace_seconds) OR e.grace_seconds<>CASE WHEN e.kick_attempt>=4 THEN 0 WHEN e.kick_attempt>=2 THEN 5 ELSE 15 END OR j.created_at<e.execute_after)")
-                      emit('"'"'EarlyOrUnannouncedCheckActions'"'"',invalid)
-                      if invalid:
-                          raise RuntimeError('"'"'Notice grace invariant failed'"'"')
-                      policies=await db.fetch('"'"'SELECT chat_id,warning_limit,warning_action,warning_mute_seconds,warning_version FROM group_moderation_settings ORDER BY chat_id'"'"')
-                      emit('"'"'WarningPolicies'"'"',[dict(r) for r in policies])
+                      schema=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
+                      emit('"'"'Schema'"'"',schema)
+                      assert schema=='"'"'0023'"'"'
+                      for name,table,condition in (
+                          ('"'"'UnfinishedNativeJobs'"'"','"'"'group_sanction_jobs'"'"',"status IN ('"'"'PENDING'"'"','"'"'PROCESSING'"'"','"'"'UNCERTAIN'"'"')"),
+                          ('"'"'UnfinishedNativeSanctions'"'"','"'"'group_sanctions'"'"',"status IN ('"'"'PENDING'"'"','"'"'REVOKING'"'"','"'"'UNCERTAIN'"'"')"),
+                          ('"'"'UnfinishedAds'"'"','"'"'ad_publication_attempts'"'"',"status IN ('"'"'CLAIMED'"'"','"'"'SENDING'"'"','"'"'UNCERTAIN'"'"')"),
+                          ('"'"'UnfinishedChecks'"'"','"'"'group_check_events'"'"',"state IN ('"'"'PENDING'"'"','"'"'WAITING'"'"','"'"'SENDING'"'"','"'"'QUEUED'"'"')"),
+                      ):
+                          emit(name,await db.fetchval('"'"'SELECT count(*) FROM '"'"'+table+'"'"' WHERE '"'"'+condition))
+                      emit('"'"'HistoricalRecoveryStates'"'"',[dict(row) for row in await db.fetch('"'"'SELECT status,count(*) AS count FROM recovery_deliveries GROUP BY status ORDER BY status'"'"')])
+                      emit('"'"'RetainedCounts'"'"',dict(await db.fetchrow('"'"''"'"''"'"'SELECT (SELECT count(*) FROM users) AS users,(SELECT count(*) FROM managed_groups) AS groups,(SELECT count(*) FROM scam_records) AS scam,(SELECT count(*) FROM trusted_designations) AS trusted,(SELECT count(*) FROM group_sanctions) AS sanctions,(SELECT count(*) FROM audit_events) AS audit,(SELECT count(*) FROM recovery_campaigns) AS legacy_campaigns,(SELECT count(*) FROM recovery_subscriptions) AS legacy_subscriptions,(SELECT count(*) FROM recovery_deliveries) AS legacy_deliveries'"'"''"'"''"'"')))
               finally:
                   await db.close()
+          
           try:
               asyncio.run(main())
           except Exception as error:
-              emit('"'"'ReadOnlyChecksVerificationFailed'"'"',{'"'"'type'"'"':type(error).__name__})
+              emit('"'"'NavigationStage2VerificationFailed'"'"',{'"'"'type'"'"':type(error).__name__})
               raise SystemExit(1) from None
           '
           REMOTE
