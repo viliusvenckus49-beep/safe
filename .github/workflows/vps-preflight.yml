@@ -93,7 +93,7 @@ jobs:
                   for lang in ('"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"'):
                       with use_language(lang):
                           assert t('"'"'button.check_profile'"'"').startswith('"'"'🪪 '"'"')
-                          assert '"'"'{admin}'"'"' in t('"'"'lm.notice.automatic_admin'"'"',admin='"'"'{admin}'"'"')
+                          assert '"'"'INITIATOR'"'"' in t('"'"'lm.notice.automatic_admin'"'"',initiator='"'"'INITIATOR'"'"')
                   emit('"'"'WarnEventRuntime'"'"',{'"'"'sources_verified'"'"':len(expected_sources),'"'"'linked_display_names'"'"':True,'"'"'profile_icon'"'"':'"'"'🪪'"'"','"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
               db=await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
               try:
