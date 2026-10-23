@@ -1,4 +1,4 @@
-name: SAFECheck WARN event read-only verification
+name: SAFECheck release guard read-only diagnostics
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -34,6 +34,8 @@ jobs:
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
+          python3 -c 'import pathlib,shutil; print("ReleaseDiskFreeBytes="+str(shutil.disk_usage(pathlib.Path.home()).free)); print("ReleaseMemAvailable="+next(line.strip() for line in pathlib.Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemAvailable:")))'
+          sudo -n docker ps --format 'ActiveContainer={{.Names}} Networks={{.Networks}}'
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
           import importlib.util
