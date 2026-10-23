@@ -280,6 +280,7 @@ async def test_photo_layout_localization_edit_only_and_back_navigation(
     await journey.click(action("group_help"), actor=42)
     from app.bot.group_help import cb as gh_cb
 
+    await journey.click(gh_cb(), actor=42)
     assert gh_cb("group", CHAT) in [b.callback_data for b in buttons(journey)]
     await journey.click(gh_cb("group", CHAT), actor=42)
     await journey.click(cb("policy", CHAT), actor=42)
@@ -292,7 +293,7 @@ async def test_photo_layout_localization_edit_only_and_back_navigation(
     sent = len([c for c in journey.transport.calls if isinstance(c, SendMessage)])
     choose = next(b.callback_data for b in buttons(journey) if b.text == "5")
     await journey.click(choose, actor=42)
-    assert "5 ✅" in [b.text for b in buttons(journey)]
+    assert "5 ✓" in [b.text for b in buttons(journey)]
     mute = next(
         b.callback_data
         for b in buttons(journey)
@@ -356,7 +357,7 @@ async def test_stale_setting_click_is_private_and_cannot_overwrite_new_policy(
     await journey.click(previous, actor=42)
     assert isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
     assert journey.transport.calls[-1].show_alert
-    assert "4 ✅" in [b.text for b in buttons(journey)]
+    assert "4 ✓" in [b.text for b in buttons(journey)]
     async with database() as session:
         assert (await session.get(GroupModerationSettings, CHAT)).warning_limit == 4
     assert not any(isinstance(c, SendMessage) for c in journey.transport.calls)

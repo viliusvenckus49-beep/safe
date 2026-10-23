@@ -24,6 +24,7 @@ from app.models import (
     BanAction,
     ManagedGroup,
     ObservedMember,
+    PrivateContact,
     RecoveryCampaign,
     RecoveryDelivery,
     RecoverySubscription,
@@ -41,10 +42,21 @@ async def seed(factory, settings):
         groups = GroupService(settings, session)
         for chat in (CHAT, OTHER):
             await groups.register_group(900, chat, "<Group>", True)
-            await groups.mark_private_contact(21)
+            if await session.get(PrivateContact, 21) is None:
+                session.add(PrivateContact(telegram_id=21))
+                await session.flush()
             await groups.observe_member(chat, 21, "member_name", "Member")
-            await groups.subscribe(21, chat, True)
-            await groups.queue_recovery(900, chat, "https://t.me/+Invite123", f"campaign:{chat}")
+            session.add(RecoverySubscription(chat_id=chat, telegram_id=21, consent=True))
+            campaign = RecoveryCampaign(
+                chat_id=chat,
+                actor_id=900,
+                invite_url="https://t.me/+Invite123",
+                request_key=f"campaign:{chat}",
+            )
+            session.add(campaign)
+            await session.flush()
+            session.add(RecoveryDelivery(campaign_id=campaign.id, telegram_id=21))
+            await session.commit()
         await Service(settings, session).add_scam(900, "22")
 
 
@@ -66,8 +78,7 @@ async def test_remove_hides_group_cancels_work_and_preserves_history(database, s
         removed = await session.get(ManagedGroup, CHAT, populate_existing=True)
         assert not removed.approved and not removed.enabled and not removed.can_restrict_members
         assert [g.chat_id for g in await groups.groups(900)] == [OTHER]
-        assert [g.chat_id for g in await groups.groups_for_subscription(21)] == [OTHER]
-        assert not (await session.get(RecoverySubscription, (CHAT, 21))).consent
+        assert (await session.get(RecoverySubscription, (CHAT, 21))).consent
         assert await session.get(ObservedMember, (CHAT, 21)) is not None
         assert await session.scalar(select(func.count()).select_from(ScamRecord)) == 1
         assert await session.scalar(select(func.count()).select_from(ManagedGroup)) == 2
@@ -75,7 +86,8 @@ async def test_remove_hides_group_cancels_work_and_preserves_history(database, s
         await session.refresh(ban)
         await session.refresh(delivery)
         expected = "SUCCEEDED" if status == "SUCCEEDED" else "OBSOLETE"
-        assert ban.status == delivery.status == expected
+        assert ban.status == expected
+        assert delivery.status == status  # Historical withdrawn-feature data is unchanged.
         assert (
             await session.scalar(select(AuditEvent).where(AuditEvent.action == "group_removed"))
         ).details["chat_id"] == CHAT
@@ -103,10 +115,6 @@ async def test_removed_group_cannot_be_reactivated_or_recovered(database, settin
         for operation in (
             lambda: groups.register_group(900, CHAT, "Rejoined", True),
             lambda: groups.remove_group(900, CHAT),
-            lambda: groups.subscribe(21, CHAT, True),
-            lambda: groups.export_members(900, CHAT),
-            lambda: groups.prepare_recovery(900, CHAT, "https://t.me/+Invite123", "new"),
-            lambda: groups.queue_recovery(900, CHAT, "https://t.me/+Invite123", "new"),
         ):
             with pytest.raises(DomainError):
                 await operation()
@@ -136,17 +144,13 @@ async def test_removal_invalidates_cached_claims_and_stale_worker_results(databa
     async with database() as worker:
         groups = GroupService(settings, worker)
         bans = await groups.claim_bans()
-        deliveries = await groups.claim_deliveries()
         removed_ban = next(b for b in bans if b.chat_id == CHAT)
-        removed_delivery = next(d for d in deliveries if d.campaign.chat_id == CHAT)
         async with database() as owner:
             await GroupService(settings, owner).remove_group(900, CHAT)
         # Cached PROCESSING objects must not resurrect jobs invalidated by another session.
         await groups.finish_ban(removed_ban.id, False, "TelegramBadRequest")
-        await groups.finish_delivery(removed_delivery.id, True, "SENT")
-        assert removed_ban.status == removed_delivery.status == "OBSOLETE"
+        assert removed_ban.status == "OBSOLETE"
         assert not await groups.ban_eligible(removed_ban.id)
-        assert not await groups.delivery_eligible(removed_delivery.id)
 
 
 async def test_worker_revalidates_group_removed_after_claim(database, settings, monkeypatch):
@@ -161,9 +165,9 @@ async def test_worker_revalidates_group_removed_after_claim(database, settings, 
 
     monkeypatch.setattr(GroupService, "claim_bans", claimed_then_removed)
     bot = WorkerBot()
-    assert await process_group_jobs(bot, settings, database) == 2
+    assert await process_group_jobs(bot, settings, database) == 1
     assert bot.bans == [(OTHER, 22)]
-    assert len(bot.messages) == 1
+    assert bot.messages == []
 
 
 @pytest_asyncio.fixture

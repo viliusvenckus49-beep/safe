@@ -26,6 +26,75 @@ release = module("production_release")
 probe = module("production_probe")
 
 
+async def test_postgres_release_preserves_only_unattempted_future_expiries(postgres_contract):
+    factory, _ = postgres_contract
+    async with factory() as session:
+        # Temporary tables isolate the actual PostgreSQL guard query from all
+        # application data and retain its real timestamp/null semantics.
+        await session.execute(
+            text("""CREATE TEMP TABLE group_sanctions (
+            id bigint, status text, owned boolean, kind text, until_date timestamptz,
+            replaces_sanction_id bigint) ON COMMIT DROP""")
+        )
+        await session.execute(
+            text("""CREATE TEMP TABLE group_sanction_jobs (
+            id bigint, sanction_id bigint, status text, operation text, automatic boolean,
+            actor_id bigint, attempts integer, available_at timestamptz,
+            lease_until timestamptz, lease_token text, result text) ON COMMIT DROP""")
+        )
+        await session.execute(
+            text("""INSERT INTO group_sanctions VALUES
+            (1,'ACTIVE',true,'MUTE',CURRENT_TIMESTAMP + INTERVAL '1 day',NULL)""")
+        )
+        await session.execute(
+            text("""INSERT INTO group_sanction_jobs VALUES
+            (1,1,'SUCCEEDED','APPLY',false,900,1,CURRENT_TIMESTAMP,NULL,NULL,'APPLIED'),
+            (2,1,'PENDING','RELEASE',true,NULL,0,
+             CURRENT_TIMESTAMP + INTERVAL '1 day',NULL,NULL,NULL)""")
+        )
+
+        async def blockers():
+            return await session.scalar(
+                text(
+                    "SELECT count(*) FROM group_sanction_jobs WHERE " + release.BLOCKING_NATIVE_JOBS
+                )
+            )
+
+        assert await blockers() == 0
+        # Every unsafe deviation must still hold the release. Revert each change
+        # with a savepoint; this must never resolve/relabel the existing queue.
+        changes = (
+            "UPDATE group_sanction_jobs SET status='PROCESSING' WHERE id=2",
+            "UPDATE group_sanction_jobs SET status='UNCERTAIN' WHERE id=2",
+            "UPDATE group_sanction_jobs SET operation='APPLY' WHERE id=2",
+            "UPDATE group_sanction_jobs SET automatic=false WHERE id=2",
+            "UPDATE group_sanction_jobs SET actor_id=900 WHERE id=2",
+            "UPDATE group_sanction_jobs SET attempts=1 WHERE id=2",
+            "UPDATE group_sanction_jobs SET lease_until=CURRENT_TIMESTAMP WHERE id=2",
+            "UPDATE group_sanction_jobs SET lease_token='existing' WHERE id=2",
+            "UPDATE group_sanction_jobs SET result='RetryAfter' WHERE id=2",
+            "UPDATE group_sanction_jobs SET available_at=CURRENT_TIMESTAMP WHERE id=2",
+            "UPDATE group_sanctions SET until_date=NULL",
+            "UPDATE group_sanctions SET until_date=CURRENT_TIMESTAMP - INTERVAL '1 second'",
+            "UPDATE group_sanctions SET until_date=CURRENT_TIMESTAMP + INTERVAL '20 minutes'",
+            "UPDATE group_sanctions SET status='REVOKED'",
+            "UPDATE group_sanctions SET owned=false",
+            "UPDATE group_sanctions SET kind='KICK'",
+            "DELETE FROM group_sanctions",
+            "DELETE FROM group_sanction_jobs WHERE id=1",
+            "UPDATE group_sanction_jobs SET status='UNCERTAIN' WHERE id=1",
+            "UPDATE group_sanction_jobs SET result='UNKNOWN' WHERE id=1",
+            "INSERT INTO group_sanctions VALUES (3,'PENDING',false,'BAN',NULL,1)",
+        )
+        for statement in changes:
+            async with session.begin_nested() as savepoint:
+                await session.execute(text(statement))
+                assert await blockers() > 0, statement
+                await savepoint.rollback()
+        assert await blockers() == 0
+        assert await session.scalar(text("SELECT count(*) FROM group_sanction_jobs")) == 2
+
+
 def test_mount_order_is_not_a_data_service_change_but_mount_content_is():
     row = {
         "Id": "id",

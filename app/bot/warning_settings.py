@@ -96,7 +96,7 @@ async def policy_panel(message: Message, policy: GroupModerationSettings | None,
         [choice("MUTE"), choice("BAN")],
         [(t("ws.duration"), cb("duration", chat))],
         [
-            (str(n) + (" ✅" if n == limit else ""), cb("limit", chat, str(n), version))
+            (str(n) + (" ✓" if n == limit else ""), cb("limit", chat, str(n), version))
             for n in range(2, 7)
         ],
         [(t("ws.back"), GroupHelp(action="group", chat=chat).pack())],
@@ -254,7 +254,7 @@ def register_warning_settings_handlers(router: Router) -> None:
                     rows = [
                         [
                             (
-                                duration_text(n, "MUTE") + (" ✅" if chosen == n else ""),
+                                duration_text(n, "MUTE") + (" ✓" if chosen == n else ""),
                                 cb("mute", d.chat, str(n), version),
                             )
                             for n in DURATIONS[i : i + 2]

@@ -27,11 +27,6 @@ class AdminAccessFlow(StatesGroup):
     preview = State()
 
 
-class RecoveryFlow(StatesGroup):
-    invite = State()
-    preview = State()
-
-
 class GroupRemovalFlow(StatesGroup):
     confirm = State()
 

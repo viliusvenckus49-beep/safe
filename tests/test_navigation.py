@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from aiogram.methods import SendMessage, SendPhoto
+from aiogram.methods import EditMessageText, SendMessage, SendPhoto
 from test_telegram import journey as telegram_journey
 
 from app.bot import group_keyboards
@@ -18,7 +18,9 @@ journey = telegram_journey
 
 def last_message(j):
     item = next(
-        item for item in reversed(j.transport.calls) if isinstance(item, (SendMessage, SendPhoto))
+        item
+        for item in reversed(j.transport.calls)
+        if isinstance(item, (SendMessage, SendPhoto, EditMessageText))
     )
     return (
         SimpleNamespace(text=item.caption, reply_markup=item.reply_markup)
@@ -59,7 +61,7 @@ async def test_rep_decision_back_returns_to_queue_not_start(journey):
     )
     assert callbacks(last_message(journey).reply_markup) == [kb.action("rep_pending", "0")]
     await journey.click(kb.action("rep_pending", "0"), actor=900)
-    assert kb.action("admin") in callbacks(last_message(journey).reply_markup)
+    assert kb.action("rep_admin") in callbacks(last_message(journey).reply_markup)
     await journey.click(kb.action("admin"), actor=900)
     assert kb.action("rep_admin") in callbacks(last_message(journey).reply_markup)
 
@@ -71,7 +73,15 @@ async def test_rep_decision_back_returns_to_queue_not_start(journey):
 async def test_admin_sections_return_to_admin_panel(journey, route, value):
     await journey.click(kb.action(route, value), actor=900)
     values = callbacks(last_message(journey).reply_markup)
-    assert kb.action("admin") in values
+    expected = (
+        kb.action("admin")
+        if route == "rep_admin"
+        else kb.action(
+            "admin_section",
+            "users" if route == "users" else "scam" if route == "admin_scams" else "system",
+        )
+    )
+    assert expected in values
     assert kb.action("home") not in values
     assert kb.action("close") not in values
     await journey.click(kb.action("admin"), actor=900)
@@ -86,7 +96,7 @@ async def test_admin_registry_pagination_retains_admin_origin(journey, database,
     values = callbacks(last_message(journey).reply_markup)
     assert kb.action("admin_scams", "1") in values
     await journey.click(kb.action("admin_scams", "1"), actor=900)
-    assert kb.action("admin") in callbacks(last_message(journey).reply_markup)
+    assert kb.action("admin_section", "scam") in callbacks(last_message(journey).reply_markup)
     await journey.click(kb.action("scams", "1"))
     assert kb.action("home") in callbacks(last_message(journey).reply_markup)
     await journey.click(kb.action("admin_scams", "0"))
@@ -100,7 +110,7 @@ async def test_scam_removal_back_keeps_operation_and_retargets(journey, database
         await Service(settings, session).add_scam(900, "42")
     await journey.click(kb.action("del_sc"), actor=900)
     assert await journey.state(900) == InputFlow.admin_target.state
-    assert kb.action("admin") in callbacks(last_message(journey).reply_markup)
+    assert kb.action("admin_section", "scam") in callbacks(last_message(journey).reply_markup)
     await journey.send("42", actor=900)
     await journey.send("tiny", actor=900)
     assert kb.action("admin_target_back") in callbacks(last_message(journey).reply_markup)
@@ -164,8 +174,6 @@ def test_static_screens_have_no_cancel_and_drafts_have_back(locale):
             kb.navigation(),
             kb.admin_rep_navigation("nonce", False),
             kb.report("nonce", "target"),
-            group_keyboards.recovery_input(-100),
-            group_keyboards.preview(-100, "nonce"),
         ]
         for markup in drafts:
             labels = [button.text for row in markup.inline_keyboard for button in row]
@@ -266,6 +274,6 @@ async def test_check_results_keep_two_buttons_and_existing_receipt_navigation(
             kb.action("home", "receipt") if persistent else kb.action("home"), chat=chat
         )
         if not persistent:
-            assert len(journey.transport.deletions) == before + 1
+            assert len(journey.transport.deletions) == before + (1 if chat is not None else 0)
         state = journey.dp.fsm.get_context(bot=journey.bot, chat_id=chat or 1, user_id=1)
         assert await state.get_state() is None

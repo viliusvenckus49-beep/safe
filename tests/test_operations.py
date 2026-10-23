@@ -38,7 +38,6 @@ class FakeDocker:
         self.states = {name: "healthy" for name in ("bot", "postgres", "redis")}
         self.metrics = {
             "ban_terminal": 0,
-            "recovery_terminal": 0,
             "oldest_pending_seconds": 0,
             "pending_reports": 0,
             "pending_rep": 0,
@@ -369,6 +368,17 @@ def test_monitor_notifies_new_terminal_counts_once_and_stale_outbox(tmp_path, mo
     assert ops.monitor() is False
     assert len(messages) == 3
     assert any("secret_entrypoint.py" in " ".join(command) for command in fake.commands)
+
+
+async def test_monitor_accepts_actual_metrics_after_group_recovery_removal(database, tmp_path):
+    from app.repositories import Repository
+
+    ops, fake = make_ops(tmp_path, "monitor")
+    async with database() as session:
+        fake.metrics = await Repository(session).operational_stats()
+    assert "recovery_terminal" not in fake.metrics
+    assert ops.monitor() is True
+    assert json.loads((ops.state / "monitor.json").read_text())["healthy"] is True
 
 
 def test_monitor_respects_maintenance_and_detects_stale_marker(tmp_path):

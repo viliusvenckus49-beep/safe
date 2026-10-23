@@ -317,7 +317,6 @@ async def test_postgres_scam_add_and_member_observation_keep_export_filtered(pos
 
     await asyncio.gather(observe(), add())
     async with sessions() as session:
-        assert await GroupService(settings, session).export_members(900, -100) == []
         users, _ = await Service(settings, session).users(900, 0)
         assert 42 not in [user.telegram_id for user in users]
 

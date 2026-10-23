@@ -36,8 +36,8 @@ async def test_root_list_and_individual_ui_have_no_duplicate_navigation(
         await Service(settings, session).set_language(900, lang)
     await journey.send("/ads", actor=900)
     assert "AUTO ADS" in last_screen(journey).text
-    assert t("ua.mine", lang) in [b.text for b in buttons(journey)]
-    assert action("group_help") in [b.callback_data for b in buttons(journey)]
+    assert t("nav.ads_list", lang) in [b.text for b in buttons(journey)]
+    assert action("admin") in [b.callback_data for b in buttons(journey)]
     await journey.click(cb("list"), actor=900)
     assert "Partner &lt;private&gt;" in last_screen(journey).text
     await journey.click(cb("panel", cid), actor=900)

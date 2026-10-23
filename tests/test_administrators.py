@@ -251,7 +251,7 @@ async def test_owner_menu_and_management_private_guard(database, settings):
         await j.send("/admin", actor=900)
         markup = j.transport.calls[-1].reply_markup
         assert any(
-            button.callback_data == AdminAccess(action="list").pack()
+            button.callback_data == "sc|admin_section|owner"
             for row in markup.inline_keyboard
             for button in row
         )

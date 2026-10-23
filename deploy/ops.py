@@ -501,7 +501,6 @@ class Operations:
                 metrics = json.loads(raw)
                 expected = {
                     "ban_terminal",
-                    "recovery_terminal",
                     "oldest_pending_seconds",
                     "pending_reports",
                     "pending_rep",
@@ -542,7 +541,7 @@ class Operations:
         last_sent = previous.get("last_sent", 0)
         new_failures = any(
             metrics.get(key, 0) > previous.get("metrics", {}).get(key, 0)
-            for key in ("ban_terminal", "recovery_terminal")
+            for key in ("ban_terminal",)
         )
         if self.args.alert_token_file and (
             changed or new_failures or (not healthy and time.time() - last_sent >= 3600)
@@ -558,9 +557,7 @@ class Operations:
                     + ": "
                     + signature
                     + "; terminal jobs: "
-                    + json.dumps(
-                        {key: metrics.get(key, 0) for key in ("ban_terminal", "recovery_terminal")}
-                    )
+                    + json.dumps({key: metrics.get(key, 0) for key in ("ban_terminal",)})
                 )
                 last_sent = time.time()
         private_write(

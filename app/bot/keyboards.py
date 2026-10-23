@@ -15,7 +15,6 @@ from app.bot.callbacks import (
     ReportStep,
     ReputationModeration,
 )
-from app.bot.group_keyboards import GroupAction
 from app.i18n import t
 from app.presentation import display_name, display_text, leaderboard_name
 
@@ -41,13 +40,11 @@ def home(admin: bool = False, *, private: bool = True, owner: bool = False) -> I
         + ([(t("button.scams"), action("scams", "0"))] if private else []),
         [(t("button.rep"), action("rep")), (t("button.info"), action("info"))],
     ]
-    if private:
-        rows.append([(t("button.recovery"), GroupAction(action="subscriptions").pack())])
     rows.append([(t("button.language"), action("language"))])
-    if admin and private:
-        rows.append([(t("button.admin"), action("admin"))])
     if private:
         rows.append([(t("ac.mine"), CustomerAd(action="list").pack())])
+    if admin and private:
+        rows.append([(t("button.admin"), action("admin"))])
     rows.append([(t("button.close"), action("close"))])
     return keyboard(rows)
 
@@ -122,21 +119,19 @@ def report(nonce: str, stage: str) -> InlineKeyboardMarkup:
 
 
 def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
+    from app.bot.callbacks import AutoAd
+
     rows = [
-        [(t("tm.menu"), action("trusted_admin"))],
-        [(t("button.pending"), action("pending"))],
-        [(t("button.rep_pending"), action("rep_pending", "0"))],
-        [(t("button.rep_admin"), action("rep_admin"))],
-        [(t("button.registry"), action("admin_scams", "0"))],
-        [(t("button.add_scam"), action("add_sc")), (t("button.remove_scam"), action("del_sc"))],
-        [(t("button.users"), action("users", "0")), (t("button.stats"), action("stats"))],
-        [(t("button.audit"), action("audit"))],
-        [(t("button.status"), action("status"))],
-        [(t("group_help.button"), action("group_help"))],
-        [(t("admin_help.button"), AdminHelp().pack())],
+        [(t("nav.scam"), action("admin_section", "scam"))],
+        [(t("nav.reputation"), action("rep_admin"))],
+        [(t("nav.group"), action("group_help"))],
+        [(t("nav.ads"), AutoAd(action="root").pack())],
+        [(t("nav.users"), action("admin_section", "users"))],
+        [(t("nav.system"), action("admin_section", "system"))],
     ]
     if owner:
-        rows.append([(t("admin_access.button"), AdminAccess(action="list").pack())])
+        rows.append([(t("nav.owner"), action("admin_section", "owner"))])
+    rows.append([(t("admin_help.button"), AdminHelp().pack())])
     return rows
 
 
@@ -156,7 +151,7 @@ def moderation(reference: str) -> InlineKeyboardMarkup:
                 (t("button.evidence"), callback("evidence")),
                 (t("button.next"), action("pending", reference)),
             ],
-            [(t("button.back"), action("admin"))],
+            [(t("button.back"), action("admin_section", "scam"))],
         ]
     )
 
@@ -167,12 +162,12 @@ def pages(page: int, total: int, *, admin: bool = False) -> InlineKeyboardMarkup
     return keyboard(
         [
             [
-                ("‹", action(route, str(max(0, page - 1)))),
+                ("◀", action(route, str(max(0, page - 1)))),
                 (f"{page + 1} / {last + 1}", action("noop")),
-                ("›", action(route, str(min(last, page + 1)))),
+                ("▶", action(route, str(min(last, page + 1)))),
             ],
             [(t("button.search"), action("lookup", f"{route}:{page}"))],
-            [(t("button.back"), action("admin" if admin else "home"))],
+            [(t("button.back"), action("admin_section", "scam") if admin else action("home"))],
         ]
     )
 
@@ -182,11 +177,18 @@ def admin_pages(name: str, page: int, total: int, *, page_size: int = 5) -> Inli
     return keyboard(
         [
             [
-                ("‹", action(name, str(max(0, page - 1)))),
+                ("◀", action(name, str(max(0, page - 1)))),
                 (f"{page + 1} / {last + 1}", action("noop")),
-                ("›", action(name, str(min(last, page + 1)))),
+                ("▶", action(name, str(min(last, page + 1)))),
             ],
-            [(t("button.back"), action("admin"))],
+            [
+                (
+                    t("button.back"),
+                    action("rep_admin")
+                    if name == "rep_pending"
+                    else action("admin_section", "users" if name == "users" else "system"),
+                )
+            ],
         ]
     )
 
@@ -208,17 +210,9 @@ def leaderboard(rows: list[dict[str, Any]]) -> InlineKeyboardMarkup:
 
 
 def reputation_admin() -> InlineKeyboardMarkup:
-    return keyboard(
-        [
-            [(t("button.rep_add"), action("rep_add")), (t("button.rep_sub"), action("rep_sub"))],
-            [(t("button.rep_reset"), action("rep_reset"))],
-            [
-                (t("button.top_include"), action("top_include")),
-                (t("button.top_exclude"), action("top_exclude")),
-            ],
-            [(t("button.back"), action("admin"))],
-        ]
-    )
+    from app.bot.admin_navigation import section_keyboard
+
+    return section_keyboard("reputation")
 
 
 def reputation_review(reference: str, page: int) -> InlineKeyboardMarkup:
@@ -320,12 +314,12 @@ def administrator_menu(rows, page: int, total: int, owner: int | None) -> Inline
     pages = max(1, (total + 7) // 8)
     navigation = []
     if page > 0:
-        navigation.append(("‹", AdminAccess(action="list", value=str(page - 1)).pack()))
+        navigation.append(("◀", AdminAccess(action="list", value=str(page - 1)).pack()))
     navigation.append((f"{page + 1} / {pages}", action("noop")))
     if page + 1 < pages:
-        navigation.append(("›", AdminAccess(action="list", value=str(page + 1)).pack()))
+        navigation.append(("▶", AdminAccess(action="list", value=str(page + 1)).pack()))
     buttons.append(navigation)
-    buttons.append([(t("button.back"), action("admin"))])
+    buttons.append([(t("button.back"), action("admin_section", "owner"))])
     return keyboard(buttons)
 
 

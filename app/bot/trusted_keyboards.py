@@ -18,15 +18,15 @@ def page(rows: list[dict], current: int, total: int, query: str) -> InlineKeyboa
     pages = max(1, (total + 7) // 8)
     navigation = []
     if current:
-        navigation.append(("◀️", callback("page", str(current - 1))))
+        navigation.append(("◀", callback("page", str(current - 1))))
     navigation.append((f"{current + 1} / {pages}", callback("noop")))
     if current + 1 < pages:
-        navigation.append(("▶️", callback("page", str(current + 1))))
+        navigation.append(("▶", callback("page", str(current + 1))))
     buttons.append(navigation)
     buttons.append([(t("tm.search"), callback("search"))])
     if query:
         buttons.append([(t("tm.clear"), callback("clear"))])
-    buttons.append([(t("button.back"), action("admin"))])
+    buttons.append([(t("button.back"), action("admin_section", "scam"))])
     return keyboard(buttons)
 
 

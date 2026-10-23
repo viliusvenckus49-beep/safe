@@ -14,13 +14,11 @@ from aiogram.methods import (
 from test_telegram import journey as telegram_journey
 
 from app.admin_services import AdminService
-from app.bot import group_keyboards
 from app.bot import keyboards as kb
 from app.bot.callbacks import AdminAccess, AdminHelp, AdsAction, Language
 from app.bot.group_keyboards import GroupAction
 from app.bot.handlers import ADMIN_ACTIONS
 from app.bot.screens import send_screen
-from app.group_services import GroupService
 from app.i18n import t, use_language
 from app.services import Service
 
@@ -57,7 +55,7 @@ async def test_private_start_exposes_only_existing_role_permissions(
     await prepare(database, settings, actor, lang)
     await journey.send("/start", actor=actor)
     screen = last_screen(journey)
-    assert isinstance(screen, SendPhoto)
+    assert isinstance(screen, SendMessage)
     with use_language(lang):
         assert screen.reply_markup == kb.home(actor != 1, owner=actor == OWNER)
         if actor != 1:
@@ -76,14 +74,14 @@ async def test_private_start_exposes_only_existing_role_permissions(
     assert kb.action("group_help") in routes
     assert GroupAction(action="list").pack() not in routes
     assert AdsAction(action="root").pack() not in routes
-    assert (AdminAccess(action="list").pack() in routes) is (actor == OWNER)
+    assert (kb.action("admin_section", "owner") in routes) is (actor == OWNER)
     await journey.click(kb.action("group_help"), actor=actor)
     with use_language(lang):
-        assert last_screen(journey).text == t("gh.title") + "\n\n" + t("lm.empty")
+        assert last_screen(journey).text == t("gh.title") + "\n\n" + t("gh.choose")
     routes = values(last_screen(journey).reply_markup)
     assert not any(value.startswith("lm2|") for value in routes)
     assert AdsAction(action="root").pack() not in routes
-    assert (GroupAction(action="list").pack() in routes) is (actor == OWNER)
+    assert GroupAction(action="list").pack() not in routes
     await journey.click(kb.action("admin"), actor=actor)
     with use_language(lang):
         assert last_screen(journey).reply_markup == kb.admin(actor == OWNER)
@@ -153,7 +151,7 @@ async def test_revocation_hides_buttons_and_rejects_saved_callback(
     await journey.send("/start", actor=MODERATOR)
     assert kb.action("admin") in values(last_screen(journey).reply_markup)
     await journey.click(kb.action("admin"), actor=MODERATOR)
-    assert kb.action("add_sc") in values(last_screen(journey).reply_markup)
+    assert kb.action("admin_section", "scam") in values(last_screen(journey).reply_markup)
     async with database() as session:
         await AdminService(settings, session).change(OWNER, str(MODERATOR), False, "b" * 32)
     await journey.click(protected_route, actor=MODERATOR)
@@ -194,42 +192,6 @@ async def test_moderator_cannot_execute_owner_only_menu_routes(journey, database
     assert await journey.state(MODERATOR) is None
 
 
-@pytest.mark.parametrize(
-    "route",
-    [
-        kb.action("admin"),
-        kb.action("group_help"),
-        kb.action("trusted_admin"),
-        kb.action("pending"),
-        kb.action("rep_pending", "0"),
-        kb.action("rep_admin"),
-        kb.action("admin_scams", "0"),
-        kb.action("add_sc"),
-        kb.action("del_sc"),
-        kb.action("users", "0"),
-        kb.action("stats"),
-        kb.action("audit"),
-        kb.action("status"),
-        AdminHelp().pack(),
-    ],
-)
-async def test_moderator_administration_opens_existing_screens_with_back(
-    journey, database, settings, route
-):
-    await prepare(database, settings, MODERATOR, "lt")
-    await journey.send("/start", actor=MODERATOR)
-    assert kb.action("admin") in values(last_screen(journey).reply_markup)
-    await journey.click(kb.action("admin"), actor=MODERATOR)
-    assert route in values(last_screen(journey).reply_markup) or route == kb.action("admin")
-    await journey.click(route, actor=MODERATOR)
-    routes = values(last_screen(journey).reply_markup)
-    assert kb.action("admin") in routes or kb.action("home") in routes
-    await journey.click(kb.action("home"), actor=MODERATOR)
-    assert kb.action("admin") in values(last_screen(journey).reply_markup)
-    assert kb.action("add_sc") not in values(last_screen(journey).reply_markup)
-    assert await journey.state(MODERATOR) is None
-
-
 @pytest.mark.parametrize("command", ["/profile", "/help", "/ask 43", "+rep"])
 async def test_private_result_back_returns_to_authorized_home(journey, database, settings, command):
     await prepare(database, settings, MODERATOR, "lt")
@@ -258,6 +220,7 @@ async def test_status_button_matches_command_and_returns_to_administration(
     await journey.send("/start", actor=actor)
     assert kb.action("status") not in values(last_screen(journey).reply_markup)
     await journey.click(kb.action("admin"), actor=actor)
+    await journey.click(kb.action("admin_section", "system"), actor=actor)
     menu = last_screen(journey).reply_markup
     buttons = {b.callback_data: b.text for row in menu.inline_keyboard for b in row}
     with use_language(lang):
@@ -267,23 +230,9 @@ async def test_status_button_matches_command_and_returns_to_administration(
     await journey.click(kb.action("status"), actor=actor)
     status = last_screen(journey)
     assert status.text == expected
-    assert values(status.reply_markup) == [kb.action("admin")]
+    assert values(status.reply_markup) == [kb.action("admin_section", "system")]
     await journey.click(kb.action("admin"), actor=actor)
-    assert kb.action("status") in values(last_screen(journey).reply_markup)
-
-
-async def test_group_export_has_back_to_group_and_owner_guard(journey, database, settings):
-    async with database() as session:
-        await GroupService(settings, session).register_group(OWNER, -100, "Test group", True)
-    route = GroupAction(action="export", chat_id=-100).pack()
-    await journey.click(route, actor=OWNER)
-    document = last_screen(journey)
-    assert isinstance(document, SendDocument)
-    assert document.reply_markup == group_keyboards.back_to_group(-100)
-    await journey.click(values(document.reply_markup)[0], actor=OWNER)
-    assert GroupAction(action="list").pack() in values(last_screen(journey).reply_markup)
-    await journey.click(route)
-    assert values(last_screen(journey).reply_markup) == [kb.action("home", "receipt")]
+    assert kb.action("admin_section", "system") in values(last_screen(journey).reply_markup)
 
 
 @pytest.mark.parametrize("private", [True, False])

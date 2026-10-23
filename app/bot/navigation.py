@@ -3,12 +3,11 @@
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup
 
-from app.bot import group_keyboards, keyboards, trusted_keyboards
+from app.bot import keyboards, trusted_keyboards
 from app.bot.states import (
     AdminAccessFlow,
     AdminRepFlow,
     InputFlow,
-    RecoveryFlow,
     ReportFlow,
     RepVoteFlow,
     ScamAdminFlow,
@@ -62,8 +61,4 @@ async def error_navigation(
         return keyboards.administrator_preview(data["access_nonce"])
     if "trusted_page" in data:
         return trusted_keyboards.search(int(data.get("trusted_page", 0)))
-    if stage in {RecoveryFlow.invite.state, RecoveryFlow.preview.state} and data.get(
-        "group_chat_id"
-    ):
-        return group_keyboards.recovery_input(data["group_chat_id"])
     return None

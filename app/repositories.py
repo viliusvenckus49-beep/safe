@@ -11,7 +11,6 @@ from app.models import (
     BanAction,
     IdentityLock,
     OperationLock,
-    RecoveryDelivery,
     Report,
     ReputationAdjustment,
     ReputationEvent,
@@ -579,7 +578,7 @@ class Repository:
 
         result = {}
         overdue = 0
-        for name, model in (("ban", BanAction), ("recovery", RecoveryDelivery)):
+        for name, model in (("ban", BanAction),):
             result[name + "_terminal"] = int(
                 await self.session.scalar(
                     select(func.count())

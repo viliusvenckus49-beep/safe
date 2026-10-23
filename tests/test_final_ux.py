@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from aiogram.methods import AnswerCallbackQuery, SendMessage, SendPhoto
+from aiogram.methods import AnswerCallbackQuery, EditMessageText, SendMessage, SendPhoto
 from aiogram.types import Chat, Message, User
 from sqlalchemy import func, select
 from test_telegram import journey as telegram_journey
@@ -20,7 +20,9 @@ journey = telegram_journey
 
 def last_screen(j):
     return next(
-        call for call in reversed(j.transport.calls) if isinstance(call, (SendMessage, SendPhoto))
+        call
+        for call in reversed(j.transport.calls)
+        if isinstance(call, (SendMessage, SendPhoto, EditMessageText))
     )
 
 

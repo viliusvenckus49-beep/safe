@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.methods import SendMessage
+from aiogram.methods import EditMessageText, SendMessage
 from aiogram.types import Chat, Message
 from aiogram.types import User as TelegramUser
 from sqlalchemy import func, select
@@ -51,7 +51,7 @@ def test_exact_design_escape_and_callbacks():
             "▰▰▱▱▱▱▱▱▱▱ 20%"
         )
         buttons = rp.controls(7).inline_keyboard
-        assert [row[0].text for row in buttons] == ["👁️‍🗨️ Naudotojo vardai", "‹ Reputacijos patikra"]
+        assert [row[0].text for row in buttons] == ["👁️‍🗨️ Naudotojo vardai", "◀ Reputacijos patikra"]
         assert Action.unpack(buttons[0][0].callback_data).value == "u:7"
         assert Action.unpack(buttons[1][0].callback_data).name == "redsafe_check"
         assert Action.unpack(buttons[1][0].callback_data).value == "u:7"
@@ -157,13 +157,17 @@ journey = telegram_journey
 async def test_info_and_history_routes_and_existing_profile(journey):
     await journey.send("/info 42")
     screen = next(
-        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+        call
+        for call in reversed(journey.transport.calls)
+        if isinstance(call, (SendMessage, EditMessageText))
     )
     assert "REDSAFE PROFILIS" in screen.text
     history_callback = screen.reply_markup.inline_keyboard[0][0].callback_data
     await journey.click(history_callback)
     screen = next(
-        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+        call
+        for call in reversed(journey.transport.calls)
+        if isinstance(call, (SendMessage, EditMessageText))
     )
     assert "Naudotojo vardų istorijos dar nėra." in screen.text
     await journey.click(screen.reply_markup.inline_keyboard[0][0].callback_data)

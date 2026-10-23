@@ -15,7 +15,14 @@ from app.bot.group_runtime import process_scam_bans
 from app.bot.lookup_limits import AskLimiter
 from app.bot.navigation import error_navigation
 from app.bot.redsafe_profile import record_activity
-from app.bot.screens import flow_screen, panel_state, preserved_source, render, send_screen
+from app.bot.screens import (
+    flow_screen,
+    navigation_edit,
+    panel_state,
+    preserved_source,
+    render,
+    send_screen,
+)
 from app.bot.states import InputFlow
 from app.bot.validation import message_content, valid_target
 from app.group_services import GroupService
@@ -115,6 +122,7 @@ class ServiceMiddleware(BaseMiddleware):
         )
         screen_context = panel_state.set(data.get("state"))
         preservation_context = preserved_source.set(None)
+        navigation_context = navigation_edit.set(isinstance(event, CallbackQuery))
         log = structlog.get_logger()
         try:
             # Observe and enforce even updates the UI intentionally ignores. Unknown
@@ -252,8 +260,6 @@ class ServiceMiddleware(BaseMiddleware):
                                     scam_record_id=record.id,
                                     exception_type=type(error).__name__,
                                 )
-                    if getattr(chat, "type", None) == "private":
-                        await GroupService(self.settings, session).mark_private_contact(actor.id)
                     result = await handler(event, data)
                     log.info("update_handled")
                     return result
@@ -297,5 +303,6 @@ class ServiceMiddleware(BaseMiddleware):
                     return None
         finally:
             preserved_source.reset(preservation_context)
+            navigation_edit.reset(navigation_context)
             panel_state.reset(screen_context)
             reset_contextvars(**context)

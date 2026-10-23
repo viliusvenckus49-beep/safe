@@ -20,7 +20,6 @@ from sqlalchemy import func, select
 from test_telegram import Journey, Transport
 
 from app.bot.callbacks import Action, CustomerAd, ScamAdmin
-from app.bot.group_keyboards import GroupAction
 from app.bot.handlers import create_router
 from app.bot.states import RepVoteFlow, ScamAdminFlow
 from app.group_services import GroupService
@@ -362,7 +361,7 @@ async def test_existing_numeric_scam_observation_bans_every_group_without_changi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sign,actor,target,label", [(1, 1, 42, "+ʀᴇᴘ"), (-1, 2, 43, "-ʀᴇᴘ")])
+@pytest.mark.parametrize("sign,actor,target,label", [(1, 1, 42, "＋ REP"), (-1, 2, 43, "− REP")])
 async def test_legacy_rep_buttons_require_five_character_comment_and_preserve_value(
     crimson, database, settings, sign, actor, target, label
 ):
@@ -407,21 +406,19 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
         ["sc|profile|", "sc|report|"],
         ["sc|top|", "sc|scams|0"],
         ["sc|rep|", "sc|info|"],
-        [GroupAction(action="subscriptions").pack()],
         ["sc|language|"],
         [CustomerAd(action="list").pack()],
         ["sc|close|"],
     ]
     if lang == "lt":
         assert [[button.text for button in row] for row in markup.inline_keyboard] == [
-            ["ᴛɪᴋʀɪɴᴛɪ"],
-            ["ᴘʀᴏꜰɪʟɪꜱ", "ᴘʀᴀɴᴇꜱᴛɪ"],
-            ["ᴛᴏᴘ 10", "ꜱᴄᴀᴍᴇʀɪᴀɪ"],
-            ["ɪᴠᴇʀᴛɪɴᴛɪ", "ɪɴꜰᴏʀᴍᴀᴄɪᴊᴀ"],
-            ["ɢʀᴜᴘᴇꜱ ᴀᴛᴋᴜʀɪᴍᴀꜱ"],
-            ["ᴋᴀʟʙᴀ"],
-            ["📢 Mano reklamos"],
-            ["ᴜᴢᴅᴀʀʏᴛɪ"],
+            ["🔎 TIKRINTI"],
+            ["👤 PROFILIS", "📩 PRANEŠTI"],
+            ["🏆 TOP 10", "🚩 SCAM REGISTRAS"],
+            ["⭐ ĮVERTINTI", "ⓘ INFORMACIJA"],
+            ["🌐 KALBA"],
+            ["📢 MANO REKLAMOS"],
+            ["× UŽDARYTI"],
         ]
     for callback in [value for row in rows[:-1] for value in row]:
         before = len(crimson.transport.calls)

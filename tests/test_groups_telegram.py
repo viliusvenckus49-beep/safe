@@ -113,24 +113,6 @@ async def test_preemptive_ban_without_group_membership(database, settings):
 
 
 @pytest.mark.asyncio
-async def test_recovery_only_explicit_consent(database, settings):
-    async with database() as session:
-        service = GroupService(settings, session)
-        await service.register_group(900, -1001, "<Group>", True)
-        for actor in (1, 2):
-            await service.mark_private_contact(actor)
-            await service.observe_member(-1001, actor, None, "Member")
-        await service.subscribe(1, -1001, True)
-        await service.queue_recovery(900, -1001, "https://t.me/+Abc123", "nonce-123456")
-    bot = WorkerBot()
-    assert await process_group_jobs(bot, settings, database) == 1
-    assert len(bot.messages) == 1
-    assert bot.messages[0][0] == 1
-    assert "&lt;Group&gt;" in bot.messages[0][1]
-    assert await process_group_jobs(bot, settings, database) == 0
-
-
-@pytest.mark.asyncio
 async def test_worker_honors_telegram_retry_after(database, settings):
     from aiogram.exceptions import TelegramRetryAfter
     from aiogram.methods import BanChatMember
@@ -186,33 +168,6 @@ async def test_worker_rechecks_scam_after_claim(database, settings, monkeypatch)
     assert not bot.bans
     async with database() as session:
         assert (await session.scalar(select(BanAction))).status == "OBSOLETE"
-
-
-@pytest.mark.asyncio
-async def test_worker_rechecks_consent_after_claim(database, settings, monkeypatch):
-    from app.models import RecoveryDelivery
-
-    async with database() as session:
-        service = GroupService(settings, session)
-        await service.register_group(900, -1001, "Group", True)
-        await service.mark_private_contact(1)
-        await service.observe_member(-1001, 1, None, "Member")
-        await service.subscribe(1, -1001, True)
-        await service.queue_recovery(900, -1001, "https://t.me/+Abc123", "nonce-123456")
-    original = GroupService.claim_deliveries
-
-    async def claim_then_unsubscribe(self, limit=20):
-        jobs = await original(self, limit)
-        async with database() as other:
-            await GroupService(settings, other).subscribe(1, -1001, False)
-        return jobs
-
-    monkeypatch.setattr(GroupService, "claim_deliveries", claim_then_unsubscribe)
-    bot = WorkerBot()
-    assert await process_group_jobs(bot, settings, database) == 0
-    assert not bot.messages
-    async with database() as session:
-        assert (await session.scalar(select(RecoveryDelivery))).status == "OBSOLETE"
 
 
 @pytest.mark.asyncio

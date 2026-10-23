@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from aiogram.methods import SendMessage, SendPhoto
+from aiogram.methods import EditMessageText, SendMessage, SendPhoto
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 from sqlalchemy import select
 from test_telegram import journey as telegram_journey
@@ -30,9 +30,9 @@ def clock(monkeypatch):
 
 def sent(j):
     return [
-        (index + 1, call)
+        (call.message_id if isinstance(call, EditMessageText) else index + 1, call)
         for index, call in enumerate(j.transport.calls)
-        if isinstance(call, (SendMessage, SendPhoto))
+        if isinstance(call, (SendMessage, SendPhoto, EditMessageText))
     ]
 
 
@@ -302,7 +302,7 @@ async def test_check_profile_replaces_source_but_check_another_keeps_history(jou
         journey, checked, checked[1].reply_markup.inline_keyboard[0][0].callback_data, chat=chat
     )
     deleted = [call.message_id for call in journey.transport.deletions]
-    assert checked[0] in deleted and original[0] not in deleted
+    assert checked[0] not in deleted and original[0] not in deleted
     profile = sent(journey)[-1][1]
     assert "🆔 ID: 43" in profile.text
     assert [
@@ -333,13 +333,17 @@ async def test_names_history_returns_to_same_profile_or_reputation_and_retires_p
     await click_result(journey, history, buttons[0][0].callback_data, chat=chat)
     restored = sent(journey)[-1]
     assert "🆔 ID: 42" in restored[1].text
-    assert history[0] in [call.message_id for call in journey.transport.deletions]
+    assert (history[0] in [call.message_id for call in journey.transport.deletions]) is (
+        chat is not None
+    )
     await click_result(
         journey, restored, restored[1].reply_markup.inline_keyboard[1][0].callback_data, chat=chat
     )
     restored_check = sent(journey)[-1]
     assert "<code>42</code>" in restored_check[1].text
-    assert restored[0] in [call.message_id for call in journey.transport.deletions]
+    assert (restored[0] in [call.message_id for call in journey.transport.deletions]) is (
+        chat is not None
+    )
     await click_result(
         journey,
         restored_check,
@@ -361,4 +365,6 @@ async def test_names_history_returns_to_same_profile_or_reputation_and_retires_p
         chat=chat,
     )
     assert "<code>42</code>" in sent(journey)[-1][1].text
-    assert next_history[0] in [call.message_id for call in journey.transport.deletions]
+    assert (next_history[0] in [call.message_id for call in journey.transport.deletions]) is (
+        chat is not None
+    )

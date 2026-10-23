@@ -17,7 +17,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiogram.types import User as TelegramUser
 from sqlalchemy import BigInteger, cast, or_, select, update
 
-from app.bot.callbacks import LocalAction
+from app.bot.callbacks import GroupHelp, LocalAction
 from app.bot.keyboards import action as menu_action
 from app.bot.keyboards import keyboard
 from app.bot.local_moderation import LocalModerationExecutor
@@ -274,7 +274,7 @@ async def group_panel(
     *,
     edit: bool = False,
 ) -> None:
-    local = await access(service, bound_bot(message), chat, actor)
+    await access(service, bound_bot(message), chat, actor)
     group = await service.session.get(ManagedGroup, chat)
     await state.set_state(None)
     await state.update_data(lm_chat=chat)
@@ -282,16 +282,7 @@ async def group_panel(
         [(t("lm." + a), cb("action", chat, a)), (t("lm." + b), cb("action", chat, b))]
         for a, b in (("BAN", "UNBAN"), ("MUTE", "UNMUTE"), ("WARN", "KICK"))
     ]
-    rows += [
-        [(t("lm.history"), cb("action", chat, "HISTORY"))],
-        [(t("lm.warnings"), cb("action", chat, "WARNINGS"))],
-    ]
-    try:
-        await local.authorization.actor(chat, actor, configure=True)
-        rows += [[(t("lm.settings"), cb("settings", chat))]]
-    except DomainError:
-        pass
-    rows += [[(t("lm.back"), cb("groups"))]]
+    rows += [[(t("lm.back"), GroupHelp(action="group", chat=chat).pack())]]
     title = t("lm.title") + "\n\n<b>" + escape(group.title if group else str(chat)) + "</b>"
     if message.chat.type != "private":
         await private_panel(message, actor, title, keyboard(rows))
@@ -365,7 +356,9 @@ async def settings_panel(message: Message, service: Service, actor: int, chat: i
         ]
         for key in SWITCHES
     ]
-    rows.append([(t("lm.back"), cb("group", chat))])
+    if await service.is_admin(actor):
+        rows.append([(t("nav.ads"), GroupHelp(action="ads", chat=chat).pack())])
+    rows.append([(t("lm.back"), GroupHelp(action="group", chat=chat).pack())])
     await display(
         message, t("lm.title") + "\n\n" + t("lm.settings_hint"), keyboard(rows), edit=True
     )

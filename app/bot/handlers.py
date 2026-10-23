@@ -65,6 +65,11 @@ from app.i18n import language, t
 from app.services import DomainError, Service
 
 ADMIN_ACTIONS = {
+    "admin_section",
+    "category_audit",
+    "user_search",
+    "user_profile",
+    "ads_clients_page",
     "trusted_admin",
     "admin",
     "group_help",
@@ -191,7 +196,7 @@ async def show_runtime_status(
                 for key in ("uptime", "poll", "worker")
             },
         ),
-        reply_markup=kb.back("admin"),
+        reply_markup=kb.back("admin_section", "system"),
     )
 
 
@@ -235,7 +240,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         await clear_flow(state)
         if await service.language(actor_id(message)) is None:
             await flow_screen(
-                message, state, t("language.choose"), reply_markup=kb.languages(), home_photo=True
+                message, state, t("language.choose"), reply_markup=kb.languages(), home_photo=False
             )
             return
         await flow_screen(
@@ -245,7 +250,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             reply_markup=await home_keyboard(
                 service, actor_id(message), private=message.chat.type == "private"
             ),
-            home_photo=True,
+            home_photo=False,
         )
 
     @router.message(Command("language"))
@@ -281,7 +286,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             reply_markup=await home_keyboard(
                 service, callback.from_user.id, private=callback.message.chat.type == "private"
             ),
-            home_photo=True,
+            home_photo=False,
         )
         if callback.message.chat.type == "private":
             assert callback.bot is not None
@@ -531,8 +536,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         if name in ADMIN_ACTIONS and not await service.is_admin(actor):
             await callback.answer(p.text("denied"), show_alert=True)
             return
-        if name in ADMIN_ACTIONS and message.chat.type != "private":
+        if name in ADMIN_ACTIONS and (message.chat.type != "private" or message.chat.id != actor):
             await callback.answer(p.text("admin_private"), show_alert=True)
+            return
+        if name == "admin_section" and value == "owner" and not service.access.is_owner(actor):
+            await callback.answer(p.text("denied"), show_alert=True)
             return
         if (
             name == "profile"
@@ -551,6 +559,11 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         check_source = bool(
             message.reply_markup
             and any(
+                button.callback_data == kb.action("lookup")
+                for row in message.reply_markup.inline_keyboard
+                for button in row
+            )
+            and any(
                 button.callback_data
                 and button.callback_data.startswith("sc|profile|")
                 and button.callback_data != kb.action("profile")
@@ -567,7 +580,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 for button in row
             )
         )
-        if receipt:
+        if receipt or check_source:
             preserved_source.set(message.message_id)
         if name in {"home", "admin", "pending"} and value == "receipt":
             preserved_source.set(message.message_id)
@@ -588,7 +601,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 reply_markup=await home_keyboard(
                     service, actor, private=message.chat.type == "private"
                 ),
-                home_photo=True,
+                home_photo=False,
             )
         elif name == "info":
             await clear_flow(state)
@@ -690,9 +703,38 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             )
         elif name == "group_help":
             await clear_flow(state)
-            from app.bot.group_help import groups as group_help_groups
+            from app.bot.group_help import root as group_help_root
 
-            await group_help_groups(message, service, actor)
+            await group_help_root(message, service, actor)
+        elif name == "admin_section":
+            from app.bot.admin_navigation import open_section
+
+            await open_section(message, state, service, actor, value)
+        elif name == "category_audit":
+            from app.bot.admin_navigation import audit_listing
+
+            match = re.fullmatch(r"(scam|reputation):([0-9]{1,6})", value)
+            if match is None:
+                raise DomainError("stale_callback")
+            await audit_listing(message, state, service, actor, match[1], int(match[2]))
+        elif name == "ads_clients_page":
+            from app.bot.admin_navigation import ads_overview
+
+            if not re.fullmatch(r"[0-9]{1,6}", value):
+                raise DomainError("stale_callback")
+            await ads_overview(message, state, service, actor, "ads_clients", int(value))
+        elif name in {"user_search", "user_profile"}:
+            await clear_flow(state)
+            await state.set_state(InputFlow.lookup)
+            await state.update_data(
+                lookup_return_name="admin_section",
+                lookup_return_value="users",
+                lookup_profile=name == "user_profile",
+                lookup_admin=True,
+            )
+            await render(
+                message, p.text("target"), reply_markup=kb.navigation("admin_section", "users")
+            )
         elif name == "status":
             await show_runtime_status(message, state, service, actor)
         elif name in {"add_sc", "del_sc"}:
@@ -700,7 +742,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await state.set_state(InputFlow.admin_target)
             await state.update_data(screen_message_id=message.message_id)
             await state.update_data(operation=name)
-            await render(message, p.text("admin_target"), reply_markup=kb.navigation("admin"))
+            await render(
+                message, p.text("admin_target"), reply_markup=kb.navigation("admin_section", "scam")
+            )
         elif name == "admin_target_back":
             draft = await state.get_data()
             if (
@@ -711,10 +755,16 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 return
             await state.set_state(InputFlow.admin_target)
             await state.update_data(target="", target_identity="")
-            await render(message, p.text("admin_target"), reply_markup=kb.navigation("admin"))
+            await render(
+                message, p.text("admin_target"), reply_markup=kb.navigation("admin_section", "scam")
+            )
         elif name == "rep_admin":
             await clear_flow(state)
-            await render(message, p.text("rep_admin"), reply_markup=kb.reputation_admin())
+            await render(
+                message,
+                t("nav.reputation") + "\n\n" + t("nav.choose"),
+                reply_markup=kb.reputation_admin(),
+            )
         elif name in {"rep_add", "rep_sub", "rep_reset", "top_include", "top_exclude"}:
             await clear_flow(state)
             nonce = uuid4().hex[:16]
@@ -806,7 +856,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
             await render(
                 message,
                 p.stats(await service.admin_stats(actor)),
-                reply_markup=kb.back("admin"),
+                reply_markup=kb.back("admin_section", "system"),
             )
         elif name == "audit":
             if value and (not value.isascii() or not value.isdigit() or len(value) > 6):
@@ -969,12 +1019,18 @@ def create_router(settings: Any, session_factory: Any) -> Router:
                 message, state, p.text("invalid"), reply_markup=kb.navigation(parent, parent_value)
             )
             return
+        if draft.get("lookup_admin"):
+            await service.require_admin(actor_id(message))
         data = await service.profile(target, refresh_identity=True)
         await flow_screen(
             message,
             state,
-            p.profile(data),
-            reply_markup=kb.check_result(data["user"].telegram_id, persistent=persistent),
+            rp.profile_text(await rp.profile_data(service, message.bot, target))
+            if draft.get("lookup_profile")
+            else p.profile(data),
+            reply_markup=kb.back(parent, parent_value)
+            if draft.get("lookup_admin")
+            else kb.check_result(data["user"].telegram_id, persistent=persistent),
             persistent=persistent,
         )
         await clear_flow(state)
@@ -1172,7 +1228,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         await callback.answer(p.text("stale"), show_alert=True)
 
     @router.message()
-    async def fallback(message: Message) -> None:
-        return
+    async def fallback(message: Message, state: FSMContext) -> None:
+        if message.chat.type == "private" and await state.get_state():
+            await clear_flow(state)
+            await flow_screen(message, state, p.text("stale"), reply_markup=kb.back())
 
     return router

@@ -114,7 +114,7 @@ def test_recovery_button_is_private_only():
         values = [
             button.callback_data for row in home(private=private).inline_keyboard for button in row
         ]
-        assert (recovery in values) is private
+        assert recovery not in values
 
 
 @pytest.mark.asyncio
