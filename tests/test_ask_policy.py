@@ -311,9 +311,7 @@ async def test_check_profile_replaces_source_but_check_another_keeps_history(jou
 
 
 @pytest.mark.parametrize("chat", [None, -100])
-async def test_names_history_returns_to_same_profile_or_reputation_and_retires_panel(
-    journey, clock, chat
-):
+async def test_names_history_returns_to_same_profile_or_reputation_in_place(journey, clock, chat):
     await journey.send("/ask 42", chat=chat)
     check = sent(journey)[-1]
     await click_result(
@@ -333,17 +331,15 @@ async def test_names_history_returns_to_same_profile_or_reputation_and_retires_p
     await click_result(journey, history, buttons[0][0].callback_data, chat=chat)
     restored = sent(journey)[-1]
     assert "🆔 ID: 42" in restored[1].text
-    assert (history[0] in [call.message_id for call in journey.transport.deletions]) is (
-        chat is not None
-    )
+    assert restored[0] == history[0]
+    assert history[0] not in [call.message_id for call in journey.transport.deletions]
     await click_result(
         journey, restored, restored[1].reply_markup.inline_keyboard[1][0].callback_data, chat=chat
     )
     restored_check = sent(journey)[-1]
     assert "<code>42</code>" in restored_check[1].text
-    assert (restored[0] in [call.message_id for call in journey.transport.deletions]) is (
-        chat is not None
-    )
+    assert restored_check[0] == restored[0]
+    assert restored[0] not in [call.message_id for call in journey.transport.deletions]
     await click_result(
         journey,
         restored_check,
@@ -365,6 +361,5 @@ async def test_names_history_returns_to_same_profile_or_reputation_and_retires_p
         chat=chat,
     )
     assert "<code>42</code>" in sent(journey)[-1][1].text
-    assert (next_history[0] in [call.message_id for call in journey.transport.deletions]) is (
-        chat is not None
-    )
+    assert sent(journey)[-1][0] == next_history[0]
+    assert next_history[0] not in [call.message_id for call in journey.transport.deletions]
