@@ -1,4 +1,4 @@
-"""Private group controls, explicit recovery consent, and trusted membership updates."""
+"""Group registration, live moderation and retained group history."""
 
 import asyncio
 import secrets
@@ -6,19 +6,19 @@ from html import escape
 from typing import Any
 
 import structlog
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.enums import ChatMemberStatus, ChatType
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, ChatMemberUpdated, Message
+from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 
 from app.bot import group_keyboards as kb
 from app.bot import group_presentation as p
 from app.bot.group_authorization import verify_group
 from app.bot.group_runtime import process_scam_bans
 from app.bot.screens import clear_flow, flow_screen, render
-from app.bot.states import GroupRemovalFlow, RecoveryFlow
+from app.bot.states import GroupRemovalFlow
 from app.config import Settings
 from app.group_services import GroupService
 from app.i18n import t
@@ -117,21 +117,6 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
             reply_markup=kb.menu(groups, admin=True),
         )
 
-    @router.message(Command("recovery"))
-    async def recovery_command(message: Message, state: FSMContext) -> None:
-        if message.chat.type != ChatType.PRIVATE:
-            return
-        assert message.from_user is not None
-        await clear_flow(state)
-        async with sessions() as session:
-            service = GroupService(settings, session)
-            await service.mark_private_contact(message.from_user.id)
-            groups = await service.groups_for_subscription(message.from_user.id)
-        await message.answer(
-            p.text("CONSENT") if groups else p.text("EMPTY"),
-            reply_markup=kb.menu(groups, admin=False),
-        )
-
     @router.callback_query(kb.GroupAction.filter())
     async def group_action(
         query: CallbackQuery, callback_data: kb.GroupAction, state: FSMContext
@@ -143,27 +128,12 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
             return
         actor = query.from_user.id
         action = callback_data.action
+        if action not in {"list", "group", "approve", "remove", "remove_confirm"}:
+            await clear_flow(state)
+            await query.answer(t("nav.removed"), show_alert=True)
+            return
         async with sessions() as session:
             service = GroupService(settings, session)
-            if action in {"subscriptions", "consent", "subscribe", "unsubscribe"}:
-                await service.mark_private_contact(actor)
-                available = await service.groups_for_subscription(actor)
-                chosen = next((g for g in available if g.chat_id == callback_data.chat_id), None)
-                if action == "subscriptions":
-                    await clear_flow(state)
-                    await _render(
-                        query,
-                        p.text("CONSENT") if available else p.text("EMPTY"),
-                        kb.menu(available, admin=False),
-                    )
-                elif chosen is None:
-                    raise DomainError("stale_callback")
-                elif action == "consent":
-                    await _render(query, p.text("CONSENT"), kb.consent(chosen.chat_id))
-                else:
-                    await service.subscribe(actor, chosen.chat_id, action == "subscribe")
-                    await _render(query, p.text("SAVED"), kb.consent(chosen.chat_id))
-                return
             service.require_owner(actor)
             if action == "approve":
                 if (
@@ -177,17 +147,22 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
                     raise DomainError("stale_callback")
                 assert query.bot is not None
                 chat = await verify_group(query.bot, settings, actor, candidate.chat_id)
-                chosen = await service.register_group(
+                approved_group = await service.register_group(
                     actor, chat.id, chat.title or "SAFECheck", True, chat_type=str(chat.type)
                 )
                 await _render(
                     query,
                     p.text("APPROVED")
                     + "\n\n"
-                    + p.group_card(chosen.title, chosen.enabled, chosen.chat_type, approved=True),
-                    kb.group(chosen.chat_id)
+                    + p.group_card(
+                        approved_group.title,
+                        approved_group.enabled,
+                        approved_group.chat_type,
+                        approved=True,
+                    ),
+                    kb.group(approved_group.chat_id)
                     if query.message.chat.type == ChatType.PRIVATE
-                    else kb.enrollment(chosen.chat_id, approved=True),
+                    else kb.enrollment(approved_group.chat_id, approved=True),
                 )
                 return
             available = await service.groups(actor)
@@ -250,61 +225,5 @@ def register_group_handlers(router: Router, settings: Settings, sessions: Any) -
                     + ("" if left else "\n\n" + p.text("LEAVE_FAILED")),
                     kb.menu(groups, admin=True),
                 )
-            elif action == "export":
-                records = await service.export_members(actor, chosen.chat_id)
-                data = p.members_backup(chosen.title, records)
-                await query.answer()
-                await query.message.answer_document(
-                    BufferedInputFile(data, filename="safecheck-members.txt"),
-                    caption=p.text("MEMBERS_NOTICE"),
-                    reply_markup=kb.back_to_group(chosen.chat_id),
-                )
-            elif action == "recover":
-                await state.set_state(RecoveryFlow.invite)
-                await state.set_data(
-                    {
-                        "group_chat_id": chosen.chat_id,
-                        "nonce": secrets.token_hex(8),
-                        "screen_message_id": query.message.message_id,
-                    }
-                )
-                await _render(query, p.text("INVITE_PROMPT"), kb.recovery_input(chosen.chat_id))
-            elif action == "send":
-                draft = await state.get_data()
-                if (
-                    await state.get_state() != RecoveryFlow.preview.state
-                    or draft.get("nonce") != callback_data.nonce
-                    or draft.get("group_chat_id") != chosen.chat_id
-                ):
-                    raise DomainError("stale_callback")
-                await service.queue_recovery(
-                    actor, chosen.chat_id, draft["invite_url"], callback_data.nonce
-                )
-                await clear_flow(state)
-                await _render(query, p.text("QUEUED"), kb.group(chosen.chat_id))
             else:
                 raise DomainError("stale_callback")
-
-    @router.message(RecoveryFlow.invite, F.chat.type == ChatType.PRIVATE)
-    async def recovery_invite(message: Message, state: FSMContext) -> None:
-        assert message.from_user is not None
-        draft = await state.get_data()
-        if (
-            not isinstance(message.text, str)
-            or not draft.get("group_chat_id")
-            or not draft.get("nonce")
-        ):
-            raise DomainError("invalid_target")
-        async with sessions() as session:
-            service = GroupService(settings, session)
-            preview = await service.prepare_recovery(
-                message.from_user.id, draft["group_chat_id"], message.text, draft["nonce"]
-            )
-        await state.update_data(invite_url=message.text.strip())
-        await state.set_state(RecoveryFlow.preview)
-        await flow_screen(
-            message,
-            state,
-            p.recovery_preview(preview["title"], message.text.strip(), preview["recipients"]),
-            reply_markup=kb.preview(draft["group_chat_id"], draft["nonce"]),
-        )

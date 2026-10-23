@@ -5,9 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from app import presentation as p
-from app.bot import group_keyboards, group_presentation, keyboards
-from app.i18n import use_language
-from app.locales.presentation import CATALOGS
+from app.bot import keyboards
+from app.i18n import CATALOGS, use_language
 
 
 def test_all_presentation_catalogs_have_matching_keys_and_placeholders():
@@ -45,8 +44,6 @@ def test_dynamic_cards_localize_and_escape_user_content(lang, word):
         assert "<script>" not in profile
         report = p.preview({"target": "<target>", "reason": "<reason>", "evidence": []})
         assert "&lt;target&gt;" in report and "&lt;reason&gt;" in report
-        recovery = group_presentation.recovery_preview("<group>", "https://t.me/x?a=1&b=2", 5)
-        assert "&lt;group&gt;" in recovery and "&amp;" in recovery
         assert (
             p.display_name(SimpleNamespace(username=None, display_name="Vartotojas"))
             == CATALOGS[lang]["p.user"]
@@ -62,27 +59,11 @@ def test_all_main_admin_and_group_buttons_localize(lang):
         assert CATALOGS[lang]["button.language"] in buttons
         assert CATALOGS[lang]["button.close"] in buttons
         admin = {button.text for row in keyboards.admin().inline_keyboard for button in row}
-        assert CATALOGS[lang]["button.pending"] in admin
-        assert CATALOGS[lang]["button.audit"] in admin
-        consent = {
-            button.text
-            for row in group_keyboards.consent(-100123).inline_keyboard
-            for button in row
-        }
-        assert CATALOGS[lang]["button.subscribe"] in consent
-        assert CATALOGS[lang]["button.unsubscribe"] in consent
+        assert CATALOGS[lang]["nav.scam"] in admin
+        assert CATALOGS[lang]["nav.system"] in admin
         languages = keyboards.languages()
         assert {button.callback_data for row in languages.inline_keyboard for button in row} >= {
             "language:lt",
             "language:en",
             "language:ru",
         }
-
-
-def test_recipient_locale_overrides_worker_context():
-    with use_language("lt"):
-        message = group_presentation.recovery_notification(
-            "Group", "https://t.me/example", lang="ru"
-        )
-        assert "Восстановление группы" in message
-        assert "Grupės atkūrimas" not in message

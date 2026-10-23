@@ -1,13 +1,11 @@
-"""Managed groups, bot-observed member backup and consent-based recovery outboxes."""
+"""Group registration, live moderation and retained group history."""
 
 import re
 from dataclasses import dataclass
 from datetime import timedelta
-from urllib.parse import urlsplit
 
-from sqlalchemy import BigInteger, cast, func, select, true, update
+from sqlalchemy import BigInteger, cast, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.config import Settings
 from app.models import (
@@ -15,10 +13,6 @@ from app.models import (
     BanAction,
     ManagedGroup,
     ObservedMember,
-    PrivateContact,
-    RecoveryCampaign,
-    RecoveryDelivery,
-    RecoverySubscription,
     ScamRecord,
     User,
     now,
@@ -173,25 +167,10 @@ class GroupService:
             raise DomainError("stale_callback")
         group.approved = group.enabled = group.can_restrict_members = False
         await self.session.execute(
-            update(RecoverySubscription)
-            .where(RecoverySubscription.chat_id == chat_id)
-            .values(consent=False)
-        )
-        await self.session.execute(
             update(BanAction)
             .where(
                 BanAction.chat_id == chat_id,
                 BanAction.status.in_(["PENDING", "FAILED", "PROCESSING"]),
-            )
-            .values(status="OBSOLETE", completed_at=now(), claimed_at=None)
-            .execution_options(synchronize_session=False)
-        )
-        campaigns = select(RecoveryCampaign.id).where(RecoveryCampaign.chat_id == chat_id)
-        await self.session.execute(
-            update(RecoveryDelivery)
-            .where(
-                RecoveryDelivery.campaign_id.in_(campaigns),
-                RecoveryDelivery.status.in_(["PENDING", "FAILED", "PROCESSING"]),
             )
             .values(status="OBSOLETE", completed_at=now(), claimed_at=None)
             .execution_options(synchronize_session=False)
@@ -479,50 +458,6 @@ class GroupService:
                     )
         await self.session.commit()
 
-    async def mark_private_contact(self, actor: int) -> None:
-        if actor <= 0:
-            raise DomainError("invalid_input")
-        if self.session.get_bind().dialect.name == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert
-        else:
-            from sqlalchemy.dialects.sqlite import insert  # type: ignore[assignment]
-        await self.session.execute(
-            insert(PrivateContact)
-            .values(telegram_id=actor, started_at=now())
-            .on_conflict_do_nothing()
-        )
-        await self.session.commit()
-
-    async def subscribe(self, actor: int, chat_id: int, consent: bool) -> bool:
-        if type(consent) is not bool:
-            raise DomainError("invalid_input")
-        await self.core.repo.lock_identity_metadata()
-        if (
-            await self.session.get(PrivateContact, actor) is None
-            or await self.session.get(ManagedGroup, chat_id) is None
-        ):
-            await self.session.rollback()
-            raise DomainError("not_found")
-        subscription = await self.session.get(
-            RecoverySubscription, (chat_id, actor), populate_existing=True
-        )
-        group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if consent and (
-            group is None
-            or not group.approved
-            or await self.session.get(ObservedMember, (chat_id, actor)) is None
-        ):
-            await self.session.rollback()
-            raise DomainError("forbidden")
-        if subscription is None:
-            self.session.add(
-                RecoverySubscription(chat_id=chat_id, telegram_id=actor, consent=consent)
-            )
-        else:
-            subscription.consent = consent
-        await self.session.commit()
-        return consent
-
     async def groups(self, actor: int) -> list[ManagedGroup]:
         self.require_owner(actor)
         return list(
@@ -534,139 +469,6 @@ class GroupService:
                 )
             ).all()
         )
-
-    async def available_groups(self, actor: int) -> list[ManagedGroup]:
-        return await self.groups_for_subscription(actor)
-
-    async def export_members(self, actor: int, chat_id: int) -> list[dict]:
-        self.require_owner(actor)
-        group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if group is None or not group.approved or await self.is_removed_group(chat_id):
-            raise DomainError("not_found")
-        excluded = (
-            select(ScamRecord.id)
-            .join(User, User.id == ScamRecord.target_id)
-            .where(
-                ScamRecord.status == "ACTIVE",
-                (User.telegram_id == ObservedMember.telegram_id)
-                | (
-                    User.telegram_id.is_(None)
-                    & User.username.is_not(None)
-                    & (User.username == func.lower(ObservedMember.username))
-                ),
-            )
-            .exists()
-        )
-        rows = list(
-            (
-                await self.session.scalars(
-                    select(ObservedMember)
-                    .where(ObservedMember.chat_id == chat_id, ~excluded)
-                    .order_by(ObservedMember.telegram_id)
-                )
-            ).all()
-        )
-        self.core._audit(actor, "group_members_exported", None, chat_id=chat_id, count=len(rows))
-        await self.session.commit()
-        return [
-            {
-                "telegram_id": r.telegram_id,
-                "username": r.username,
-                "display_name": r.display_name,
-                "observed_at": r.observed_at.isoformat(),
-            }
-            for r in rows
-        ]
-
-    @staticmethod
-    def _invite(url: str) -> str:
-        parsed = urlsplit(url)
-        if (
-            len(url) > 512
-            or parsed.scheme != "https"
-            or parsed.netloc != "t.me"
-            or parsed.query
-            or parsed.fragment
-            or not re.fullmatch(
-                r"/(?:\+[A-Za-z0-9_-]+|joinchat/[A-Za-z0-9_-]+|[A-Za-z][A-Za-z0-9_]{4,31})",
-                parsed.path,
-            )
-        ):
-            raise DomainError("invalid_input")
-        return url
-
-    async def prepare_recovery(
-        self, actor: int, chat_id: int, invite_url: str, request_key: str
-    ) -> dict:
-        self.require_owner(actor)
-        self.core._request_key(request_key)
-        self._invite(invite_url)
-        if await self.session.get(ManagedGroup, chat_id) is None:
-            raise DomainError("not_found")
-        recipients = list(
-            (
-                await self.session.scalars(
-                    select(RecoverySubscription.telegram_id).where(
-                        RecoverySubscription.chat_id == chat_id,
-                        RecoverySubscription.consent.is_(True),
-                    )
-                )
-            ).all()
-        )
-        group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if group is None or not group.approved:
-            raise DomainError("not_found")
-        return {"recipients": len(recipients), "chat_id": chat_id, "title": group.title}
-
-    async def queue_recovery(
-        self, actor: int, chat_id: int, invite_url: str, request_key: str
-    ) -> dict:
-        await self.prepare_recovery(actor, chat_id, invite_url, request_key)
-        await self.core.repo.lock_identity_metadata()
-        group = await self.session.get(ManagedGroup, chat_id, populate_existing=True)
-        if group is None or not group.approved:
-            await self.session.rollback()
-            raise DomainError("not_found")
-        previous = await self.session.scalar(
-            select(RecoveryCampaign).where(RecoveryCampaign.request_key == request_key)
-        )
-        if previous:
-            if (
-                previous.actor_id != actor
-                or previous.chat_id != chat_id
-                or previous.invite_url != invite_url
-            ):
-                await self.session.rollback()
-                raise DomainError("invalid_input")
-            await self.session.commit()
-            return {"campaign_id": previous.id, "queued": 0}
-        campaign = RecoveryCampaign(
-            chat_id=chat_id, actor_id=actor, invite_url=invite_url, request_key=request_key
-        )
-        self.session.add(campaign)
-        await self.session.flush()
-        recipients = list(
-            (
-                await self.session.scalars(
-                    select(RecoverySubscription.telegram_id).where(
-                        RecoverySubscription.chat_id == chat_id,
-                        RecoverySubscription.consent.is_(True),
-                    )
-                )
-            ).all()
-        )
-        for recipient in recipients:
-            self.session.add(RecoveryDelivery(campaign_id=campaign.id, telegram_id=recipient))
-        self.core._audit(
-            actor,
-            "recovery_queued",
-            None,
-            chat_id=chat_id,
-            recipients=len(recipients),
-            campaign_id=campaign.id,
-        )
-        await self.session.commit()
-        return {"campaign_id": campaign.id, "queued": len(recipients)}
 
     async def ban_summary(self, record_id: int) -> BanSummary:
         record = await self.session.get(ScamRecord, record_id, populate_existing=True)
@@ -776,9 +578,6 @@ class GroupService:
         await self.session.commit()
         return ready is not None
 
-    async def claim_deliveries(self, limit: int = 20) -> list[RecoveryDelivery]:
-        return await self._claim(RecoveryDelivery, limit)
-
     async def _claim(self, model, limit, *, scam_record_id=None):
         await self.core.repo.lock_identity_metadata()
         stale = now() - timedelta(minutes=5)
@@ -799,9 +598,7 @@ class GroupService:
             .order_by(model.id)
             .limit(min(max(limit, 1), 100))
         )
-        if model is RecoveryDelivery:
-            query = query.options(selectinload(RecoveryDelivery.campaign))
-        elif scam_record_id is not None:
+        if scam_record_id is not None:
             query = query.where(BanAction.scam_record_id == scam_record_id)
         rows = list((await self.session.scalars(query)).all())
         valid = []
@@ -825,21 +622,6 @@ class GroupService:
                     and target is not None
                     and target.telegram_id == row.telegram_id
                 )
-            else:
-                subscription = await self.session.get(
-                    RecoverySubscription,
-                    (row.campaign.chat_id, row.telegram_id),
-                    populate_existing=True,
-                )
-                group = await self.session.get(
-                    ManagedGroup, row.campaign.chat_id, populate_existing=True
-                )
-                eligible = (
-                    group is not None
-                    and group.approved
-                    and subscription is not None
-                    and subscription.consent
-                )
             if not eligible:
                 row.status, row.completed_at = "OBSOLETE", now()
                 continue
@@ -861,18 +643,6 @@ class GroupService:
     ) -> None:
         await self._finish(
             BanAction, action_id, success, result_type, retry_after, permanent, reason=reason
-        )
-
-    async def finish_delivery(
-        self,
-        action_id: int,
-        success: bool,
-        result_type: str,
-        retry_after: int | None = None,
-        permanent: bool = False,
-    ) -> None:
-        await self._finish(
-            RecoveryDelivery, action_id, success, result_type, retry_after, permanent
         )
 
     async def _finish(
@@ -934,24 +704,6 @@ class GroupService:
         await self.session.commit()
         await self.session.refresh(row)
 
-    async def groups_for_subscription(self, actor: int) -> list[ManagedGroup]:
-        if await self.session.get(PrivateContact, actor) is None:
-            raise DomainError("not_found")
-        return list(
-            (
-                await self.session.scalars(
-                    select(ManagedGroup)
-                    .join(ObservedMember, ObservedMember.chat_id == ManagedGroup.chat_id)
-                    .where(
-                        ObservedMember.telegram_id == actor,
-                        ManagedGroup.approved.is_(True),
-                        ~self.removed_group(ManagedGroup.chat_id),
-                    )
-                    .order_by(ManagedGroup.chat_id)
-                )
-            ).all()
-        )
-
     async def ban_eligible(self, action_id: int) -> bool:
         row = await self.session.get(BanAction, action_id, populate_existing=True)
         if row is None or row.status != "PROCESSING":
@@ -971,34 +723,6 @@ class GroupService:
             and group.enabled
             and target is not None
             and target.telegram_id == row.telegram_id
-        )
-        if not eligible:
-            row.status, row.completed_at = "OBSOLETE", now()
-        await self.session.commit()
-        return eligible
-
-    async def delivery_eligible(self, action_id: int) -> bool:
-        row = await self.session.get(RecoveryDelivery, action_id, populate_existing=True)
-        if row is None or row.status != "PROCESSING":
-            return False
-        campaign = await self.session.get(RecoveryCampaign, row.campaign_id)
-        subscription = (
-            await self.session.get(
-                RecoverySubscription, (campaign.chat_id, row.telegram_id), populate_existing=True
-            )
-            if campaign
-            else None
-        )
-        group = (
-            await self.session.get(ManagedGroup, campaign.chat_id, populate_existing=True)
-            if campaign
-            else None
-        )
-        eligible = (
-            group is not None
-            and group.approved
-            and subscription is not None
-            and subscription.consent
         )
         if not eligible:
             row.status, row.completed_at = "OBSOLETE", now()

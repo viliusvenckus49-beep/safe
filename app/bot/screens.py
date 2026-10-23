@@ -9,6 +9,7 @@ from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards import back
 
+navigation_edit: ContextVar[bool] = ContextVar("navigation_edit", default=False)
 panel_state: ContextVar[FSMContext | None] = ContextVar("panel_state", default=None)
 preserved_source: ContextVar[int | None] = ContextVar("preserved_source", default=None)
 HOME_PHOTO = Path(__file__).resolve().parents[1] / "assets" / "home.jpg"
@@ -55,6 +56,24 @@ async def render(
         if state is not None and message.message_id == preserved_source.get()
         else None
     )
+    if (
+        edit
+        and navigation_edit.get()
+        and not home_photo
+        and message.chat.type == "private"
+        and message.message_id != preserved_source.get()
+        and not message.photo
+    ):
+        try:
+            result = await message.edit_text(text, reply_markup=reply_markup)
+            if state is not None:
+                await state.update_data(screen_message_id=message.message_id)
+            return result
+        except TelegramBadRequest as error:
+            if "message is not modified" in error.message.lower():
+                return message
+            if not _unavailable(error):
+                raise
     result = await send_screen(message, text, reply_markup, home_photo)
     if state is not None:
         await state.update_data(screen_message_id=result.message_id)
@@ -76,6 +95,17 @@ async def flow_screen(
 ) -> None:
     data = await state.get_data()
     previous = data.get("screen_message_id")
+    if (
+        navigation_edit.get()
+        and not persistent
+        and previous == message.message_id
+        and message.message_id != preserved_source.get()
+        and message.chat.type == "private"
+        and not home_photo
+        and not message.photo
+    ):
+        await render(message, text, reply_markup=reply_markup)
+        return
     result = await send_screen(message, text, reply_markup, home_photo, persistent=persistent)
     # Receipts are chat history, never an anchor retired by the next screen.
     await state.update_data(screen_message_id=None if persistent else result.message_id)

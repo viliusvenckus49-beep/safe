@@ -131,9 +131,12 @@ async def root(message, ads, actor, *, edit=True):
         + t("ua.counts", total=total, active=active, paused=paused),
         keyboard(
             [
-                [(t("ua.new"), content_cb("new"))],
-                [(t("ua.mine"), cb("list"))],
-                [(t("ua.back"), action("group_help"))],
+                [(t("nav.ads_list"), cb("list"))],
+                [(t("nav.create_ad"), content_cb("new"))],
+                [(t("nav.clients"), action("admin_section", "ads_clients"))],
+                [(t("button.stats"), action("admin_section", "ads_stats"))],
+                [(t("nav.settings"), action("admin_section", "ads_settings"))],
+                [(t("button.back_admin"), action("admin"))],
             ]
         ),
         edit=edit,

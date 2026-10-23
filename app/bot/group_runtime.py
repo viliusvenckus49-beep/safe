@@ -1,4 +1,4 @@
-"""Durable, bounded Telegram moderation and opt-in notification delivery worker."""
+"""Group registration, live moderation and retained group history."""
 
 import asyncio
 from collections.abc import Callable
@@ -15,7 +15,6 @@ from aiogram.exceptions import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot.group_presentation import recovery_notification
 from app.bot.local_moderation import LocalModerationExecutor
 from app.bot.moderation_lock import has_permanent_ban, user_moderation_lock
 from app.bot.moderation_notices import notify_ban_failure
@@ -23,10 +22,8 @@ from app.bot.scam_broadcasts import process_scam_announcements
 from app.config import Settings
 from app.errors import safe_telegram_reason
 from app.group_services import BanSummary, GroupService, enqueue_scam_bans
-from app.i18n import t, use_language
-from app.models import BanAction, ManagedGroup, RecoveryCampaign, ScamRecord
+from app.models import BanAction, ScamRecord
 from app.mtproto_relay import active_relay
-from app.repositories import Repository
 
 BAN_API_TIMEOUT = 10.0
 INTERACTIVE_BAN_BUDGET = 20.0
@@ -165,7 +162,6 @@ async def process_scam_bans(
 
 
 async def process_group_jobs(bot: Bot, settings: Settings, sessions: Any) -> int:
-    log = structlog.get_logger()
     processed = 0
     relay = active_relay()
     if settings.group_help_enabled and relay is not None:
@@ -174,39 +170,6 @@ async def process_group_jobs(bot: Bot, settings: Settings, sessions: Any) -> int
         service = GroupService(settings, session)
         bans = await service.claim_bans(limit=5)
         processed += await _execute_bans(bot, service, bans)
-        deliveries = await service.claim_deliveries(limit=5)
-        for delivery in deliveries:
-            if not await service.delivery_eligible(delivery.id):
-                continue
-            campaign = await session.get(RecoveryCampaign, delivery.campaign_id)
-            if campaign is None:
-                await service.finish_delivery(delivery.id, False, "OBSOLETE", permanent=True)
-                continue
-            group = await session.get(ManagedGroup, campaign.chat_id)
-            selected_language = await Repository(session).language(delivery.telegram_id)
-            title = group.title if group else t("core.group", selected_language)
-            success, result = False, "TelegramAPIError"
-            retry_after, permanent = None, False
-            try:
-                with use_language(selected_language):
-                    await bot.send_message(
-                        delivery.telegram_id, recovery_notification(title, campaign.invite_url)
-                    )
-                success, result = True, "SENT"
-            except TelegramRetryAfter as error:
-                result = "TelegramRetryAfter"
-                retry_after = error.retry_after
-            except TelegramForbiddenError:
-                result = "TelegramForbiddenError"
-                permanent = True
-                await service.subscribe(delivery.telegram_id, campaign.chat_id, False)
-            except TelegramAPIError as error:
-                result = type(error).__name__
-            await service.finish_delivery(
-                delivery.id, success, result, retry_after=retry_after, permanent=permanent
-            )
-            log.info("group_recovery_result", user_id=delivery.telegram_id, result=result)
-            processed += 1
     from app.bot.checks_runtime import process_checks
 
     processed += await process_checks(sessions, bot)

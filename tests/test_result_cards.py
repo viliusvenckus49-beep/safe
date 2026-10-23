@@ -212,7 +212,7 @@ def test_lithuanian_check_matches_requested_design_and_html():
 async def test_checked_profile_keeps_numeric_target_after_username_change(
     journey, database, settings
 ):
-    from aiogram.methods import SendMessage
+    from aiogram.methods import EditMessageText, SendMessage
 
     from app.bot import keyboards as kb
 
@@ -220,11 +220,13 @@ async def test_checked_profile_keeps_numeric_target_after_username_change(
         await Service(settings, session).observe(42, "checked_person", "Checked person")
     await journey.send("/ask @checked_person")
     result = next(
-        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+        call
+        for call in reversed(journey.transport.calls)
+        if isinstance(call, (SendMessage, EditMessageText))
     )
     assert [[button.text for button in row] for row in result.reply_markup.inline_keyboard] == [
-        ["🪪 REDSAFE PROFILIS"],
-        ["ᴛɪᴋʀɪɴᴛɪ ᴋɪᴛᴀ"],
+        ["👤 REDSAFE PROFILIS"],
+        ["🔎 Tikrinti kitą"],
     ]
     profile_callback = result.reply_markup.inline_keyboard[0][0].callback_data
     assert profile_callback == kb.action("profile", "42")
@@ -235,26 +237,34 @@ async def test_checked_profile_keeps_numeric_target_after_username_change(
         await core.observe(43, "checked_person", "Different person")
     await journey.click(profile_callback)
     profile = next(
-        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+        call
+        for call in reversed(journey.transport.calls)
+        if isinstance(call, (SendMessage, EditMessageText))
     )
     assert "REDSAFE PROFILIS" in profile.text and "🆔 ID: 42" in profile.text
     assert "@changed_person" in profile.text and "Different person" not in profile.text
     # The unchanged main-menu callback with an empty value still opens the actor's own profile.
     await journey.click(kb.action("profile"))
-    own = next(call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage))
+    own = next(
+        call
+        for call in reversed(journey.transport.calls)
+        if isinstance(call, (SendMessage, EditMessageText))
+    )
     assert "🆔 ID: 1" in own.text
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("target", ["unknown", "@unknown_name", "u:1", "-123", "0"])
 async def test_unknown_or_invalid_profile_target_never_opens_another_user(journey, target):
-    from aiogram.methods import AnswerCallbackQuery, SendMessage
+    from aiogram.methods import AnswerCallbackQuery, EditMessageText, SendMessage
 
     from app.bot import keyboards as kb
 
     await journey.send("/ask @unknown_name")
     result = next(
-        call for call in reversed(journey.transport.calls) if isinstance(call, SendMessage)
+        call
+        for call in reversed(journey.transport.calls)
+        if isinstance(call, (SendMessage, EditMessageText))
     )
     assert result.reply_markup.inline_keyboard[0][0].callback_data == kb.action(
         "profile", "unknown"

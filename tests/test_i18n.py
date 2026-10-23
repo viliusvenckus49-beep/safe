@@ -11,6 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
+    EditMessageText,
     SendMessage,
     SendPhoto,
     SetMyCommands,
@@ -91,7 +92,7 @@ def last_screen(localized_bot):
     call = next(
         call
         for call in reversed(localized_bot[2].calls)
-        if isinstance(call, (SendMessage, SendPhoto))
+        if isinstance(call, (SendMessage, SendPhoto, EditMessageText))
     )
     return (
         SimpleNamespace(text=call.caption, reply_markup=call.reply_markup)

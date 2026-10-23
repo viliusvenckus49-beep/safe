@@ -27,21 +27,19 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
     with use_language("lt"):
         rows = keyboards.home().inline_keyboard
         assert [[button.text for button in row] for row in rows] == [
-            ["ᴛɪᴋʀɪɴᴛɪ"],
-            ["ᴘʀᴏꜰɪʟɪꜱ", "ᴘʀᴀɴᴇꜱᴛɪ"],
-            ["ᴛᴏᴘ 10", "ꜱᴄᴀᴍᴇʀɪᴀɪ"],
-            ["ɪᴠᴇʀᴛɪɴᴛɪ", "ɪɴꜰᴏʀᴍᴀᴄɪᴊᴀ"],
-            ["ɢʀᴜᴘᴇꜱ ᴀᴛᴋᴜʀɪᴍᴀꜱ"],
-            ["ᴋᴀʟʙᴀ"],
-            ["📢 Mano reklamos"],
-            ["ᴜᴢᴅᴀʀʏᴛɪ"],
+            ["🔎 TIKRINTI"],
+            ["👤 PROFILIS", "📩 PRANEŠTI"],
+            ["🏆 TOP 10", "🚩 SCAM REGISTRAS"],
+            ["⭐ ĮVERTINTI", "ⓘ INFORMACIJA"],
+            ["🌐 KALBA"],
+            ["📢 MANO REKLAMOS"],
+            ["× UŽDARYTI"],
         ]
         assert [[button.callback_data for button in row] for row in rows] == [
             [keyboards.action("lookup")],
             [keyboards.action("profile"), keyboards.action("report")],
             [keyboards.action("top"), keyboards.action("scams", "0")],
             [keyboards.action("rep"), keyboards.action("info")],
-            [GroupAction(action="subscriptions").pack()],
             [keyboards.action("language")],
             [CustomerAd(action="list").pack()],
             [keyboards.action("close")],
@@ -59,7 +57,7 @@ def test_reputation_buttons_keep_original_vote_routes_in_all_languages():
     for lang in ("lt", "en", "ru"):
         with use_language(lang):
             row = keyboards.result("u:42").inline_keyboard[1]
-            assert [button.text for button in row] == ["+ʀᴇᴘ", "-ʀᴇᴘ"]
+            assert [button.text for button in row] == ["＋ REP", "− REP"]
             assert [button.callback_data for button in row] == [
                 keyboards.action("vote+", "u:42"),
                 keyboards.action("vote-", "u:42"),
@@ -101,17 +99,13 @@ def test_top_links_use_username_or_numeric_telegram_identity():
     assert buttons[-1].callback_data == keyboards.action("home")
 
 
-def test_admin_circled_buttons_use_emoji_with_original_routes():
+def test_admin_categories_have_exact_symbols_and_stable_routes():
+    from app.bot.admin_navigation import section_keyboard
+
     labels = {
-        button.callback_data: button.text
-        for row in keyboards.admin(owner=True).inline_keyboard
-        for button in row
+        b.callback_data: b.text for row in section_keyboard("scam").inline_keyboard for b in row
     }
-    assert labels[keyboards.action("admin_scams", "0")] == "🚷 SCAM registras"
-    assert labels[keyboards.action("users", "0")] == "👥 Vartotojai"
-    assert labels[keyboards.action("stats")] == "📊 Statistika"
-    assert labels[keyboards.action("audit")] == "📜 Veiksmų istorija"
-    assert labels[keyboards.action("rep_admin")] == "🏆 REP ir TOP valdymas"
-    assert labels[keyboards.action("rep_pending", "0")] == "＋ Laukiantys REP"
-    assert labels[keyboards.action("add_sc")] == "+ᴘʀɪᴅᴇᴛɪ ꜱᴄᴀᴍ"
-    assert labels[keyboards.action("del_sc")] == "+ᴘᴀꜱᴀʟɪɴᴛɪ ꜱᴄᴀᴍ"
+    assert labels[keyboards.action("admin_scams", "0")] == "🚩 SCAM REGISTRAS"
+    assert labels[keyboards.action("pending")] == "📩 LAUKIANTYS PRANEŠIMAI"
+    root = {b.callback_data: b.text for row in keyboards.admin(True).inline_keyboard for b in row}
+    assert root[keyboards.action("admin_section", "owner")] == "♛ SAVININKO VALDYMAS"

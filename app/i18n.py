@@ -20,6 +20,8 @@ from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
 from app.locales.group_help import DATA as GROUP_HELP
 from app.locales.local_moderation import CATALOGS as LOCAL_MODERATION
 from app.locales.moderation_control import CATALOGS as MODERATION_CONTROL
+from app.locales.navigation import CATALOGS as NAVIGATION
+from app.locales.navigation import standardize
 from app.locales.presentation import CATALOGS as PRESENTATION
 from app.locales.scam_management import CATALOGS as SCAM_MANAGEMENT
 from app.locales.trusted_management import CATALOGS as TRUSTED_MANAGEMENT
@@ -63,6 +65,7 @@ CATALOGS = {
         **WARNINGS[lang],
         **CHECKS[lang],
         **GROUP_HELP[lang],
+        **NAVIGATION[lang],
     }
     for lang in LANGUAGES
 }
@@ -74,6 +77,9 @@ for _lang, _entries in MODERATION_CONTROL.items():
             CATALOGS[_lang]["lm.diagnostic." + _key + ".body"] = _value[1]
         else:
             CATALOGS[_lang]["lm.control." + _key] = _value
+
+
+standardize(CATALOGS)
 
 
 @contextmanager

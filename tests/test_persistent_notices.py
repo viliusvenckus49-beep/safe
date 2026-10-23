@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from aiogram.methods import SendMessage, SendPhoto
+from aiogram.methods import EditMessageText, SendMessage, SendPhoto
 from aiogram.types import CallbackQuery, Chat, Message, Update, User
 from test_telegram import journey as telegram_journey
 
@@ -19,8 +19,8 @@ journey = telegram_journey
 def last_sent(j):
     for index in range(len(j.transport.calls) - 1, -1, -1):
         item = j.transport.calls[index]
-        if isinstance(item, (SendMessage, SendPhoto)):
-            return index + 1, item
+        if isinstance(item, (SendMessage, SendPhoto, EditMessageText)):
+            return item.message_id if isinstance(item, EditMessageText) else index + 1, item
     raise AssertionError("No message sent")
 
 
@@ -95,7 +95,7 @@ async def test_new_back_button_keeps_persistent_notice_in_history(journey, kind)
     await click_message(journey, button.callback_data, receipt, actor=actor)
     assert receipt not in [call.message_id for call in journey.transport.deletions]
     _, screen = last_sent(journey)
-    assert isinstance(screen, SendPhoto)
+    assert isinstance(screen, SendMessage)
     assert await journey.state(actor) is None
 
 
@@ -144,7 +144,8 @@ async def test_receipt_buttons_preserve_source_but_replace_current_menu(journey)
     assert (await journey.data(900))["screen_message_id"] == panel
     assert preserved_source.get() is None
     await click_message(journey, Action(name="admin").pack(), panel)
-    assert panel in [call.message_id for call in journey.transport.deletions]
+    assert panel not in [call.message_id for call in journey.transport.deletions]
+    assert (await journey.data(900))["screen_message_id"] == panel
     assert receipt not in [call.message_id for call in journey.transport.deletions]
 
 

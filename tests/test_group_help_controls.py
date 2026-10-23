@@ -217,11 +217,12 @@ async def test_group_first_navigation_words_edit_back_and_no_new_windows(
     def routes():
         return [b.callback_data for row in screen().reply_markup.inline_keyboard for b in row]
 
+    await journey.click(cb(), actor=42)
     assert cb("group", CHAT) in routes()
     await journey.click(cb("group", CHAT), actor=42)
     assert WarningSettings(action="policy", chat=CHAT).pack() in routes()
+    await journey.click(cb("protection", CHAT), actor=42)
     assert CheckSettings(action="words", chat=CHAT).pack() in routes()
-    assert not any(v.startswith("lm2|") for v in routes())
     sent = len([c for c in journey.transport.calls if isinstance(c, SendMessage)])
     await journey.click(CheckSettings(action="words", chat=CHAT).pack(), actor=42)
     add = next(v for v in routes() if v.startswith("ck|w_add|"))

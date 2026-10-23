@@ -14,7 +14,6 @@ async def test_operational_counts_and_late_outbox_are_read_only(database, settin
         empty = await core.repo.operational_stats()
         assert empty == {
             "ban_terminal": 0,
-            "recovery_terminal": 0,
             "oldest_pending_seconds": 0,
             "pending_reports": 0,
             "pending_rep": 0,
@@ -40,7 +39,7 @@ async def test_operational_counts_and_late_outbox_are_read_only(database, settin
         await core.submit_report(1, "44", "Test-only report evidence", [], "report-test")
         await core.vote(2, "44", 1, None, "vote-test", comment="Test-only reason")
         data = await Repository(session).operational_stats()
-        assert data["ban_terminal"] == 1 and data["recovery_terminal"] == 0
+        assert data["ban_terminal"] == 1 and "recovery_terminal" not in data
         assert 590 <= data["oldest_pending_seconds"] <= 610
         assert data["pending_reports"] == 1 and data["pending_rep"] == 1
         assert all(isinstance(value, int) for value in data.values())

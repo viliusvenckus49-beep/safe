@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.group_services import GroupService
-from app.models import BanAction, RecoveryDelivery
+from app.models import BanAction
 from app.services import DomainError, Service
 
 pytestmark = pytest.mark.asyncio
@@ -45,54 +45,6 @@ async def test_ban_retry_obsolete_and_reactivation(database, settings):
         assert len(await groups.claim_bans()) == 1
 
 
-async def test_recovery_requires_observation_private_start_and_consent(database, settings):
-    async with database() as session:
-        groups = GroupService(settings, session)
-        await groups.register_group(900, -100, "Matyta grupė", True)
-        await groups.register_group(900, -200, "Privati nematyta grupė", True)
-        with pytest.raises(DomainError, match="not_found"):
-            await groups.subscribe(12, -100, True)
-        await groups.mark_private_contact(12)
-        with pytest.raises(DomainError, match="forbidden"):
-            await groups.subscribe(12, -100, True)
-        await groups.observe_member(-100, 12, "some_user", "Vardas")
-        assert [g.chat_id for g in await groups.groups_for_subscription(12)] == [-100]
-        await groups.subscribe(12, -100, True)
-        preview = await groups.prepare_recovery(900, -100, "https://t.me/+Invite123", "campaign")
-        assert preview["recipients"] == 1
-        assert (await groups.queue_recovery(900, -100, "https://t.me/+Invite123", "campaign"))[
-            "queued"
-        ] == 1
-        assert (await groups.queue_recovery(900, -100, "https://t.me/+Invite123", "campaign"))[
-            "queued"
-        ] == 0
-        await groups.subscribe(12, -100, False)
-        assert await groups.claim_deliveries() == []
-        delivery = await session.scalar(select(RecoveryDelivery))
-        assert delivery.status == "OBSOLETE"
-        backup = await groups.export_members(900, -100)
-        assert backup[0]["telegram_id"] == 12
-        with pytest.raises(DomainError, match="forbidden"):
-            await groups.export_members(1, -100)
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "http://t.me/+ok",
-        "https://evil.test/+ok",
-        "https://t.me.evil.test/+ok",
-        "https://t.me/+ok?secret=a",
-    ],
-)
-async def test_recovery_rejects_invalid_invite(database, settings, url):
-    async with database() as session:
-        groups = GroupService(settings, session)
-        await groups.register_group(900, -100, "Grupė", True)
-        with pytest.raises(DomainError, match="invalid_input"):
-            await groups.prepare_recovery(900, -100, url, "key")
-
-
 async def test_claim_revalidation_and_exhausted_ban_rearm(database, settings):
     async with database() as session:
         svc, groups = Service(settings, session), GroupService(settings, session)
@@ -109,23 +61,3 @@ async def test_claim_revalidation_and_exhausted_ban_rearm(database, settings):
         assert not await groups.ban_eligible(job.id)
         await session.refresh(job)
         assert job.status == "OBSOLETE"
-
-
-async def test_unsubscribe_refreshes_reused_session_consent(database, settings):
-    from app.models import RecoverySubscription
-
-    async with database() as setup:
-        groups = GroupService(settings, setup)
-        await groups.register_group(900, -100, "Grupė", True)
-        await groups.mark_private_contact(12)
-        await groups.observe_member(-100, 12, "some_user", "Vardas")
-        await groups.subscribe(12, -100, False)
-    async with database() as first, database() as second:
-        cached = await first.get(RecoverySubscription, (-100, 12))
-        assert cached.consent is False
-        await first.commit()
-        await GroupService(settings, second).subscribe(12, -100, True)
-        await GroupService(settings, first).subscribe(12, -100, False)
-    async with database() as verify:
-        subscription = await verify.get(RecoverySubscription, (-100, 12))
-        assert subscription.consent is False

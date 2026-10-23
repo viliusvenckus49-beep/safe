@@ -24,13 +24,11 @@ async def test_active_scam_hidden_from_users_backup_but_history_preserved(databa
         assert record.reason == ""
         users, total = await service.users(900, 0)
         assert 42 not in [user.telegram_id for user in users] and total == 1
-        assert [r["telegram_id"] for r in await groups.export_members(900, -100)] == [43]
         assert await session.get(ObservedMember, (-100, 42)) is not None
         await service.observe(42, "newname", "Changed")
         assert 42 not in [u.telegram_id for u in (await service.users(900, 0))[0]]
         await service.remove_scam(900, "42", "Reviewed incorrect record")
         assert 42 in [u.telegram_id for u in (await service.users(900, 0))[0]]
-        assert 42 in [r["telegram_id"] for r in await groups.export_members(900, -100)]
 
 
 @pytest.mark.asyncio
@@ -42,7 +40,6 @@ async def test_scam_member_not_newly_saved_but_ban_still_queued(database, settin
         await service.add_scam(900, "42")
         await groups.observe_member(-100, 42, "example", "Person")
         assert await session.get(ObservedMember, (-100, 42)) is None
-        assert await groups.export_members(900, -100) == []
         from app.models import BanAction
 
         assert (
@@ -65,7 +62,6 @@ async def test_username_only_scam_filter_case_normalization(database, settings):
         await session.flush()
         session.add(ScamRecord(target_id=target.id, reason="", moderator_id=900, status="ACTIVE"))
         await session.commit()
-        assert await groups.export_members(900, -100) == []
         assert not (await service.users(900, 0))[0]
 
 

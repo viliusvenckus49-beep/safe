@@ -554,7 +554,7 @@ async def test_ordinary_group_messages_are_silent_but_rep_command_works(journey,
 
 
 @pytest.mark.asyncio
-async def test_callback_navigation_sends_at_bottom_and_deletes_predecessor(journey):
+async def test_callback_navigation_edits_one_panel_without_new_messages(journey):
     for action in ["home", "info", "lookup", "top", "profile", "home"]:
         await journey.click(Action(name=action).pack())
     panels = [
@@ -563,9 +563,9 @@ async def test_callback_navigation_sends_at_bottom_and_deletes_predecessor(journ
         if isinstance(call, (SendMessage, EditMessageText, SendPhoto))
     ]
     assert len(panels) == 6
-    assert all(isinstance(call, (SendMessage, SendPhoto)) for call in panels)
-    assert len(journey.transport.deletions) == 6
-    assert all(call.message_id == 100 for call in journey.transport.deletions)
+    assert all(isinstance(call, EditMessageText) for call in panels)
+    assert journey.transport.deletions == []
+    assert all(call.message_id == 100 for call in panels)
 
 
 @pytest.mark.asyncio
@@ -639,7 +639,7 @@ async def test_cancel_command_closes_latest_callback_panel(journey):
     await journey.send("/start")
     await journey.click(Action(name="info").pack())
     latest = (await journey.data())["screen_message_id"]
-    assert latest != 100
+    assert latest == 100
     panel_count = len(journey.transport.calls)
     await journey.send("/cancel")
     assert journey.transport.deletions[-1].message_id == latest
