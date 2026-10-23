@@ -1,4 +1,4 @@
-name: SAFECheck WARN event read-only verification
+name: SAFECheck ad group read-only diagnostics
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -35,91 +35,38 @@ jobs:
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio
-          import importlib.util
-          import json
+          sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio,json
           import asyncpg
+          from aiogram import Bot
           from app.config import Settings
-          from app.health import snapshot
-          
+          from app.bot.session import telegram_session
           
           def emit(name,value):
-              print(name+'"'"'='"'"'+json.dumps(value,sort_keys=True,default=str))
-          
+              print(name+'"'"'='"'"'+json.dumps(value,default=str,ensure_ascii=True))
           
           async def main():
-              healthy=snapshot()
-              emit('"'"'RuntimeHeartbeat'"'"',healthy)
-              if not healthy['"'"'healthy'"'"']:
-                  raise RuntimeError('"'"'Unhealthy runtime'"'"')
-              upgraded=importlib.util.find_spec('"'"'app.bot.admin_navigation'"'"') is not None
-              if upgraded:
-                  from app.bot import keyboards,states
-                  from app.group_services import GroupService
-                  from app.i18n import CATALOGS,use_language
-                  from app.locales.button_icons import CATALOGS as icons
-                  for lang in ('"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"'):
-                      assert '"'"'command.recovery'"'"' not in CATALOGS[lang]
-                      with use_language(lang):
-                          buttons=[b for row in keyboards.home(True,owner=True).inline_keyboard for b in row]
-                          assert all(b.icon_custom_emoji_id is None for b in buttons)
-                          assert all(len(b.callback_data.encode())<=64 for b in buttons)
-                          assert not any(b.callback_data.startswith('"'"'sg|'"'"') for b in buttons)
-                          assert icons[lang]=={}
-                  import hashlib
-                  expected_home={'"'"'lt'"'"': '"'"'212ec1aab8836a8ded45fa859dc344e178d9c70a6c3e7fbe364bf22974a6fdd4'"'"', '"'"'en'"'"': '"'"'f5f80a98dc39535e2963340e125e38c9410908b936b55b83490efc7fa84455c9'"'"', '"'"'ru'"'"': '"'"'2b82cb5dbe800c7885427320853fbd7579bd8a97d796ec63829492844ecafc52'"'"'}
-                  for lang,digest in expected_home.items():
-                      assert hashlib.sha256(CATALOGS[lang]['"'"'p.home'"'"'].encode()).hexdigest()==digest
-                  emit('"'"'HomeCopyRuntime'"'"',{'"'"'exact_localized_html'"'"':True,'"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
-                  from app.operations_status import status as operations_status
-                  metrics=await operations_status(Settings())
-                  assert set(metrics)=={'"'"'ban_terminal'"'"','"'"'oldest_pending_seconds'"'"','"'"'pending_reports'"'"','"'"'pending_rep'"'"'}
-                  emit('"'"'OperationalMetrics'"'"',metrics)
-                  assert not hasattr(states,'"'"'RecoveryFlow'"'"')
-                  assert not any(hasattr(GroupService,name) for name in ('"'"'queue_recovery'"'"','"'"'subscribe'"'"','"'"'export_members'"'"','"'"'claim_deliveries'"'"'))
-                  emit('"'"'NavigationStage2Runtime'"'"',{'"'"'state'"'"':'"'"'AFTER'"'"','"'"'unicode_labels'"'"':True,'"'"'legacy_recovery_runtime_removed'"'"':True,'"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
-              else:
-                  emit('"'"'NavigationStage2Runtime'"'"',{'"'"'state'"'"':'"'"'BEFORE'"'"'})
-              from pathlib import Path
-              import hashlib
-              from types import SimpleNamespace
-              from app.bot.checks_runtime import security_identity
-              from app.i18n import t
-              expected_sources = {'"'"'app/warning_snapshots.py'"'"': '"'"'d19919968b53e8feccb7c069fc8b8d0d46a7aed73efd1d1f0f02dda6f7ba0e1b'"'"', '"'"'app/bot/checks_runtime.py'"'"': '"'"'cdedc6bb78614cf5867b1ba713e0464c0aad951fe9959a5f396142ec3b3c4685'"'"', '"'"'app/bot/moderation_controls.py'"'"': '"'"'f9afeb89e48ca150da066cf0a967857006f57a0cfcb64ea41e76273de411b19f'"'"', '"'"'app/bot/moderation_messages.py'"'"': '"'"'a806a36e55264353554e8c3101e7815371327d89af35ca5b3f87c41122966b66'"'"', '"'"'app/bot/handlers.py'"'"': '"'"'f78c07f9387d02e4cd68e7d4b7a784c053b1021b5eaf693a226755ca5763c8e4'"'"', '"'"'app/bot/screens.py'"'"': '"'"'2a20641a43a7af986b0a69eab955e761da6edc9d78b2dd6c7745b9f5fb892658'"'"', '"'"'app/moderation_services.py'"'"': '"'"'36a56133a81055b3117119791a284d42dbe1742c9d538f43ff246217023f92e5'"'"', '"'"'app/warning_services.py'"'"': '"'"'c9450682751bd52eee5568388f47b56a07b7e952586c582672dc345df38f2100'"'"', '"'"'app/locales/navigation.py'"'"': '"'"'f944335ff6df35b926ec51e270daf9a5eb106f1c6aeb9a9cee1abfc397e2627a'"'"'}
-              for name,digest in expected_sources.items():
-                  assert hashlib.sha256(Path(importlib.util.find_spec(name[:-3].replace('"'"'/'"'"','"'"'.'"'"')).origin).read_bytes()).hexdigest()==digest, name
-              sample=security_identity(SimpleNamespace(telegram_id=51,display_name='"'"'A<&'"'"'))
-              assert sample=='"'"'<a href="tg://user?id=51"><b>A&lt;&amp;</b></a> [<code>51</code>]'"'"'
-              for lang in ('"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"'):
-                  with use_language(lang):
-                      assert t('"'"'button.check_profile'"'"').startswith('"'"'🪪 '"'"')
-                      assert '"'"'INITIATOR'"'"' in t('"'"'lm.notice.automatic_admin'"'"',initiator='"'"'INITIATOR'"'"')
-              emit('"'"'WarnEventRuntime'"'"',{'"'"'sources_verified'"'"':len(expected_sources),'"'"'linked_display_names'"'"':True,'"'"'profile_icon'"'"':'"'"'🪪'"'"','"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
-              db=await asyncpg.connect(Settings().database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
+              settings=Settings()
+              db=await asyncpg.connect(settings.database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
               try:
                   async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
-                      schema=await db.fetchval('"'"'SELECT version_num FROM alembic_version'"'"')
-                      emit('"'"'Schema'"'"',schema)
-                      assert schema=='"'"'0023'"'"'
-                      for name,table,condition in (
-                          ('"'"'UnfinishedNativeJobs'"'"','"'"'group_sanction_jobs'"'"',"status IN ('"'"'PENDING'"'"','"'"'PROCESSING'"'"','"'"'UNCERTAIN'"'"')"),
-                          ('"'"'UnfinishedNativeSanctions'"'"','"'"'group_sanctions'"'"',"status IN ('"'"'PENDING'"'"','"'"'REVOKING'"'"','"'"'UNCERTAIN'"'"')"),
-                          ('"'"'UnfinishedAds'"'"','"'"'ad_publication_attempts'"'"',"status IN ('"'"'CLAIMED'"'"','"'"'SENDING'"'"','"'"'UNCERTAIN'"'"')"),
-                          ('"'"'UnfinishedChecks'"'"','"'"'group_check_events'"'"',"state IN ('"'"'PENDING'"'"','"'"'WAITING'"'"','"'"'SENDING'"'"','"'"'QUEUED'"'"')"),
-                      ):
-                          emit(name,await db.fetchval('"'"'SELECT count(*) FROM '"'"'+table+'"'"' WHERE '"'"'+condition))
-                      emit('"'"'UnfinishedNativeJobDetails'"'"',[dict(row) for row in await db.fetch("""SELECT j.id AS job_id,j.sanction_id,j.operation,j.actor_id,j.automatic,j.status AS job_status,j.attempts,j.available_at,j.lease_until,j.result,j.created_at,j.updated_at,s.chat_id,s.telegram_id,s.kind,s.status AS sanction_status,s.owned,s.until_date,s.updated_at AS sanction_updated_at FROM group_sanction_jobs j JOIN group_sanctions s ON s.id=j.sanction_id WHERE j.status IN ('"'"'PENDING'"'"','"'"'PROCESSING'"'"','"'"'UNCERTAIN'"'"') ORDER BY j.id LIMIT 20""")])
-                      emit('"'"'BlockingNativeJobs'"'"',await db.fetchval("SELECT count(*) FROM group_sanction_jobs WHERE status IN ('"'"'PENDING'"'"','"'"'PROCESSING'"'"','"'"'UNCERTAIN'"'"') AND NOT EXISTS (\n    SELECT 1 FROM group_sanctions s\n    WHERE s.id = group_sanction_jobs.sanction_id\n      AND group_sanction_jobs.status = '"'"'PENDING'"'"'\n      AND group_sanction_jobs.operation = '"'"'RELEASE'"'"'\n      AND group_sanction_jobs.automatic IS TRUE\n      AND group_sanction_jobs.actor_id IS NULL\n      AND group_sanction_jobs.attempts = 0\n      AND group_sanction_jobs.lease_until IS NULL\n      AND group_sanction_jobs.lease_token IS NULL\n      AND group_sanction_jobs.result IS NULL\n      AND group_sanction_jobs.available_at = s.until_date\n      AND s.until_date > CURRENT_TIMESTAMP + INTERVAL '"'"'30 minutes'"'"'\n      AND s.status = '"'"'ACTIVE'"'"' AND s.owned IS TRUE AND s.kind IN ('"'"'BAN'"'"','"'"'MUTE'"'"')\n      AND EXISTS (\n          SELECT 1 FROM group_sanction_jobs applied\n          WHERE applied.sanction_id = s.id AND applied.operation = '"'"'APPLY'"'"'\n            AND applied.status = '"'"'SUCCEEDED'"'"' AND applied.result = '"'"'APPLIED'"'"'\n      )\n      AND NOT EXISTS (\n          SELECT 1 FROM group_sanctions replacement\n          WHERE replacement.replaces_sanction_id = s.id\n            AND replacement.status IN ('"'"'PENDING'"'"','"'"'ACTIVE'"'"','"'"'REVOKING'"'"','"'"'UNCERTAIN'"'"')\n      )\n)"))
-                      emit('"'"'HistoricalRecoveryStates'"'"',[dict(row) for row in await db.fetch('"'"'SELECT status,count(*) AS count FROM recovery_deliveries GROUP BY status ORDER BY status'"'"')])
-                      emit('"'"'RetainedCounts'"'"',dict(await db.fetchrow('"'"''"'"''"'"'SELECT (SELECT count(*) FROM users) AS users,(SELECT count(*) FROM managed_groups) AS groups,(SELECT count(*) FROM scam_records) AS scam,(SELECT count(*) FROM trusted_designations) AS trusted,(SELECT count(*) FROM group_sanctions) AS sanctions,(SELECT count(*) FROM audit_events) AS audit,(SELECT count(*) FROM recovery_campaigns) AS legacy_campaigns,(SELECT count(*) FROM recovery_subscriptions) AS legacy_subscriptions,(SELECT count(*) FROM recovery_deliveries) AS legacy_deliveries'"'"''"'"''"'"')))
+                      groups=await db.fetch("SELECT g.*, EXISTS(SELECT 1 FROM audit_events a WHERE a.action='"'"'group_removed'"'"' AND (a.details->>'"'"'chat_id'"'"')::bigint=g.chat_id) AS removed_history FROM managed_groups g ORDER BY g.chat_id")
+                      emit('"'"'Groups'"'"',[dict(r) for r in groups])
+                      emit('"'"'Campaigns'"'"',[dict(r) for r in await db.fetch("SELECT c.id,c.internal_name,c.status,c.version,c.client_telegram_id,c.created_at,c.updated_at,p.mode,p.auto_activate,p.interval_seconds,p.start_at,p.end_at,p.last_error, EXISTS(SELECT 1 FROM ad_content_versions v WHERE v.campaign_id=c.id AND v.content::text ILIKE '"'"'%pranashas%'"'"') AS mentions_pranashas FROM ad_campaigns c LEFT JOIN ad_assignment_policies p ON p.campaign_id=c.id ORDER BY c.id DESC LIMIT 30")])
+                      schedules=await db.fetch('"'"'SELECT id,campaign_id,chat_id,status,excluded,interval_seconds,start_at,end_at,next_run_at,last_dispatched_at,last_error,authorized_by,updated_at FROM ad_schedules ORDER BY campaign_id,id'"'"')
+                      emit('"'"'Schedules'"'"',[dict(r) for r in schedules])
+                      emit('"'"'RecentPublicationResults'"'"',[dict(r) for r in await db.fetch('"'"'SELECT a.id,s.campaign_id,a.schedule_id,a.chat_id,a.status,a.error,a.due_at,a.completed_at FROM ad_publication_attempts a JOIN ad_schedules s ON s.id=a.schedule_id ORDER BY a.id DESC LIMIT 20'"'"')])
+                      emit('"'"'GroupChangeAudit'"'"',[dict(r) for r in await db.fetch("SELECT id,actor_id,action,details->>'"'"'chat_id'"'"' AS chat_id,details->>'"'"'enabled'"'"' AS enabled,created_at FROM audit_events WHERE action IN ('"'"'group_removed'"'"','"'"'group_registered'"'"','"'"'group_staged'"'"','"'"'group_approved'"'"','"'"'group_disabled'"'"','"'"'group_enabled'"'"') ORDER BY id DESC LIMIT 25")])
+                  async with Bot(settings.bot_token.get_secret_value(),session=telegram_session(settings)) as bot:
+                      ids=sorted({r['"'"'chat_id'"'"'] for r in schedules if r['"'"'chat_id'"'"'] and not r['"'"'excluded'"'"']})
+                      for chat in ids:
+                          try:
+                              member=await asyncio.wait_for(bot.get_chat_member(chat,bot.id),8)
+                              emit('"'"'BotGroupRights'"'"',{'"'"'chat_id'"'"':chat,'"'"'status'"'"':member.status,'"'"'can_post_messages'"'"':getattr(member,'"'"'can_post_messages'"'"',None),'"'"'can_manage_chat'"'"':getattr(member,'"'"'can_manage_chat'"'"',None)})
+                          except Exception as error:
+                              emit('"'"'BotGroupRights'"'"',{'"'"'chat_id'"'"':chat,'"'"'error_type'"'"':type(error).__name__,'"'"'message'"'"':getattr(error,'"'"'message'"'"','"'"''"'"')[:160]})
               finally:
                   await db.close()
-          
-          try:
-              asyncio.run(main())
-          except Exception as error:
-              emit('"'"'NavigationStage2VerificationFailed'"'"',{'"'"'type'"'"':type(error).__name__})
-              raise SystemExit(1) from None'
+          asyncio.run(main())'
           REMOTE
       - name: Remove runner key
         if: always()
