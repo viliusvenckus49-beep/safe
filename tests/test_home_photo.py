@@ -1,4 +1,4 @@
-"""Photo menus share the existing screen lifecycle and localized captions."""
+"""Localized text-only home menus share the existing screen lifecycle."""
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest
@@ -26,11 +26,17 @@ async def test_home_text_buttons_edit_and_close(journey, database, settings, loc
     await journey.click(Action(name="info").pack(), chat=chat)
     if chat is not None:
         assert journey.transport.deletions[-1].message_id == 100
+    sends_before_return = sum(isinstance(c, SendMessage) for c in journey.transport.calls)
     await journey.click(Action(name="home").pack(), chat=chat)
     assert isinstance(
         journey.transport.calls[-1], SendMessage if chat is not None else EditMessageText
     )
     assert not any(isinstance(c, SendPhoto) for c in journey.transport.calls)
+    assert journey.transport.calls[-1].text == t("p.home", lang=locale)
+    if chat is None:
+        assert (
+            sum(isinstance(c, SendMessage) for c in journey.transport.calls) == sends_before_return
+        )
     count = len(journey.transport.calls)
     await journey.click(Action(name="close").pack(), chat=chat)
     assert journey.transport.deletions[-1].message_id == 100

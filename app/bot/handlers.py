@@ -282,7 +282,7 @@ def create_router(settings: Any, session_factory: Any) -> Router:
         await callback.answer(t("language.changed"))
         await render(
             callback.message,
-            t("language.changed") + "\n\n" + p.home(),
+            p.home(),
             reply_markup=await home_keyboard(
                 service, callback.from_user.id, private=callback.message.chat.type == "private"
             ),

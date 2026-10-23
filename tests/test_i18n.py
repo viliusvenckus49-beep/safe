@@ -284,9 +284,7 @@ async def test_all_language_switch_pairs(localized_bot, database, initial, targe
     await click(localized_bot, f"language:{initial}")
     await send(localized_bot, "/language")
     await click(localized_bot, f"language:{target}")
-    assert last_screen(localized_bot).text == t("language.changed", lang=target) + "\n\n" + t(
-        "p.home", lang=target
-    )
+    assert last_screen(localized_bot).text == t("p.home", lang=target)
     async with database() as session:
         assert (
             await session.scalars(select(User).where(User.telegram_id == 1))

@@ -108,9 +108,11 @@ async def test_first_language_selection_and_home_recheck_callback_actor(
     for lang in ("lt", "en", "ru"):
         await journey.click(Language(lang=lang).pack(), actor=actor)
         with use_language(lang):
+            assert last_screen(journey).text == t("p.home")
             assert last_screen(journey).reply_markup == kb.home(True, owner=actor == OWNER)
         await journey.click(kb.action("home"), actor=actor)
         with use_language(lang):
+            assert last_screen(journey).text == t("p.home")
             assert last_screen(journey).reply_markup == kb.home(True, owner=actor == OWNER)
 
 
