@@ -1,4 +1,4 @@
-name: SAFECheck navigation read-only verification
+name: SAFECheck home copy read-only verification
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -66,6 +66,11 @@ jobs:
                           assert all(len(b.callback_data.encode())<=64 for b in buttons)
                           assert not any(b.callback_data.startswith('"'"'sg|'"'"') for b in buttons)
                           assert icons[lang]=={}
+                  import hashlib
+                  expected_home={'"'"'lt'"'"': '"'"'212ec1aab8836a8ded45fa859dc344e178d9c70a6c3e7fbe364bf22974a6fdd4'"'"', '"'"'en'"'"': '"'"'f5f80a98dc39535e2963340e125e38c9410908b936b55b83490efc7fa84455c9'"'"', '"'"'ru'"'"': '"'"'2b82cb5dbe800c7885427320853fbd7579bd8a97d796ec63829492844ecafc52'"'"'}
+                  for lang,digest in expected_home.items():
+                      assert hashlib.sha256(CATALOGS[lang]['"'"'p.home'"'"'].encode()).hexdigest()==digest
+                  emit('"'"'HomeCopyRuntime'"'"',{'"'"'exact_localized_html'"'"':True,'"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
                   from app.operations_status import status as operations_status
                   metrics=await operations_status(Settings())
                   assert set(metrics)=={'"'"'ban_terminal'"'"','"'"'oldest_pending_seconds'"'"','"'"'pending_reports'"'"','"'"'pending_rep'"'"'}
