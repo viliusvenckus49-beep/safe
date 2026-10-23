@@ -59,6 +59,12 @@ remain for data compatibility. No destructive migration or row deletion is requi
 Group registration/approval/removal, native sanctions, checks and SCAM workers remain.
 Operational queue age no longer counts the retired delivery queue.
 
+The release guard retains untouched automatic expiry jobs scheduled more than 30
+minutes ahead, only for ACTIVE owned BAN/MUTE with a confirmed successful APPLY.
+Manual, attempted, leased, near-due and uncertain work still blocks deployment.
+The queue rows and their original deadlines remain unchanged and are covered by
+the frozen backup/retention verification; the guard runs again after stopping the bot.
+
 No token, environment variable, VPS configuration, scheduler, payment rule or
 reputation algorithm is changed. No dependency is added. The migration head remains
 0023. A pre-stage-2 binary contains the former recovery worker; do not roll back to

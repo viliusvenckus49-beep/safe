@@ -31,6 +31,35 @@ PINS = {
     "0022_group_checks.py": "4e88c33720339b02cbc82ae57ca86f6a603caae58fe0eb0246b0812fad9e1783",
 }
 
+# A durable future expiry is not an interrupted Telegram write. Preserve its row
+# across the release; never exempt manual, attempted, leased or due work. The
+# half-hour margin covers the bounded deployment/restore rehearsal window.
+BLOCKING_NATIVE_JOBS = """status IN ('PENDING','PROCESSING','UNCERTAIN') AND NOT EXISTS (
+    SELECT 1 FROM group_sanctions s
+    WHERE s.id = group_sanction_jobs.sanction_id
+      AND group_sanction_jobs.status = 'PENDING'
+      AND group_sanction_jobs.operation = 'RELEASE'
+      AND group_sanction_jobs.automatic IS TRUE
+      AND group_sanction_jobs.actor_id IS NULL
+      AND group_sanction_jobs.attempts = 0
+      AND group_sanction_jobs.lease_until IS NULL
+      AND group_sanction_jobs.lease_token IS NULL
+      AND group_sanction_jobs.result IS NULL
+      AND group_sanction_jobs.available_at = s.until_date
+      AND s.until_date > CURRENT_TIMESTAMP + INTERVAL '30 minutes'
+      AND s.status = 'ACTIVE' AND s.owned IS TRUE AND s.kind IN ('BAN','MUTE')
+      AND EXISTS (
+          SELECT 1 FROM group_sanction_jobs applied
+          WHERE applied.sanction_id = s.id AND applied.operation = 'APPLY'
+            AND applied.status = 'SUCCEEDED' AND applied.result = 'APPLIED'
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM group_sanctions replacement
+          WHERE replacement.replaces_sanction_id = s.id
+            AND replacement.status IN ('PENDING','ACTIVE','REVOKING','UNCERTAIN')
+      )
+)"""
+
 
 def imported(path):
     spec = importlib.util.spec_from_file_location("production_ops", path)
@@ -153,7 +182,7 @@ class Release:
 
     def idle(self):
         for table, condition in (
-            ("group_sanction_jobs", "status IN ('PENDING','PROCESSING','UNCERTAIN')"),
+            ("group_sanction_jobs", BLOCKING_NATIVE_JOBS),
             ("group_sanctions", "status IN ('PENDING','REVOKING','UNCERTAIN')"),
             ("ad_publication_attempts", "status IN ('CLAIMED','SENDING','UNCERTAIN')"),
             ("group_check_events", "state IN ('PENDING','WAITING','SENDING','QUEUED')"),
