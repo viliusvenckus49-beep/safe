@@ -1,4 +1,4 @@
-name: SAFECheck retirement verification and disk inventory
+name: SAFECheck authorized cache cleanup and final verification
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -27,42 +27,62 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Verify test retirement, unchanged production and remaining disk usage
+      - name: Clean rebuildable caches and verify unchanged running services
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
-          sudo -n python3 -c 'import json,os,shutil,subprocess
+          sudo -n python3 -c 'import fcntl,json,os,shutil,subprocess
           from pathlib import Path
           D=['"'"'docker'"'"','"'"'--host=unix:///var/run/docker.sock'"'"']
-          PREFIX='"'"'safecheck-redtrust-mtproto-test-20261020'"'"'
-          EXPECTED={'"'"'safecheck-bot-1'"'"':'"'"'b9fcdac162e7860ea6e56136a8955a5370a22b03eec7956a6fae2f36fc1f0dac'"'"','"'"'safecheck-postgres-1'"'"':'"'"'66aafc7f4afe51ba0ecc246932e9a7bdea3ef81c0d06c1f6818450595692c334'"'"','"'"'safecheck-redis-1'"'"':'"'"'6b2a1d17f3ec0a0b017a6af6baedd496234f378ac82bc4d801e7b0d0c599e747'"'"'}
           ENV=dict(os.environ)
           for key in ('"'"'DOCKER_HOST'"'"','"'"'DOCKER_CONTEXT'"'"','"'"'DOCKER_TLS'"'"','"'"'DOCKER_TLS_VERIFY'"'"','"'"'DOCKER_CERT_PATH'"'"'):ENV.pop(key,None)
-          def run(args):return subprocess.check_output(args,text=True,timeout=60,env=ENV)
-          def emit(name,value):print(name+'"'"'='"'"'+json.dumps(value,ensure_ascii=True,sort_keys=True),flush=True)
+          def run(args,timeout=90):return subprocess.check_output(args,text=True,timeout=timeout,env=ENV)
+          def emit(name,value):print(name+'"'"'='"'"'+json.dumps(value,sort_keys=True),flush=True)
+          def disk():return dict(zip(('"'"'total'"'"','"'"'used'"'"','"'"'free'"'"'),shutil.disk_usage('"'"'/home/ubuntu'"'"')))
+          FMT='"'"'{"id":{{json .Id}},"image":{{json .Image}},"started":{{json .State.StartedAt}},"state":{{json .State.Status}},"mounts":{{json .Mounts}}}'"'"'
+          def containers():
+           result={}
+           for cid in run(D+['"'"'ps'"'"','"'"'-aq'"'"']).split():
+            r=json.loads(run(D+['"'"'inspect'"'"','"'"'--format'"'"',FMT,cid]));r['"'"'mounts'"'"']=sorted(r['"'"'mounts'"'"'],key=lambda m:m['"'"'Destination'"'"']);result[cid]=r
+           return result
           assert os.geteuid()==0
-          assert not (Path('"'"'/home/ubuntu'"'"')/PREFIX).exists()
-          for args in (['"'"'ps'"'"','"'"'-a'"'"','"'"'--format'"'"','"'"'{{.Names}}'"'"'],['"'"'volume'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"'],['"'"'network'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"']):assert PREFIX not in run(D+args)
-          emit('"'"'TestRetirementVerified'"'"',True)
-          FMT='"'"'{"id":{{json .Id}},"started":{{json .State.StartedAt}},"image":{{json .Config.Image}},"health":{{json .State.Health.Status}},"mounts":{{json .Mounts}}}'"'"'
-          for name,cid in EXPECTED.items():
-           value=json.loads(run(D+['"'"'inspect'"'"','"'"'--format'"'"',FMT,name]))
-           value['"'"'mounts'"'"']=sorted(value['"'"'mounts'"'"'],key=lambda m:m['"'"'Destination'"'"'])
-           emit('"'"'ProductionStatus'"'"',dict(name=name,**value))
-           assert value['"'"'id'"'"']==cid and value['"'"'health'"'"']=='"'"'healthy'"'"'
-           assert value['"'"'started'"'"']<'"'"'2026-10-23T15:36:24'"'"'
+          lock=os.open('"'"'/var/lock/safecheck-cache-cleanup.lock'"'"',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+          fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+          before=containers()
+          assert len(before)==5 and all(r['"'"'state'"'"']=='"'"'running'"'"' for r in before.values())
+          images_before=set(run(D+['"'"'image'"'"','"'"'ls'"'"','"'"'--no-trunc'"'"','"'"'--format'"'"','"'"'{{.ID}} {{.Repository}}:{{.Tag}}'"'"']).splitlines())
+          volumes_before=set(run(D+['"'"'volume'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"']).splitlines())
+          assert volumes_before=={'"'"'safecheck_postgres_data'"'"','"'"'safecheck_redis_data'"'"'}
+          before_disk=disk();emit('"'"'BeforeCacheCleanupDisk'"'"',before_disk)
+          emit('"'"'DockerBuildCacheCleanup'"'"',run(D+['"'"'builder'"'"','"'"'prune'"'"','"'"'--all'"'"','"'"'--force'"'"'],timeout=180).strip())
+          emit('"'"'DanglingImageCleanup'"'"',run(D+['"'"'image'"'"','"'"'prune'"'"','"'"'--force'"'"'],timeout=90).strip())
+          assert shutil.which('"'"'apt-get'"'"')
+          run(['"'"'apt-get'"'"','"'"'clean'"'"'])
+          emit('"'"'DownloadedPackageCacheCleaned'"'"',True)
+          assert containers()==before,'"'"'Container identity, start time or mount changed'"'"'
+          images_after=set(run(D+['"'"'image'"'"','"'"'ls'"'"','"'"'--no-trunc'"'"','"'"'--format'"'"','"'"'{{.ID}} {{.Repository}}:{{.Tag}}'"'"']).splitlines())
+          assert {s for s in images_before if '"'"'<none>'"'"' not in s}.issubset(images_after),'"'"'Tagged image changed'"'"'
+          assert set(run(D+['"'"'volume'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"']).splitlines())==volumes_before
+          emit('"'"'AllFiveRunningContainersPreserved'"'"',True)
+          emit('"'"'TaggedImagesAndProductionVolumesPreserved'"'"',True)
+          prefix='"'"'safecheck-redtrust-mtproto-test-20261020'"'"'
+          assert not (Path('"'"'/home/ubuntu'"'"')/prefix).exists()
+          for args in (['"'"'ps'"'"','"'"'-a'"'"','"'"'--format'"'"','"'"'{{.Names}}'"'"'],['"'"'volume'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"'],['"'"'network'"'"','"'"'ls'"'"','"'"'--format'"'"','"'"'{{.Name}}'"'"']):assert prefix not in run(D+args)
+          helpers=['"'"'SAFECHECK_AUTO_ADS_LIVE_TEST'"'"','"'"'SAFECHECK_EPHEMERAL_STAGING'"'"','"'"'SAFECHECK_MODERATION_TEST_FIX'"'"','"'"'SAFECHECK_MTPROTO_LOOKUP_ONLY'"'"','"'"'SAFECHECK_MTPROTO_TEST_SETUP'"'"','"'"'SAFECHECK_WARN_CONTROLS_TEST'"'"']
+          for stem in helpers:
+           assert not (Path('"'"'/home/ubuntu'"'"')/(stem+'"'"'.py'"'"')).exists()
+           assert not list(Path('"'"'/home/ubuntu/__pycache__'"'"').glob(stem+'"'"'.*.pyc'"'"'))
+          emit('"'"'TestBotResourcesAndHelpersAbsent'"'"',True)
+          for name in ('"'"'safecheck-bot-1'"'"','"'"'safecheck-postgres-1'"'"','"'"'safecheck-redis-1'"'"'):
+           health=run(D+['"'"'inspect'"'"','"'"'--format'"'"','"'"'{{.State.Health.Status}}'"'"',name]).strip()
+           emit('"'"'ProductionHealth'"'"',{'"'"'name'"'"':name,'"'"'health'"'"':health});assert health=='"'"'healthy'"'"'
           emit('"'"'BotRuntimeHealth'"'"',run(D+['"'"'exec'"'"','"'"'safecheck-bot-1'"'"','"'"'python'"'"','"'"'/run/configs/secret_entrypoint.py'"'"','"'"'python'"'"','"'"'-c'"'"','"'"'import json;from app.health import snapshot;s=snapshot();print(json.dumps(s,sort_keys=True));assert s["healthy"]'"'"']).strip())
+          after_disk=disk();emit('"'"'AfterCacheCleanupDisk'"'"',after_disk);emit('"'"'CacheCleanupFreedBytes'"'"',after_disk['"'"'free'"'"']-before_disk['"'"'free'"'"']);emit('"'"'TotalRetirementAndCleanupFreedBytes'"'"',after_disk['"'"'free'"'"']-25120493568)
           emit('"'"'HostMemory'"'"',{l.split('"'"':'"'"')[0]:int(l.split()[1])*1024 for l in Path('"'"'/proc/meminfo'"'"').read_text().splitlines() if l.startswith(('"'"'MemTotal:'"'"','"'"'MemAvailable:'"'"'))})
-          emit('"'"'DiskUsage'"'"',dict(zip(('"'"'total'"'"','"'"'used'"'"','"'"'free'"'"'),shutil.disk_usage('"'"'/home/ubuntu'"'"'))))
-          emit('"'"'DockerDiskSummary'"'"',run(D+['"'"'system'"'"','"'"'df'"'"']).strip())
-          for directory in ('"'"'/home/ubuntu/safecheck-releases'"'"','"'"'/var/lib/safecheck'"'"','"'"'/var/backups/safecheck'"'"','"'"'/var/cache/apt/archives'"'"','"'"'/root/.cache/pip'"'"','"'"'/home/ubuntu/.cache/pip'"'"','"'"'/var/log/journal'"'"'):
-           p=Path(directory)
-           if p.is_dir() and not p.is_symlink():emit('"'"'KnownDirectoryBytes'"'"',{'"'"'path'"'"':directory,'"'"'bytes'"'"':int(run(['"'"'du'"'"','"'"'-sx'"'"','"'"'-B1'"'"',directory]).split()[0])})
-          for line in run(D+['"'"'image'"'"','"'"'ls'"'"','"'"'--no-trunc'"'"','"'"'--format'"'"','"'"'{{json .}}'"'"']).splitlines():
-           row=json.loads(line);emit('"'"'ImageInventory'"'"',{k:row.get(k) for k in ('"'"'ID'"'"','"'"'Repository'"'"','"'"'Tag'"'"','"'"'Size'"'"','"'"'CreatedAt'"'"')})'
+          emit('"'"'DockerDiskSummary'"'"',run(D+['"'"'system'"'"','"'"'df'"'"']).strip())'
           REMOTE
       - name: Remove runner key
         if: always()
