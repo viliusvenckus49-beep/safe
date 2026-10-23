@@ -87,7 +87,7 @@ jobs:
               from app.i18n import t
               expected_sources = {'"'"'app/warning_snapshots.py'"'"': '"'"'d19919968b53e8feccb7c069fc8b8d0d46a7aed73efd1d1f0f02dda6f7ba0e1b'"'"', '"'"'app/bot/checks_runtime.py'"'"': '"'"'cdedc6bb78614cf5867b1ba713e0464c0aad951fe9959a5f396142ec3b3c4685'"'"', '"'"'app/bot/moderation_controls.py'"'"': '"'"'f9afeb89e48ca150da066cf0a967857006f57a0cfcb64ea41e76273de411b19f'"'"', '"'"'app/bot/moderation_messages.py'"'"': '"'"'a806a36e55264353554e8c3101e7815371327d89af35ca5b3f87c41122966b66'"'"', '"'"'app/bot/handlers.py'"'"': '"'"'f78c07f9387d02e4cd68e7d4b7a784c053b1021b5eaf693a226755ca5763c8e4'"'"', '"'"'app/bot/screens.py'"'"': '"'"'2a20641a43a7af986b0a69eab955e761da6edc9d78b2dd6c7745b9f5fb892658'"'"', '"'"'app/moderation_services.py'"'"': '"'"'36a56133a81055b3117119791a284d42dbe1742c9d538f43ff246217023f92e5'"'"', '"'"'app/warning_services.py'"'"': '"'"'c9450682751bd52eee5568388f47b56a07b7e952586c582672dc345df38f2100'"'"', '"'"'app/locales/navigation.py'"'"': '"'"'f944335ff6df35b926ec51e270daf9a5eb106f1c6aeb9a9cee1abfc397e2627a'"'"'}
               for name,digest in expected_sources.items():
-                  assert hashlib.sha256(Path(name).read_bytes()).hexdigest()==digest, name
+                  assert hashlib.sha256(Path(importlib.util.find_spec(name[:-3].replace('"'"'/'"'"','"'"'.'"'"')).origin).read_bytes()).hexdigest()==digest, name
               sample=security_identity(SimpleNamespace(telegram_id=51,display_name='"'"'A<&'"'"'))
               assert sample=='"'"'<a href="tg://user?id=51"><b>A&lt;&amp;</b></a> [<code>51</code>]'"'"'
               for lang in ('"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"'):
