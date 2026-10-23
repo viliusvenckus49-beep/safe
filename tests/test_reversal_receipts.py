@@ -1,8 +1,8 @@
-"""Original receipts are rewritten; commands also announce the confirmed reversal."""
+"""Original receipts are immutable; reversals receive separate confirmed receipts."""
 
 import pytest
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.methods import EditMessageText, RestrictChatMember, SendMessage
+from aiogram.methods import EditMessageReplyMarkup, EditMessageText, RestrictChatMember, SendMessage
 from sqlalchemy import select
 from test_group_moderation_foundation import CHAT
 from test_local_moderation_stage2 import local_journey as local_journey
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["BAN", "MUTE"])
 @pytest.mark.parametrize("method", ["command", "button"])
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
-async def test_release_rewrites_original_and_command_sends_new_confirmation(
+async def test_release_keeps_original_and_sends_separate_confirmation(
     username_journey, database, settings, kind, method, lang
 ):
     journey, native = username_journey
@@ -55,7 +55,7 @@ async def test_release_rewrites_original_and_command_sends_new_confirmation(
         for c in calls
         if isinstance(c, SendMessage) and c.chat_id == CHAT and not c.ephemeral_message_parameters
     ]
-    assert len(public) == (1 if method == "command" else 0)
+    assert len(public) == 1
     if public:
         assert public[0].text.startswith(HEADINGS["UNBAN" if kind == "BAN" else "UNMUTE"])
     edits = [
@@ -63,8 +63,15 @@ async def test_release_rewrites_original_and_command_sends_new_confirmation(
         for c in calls
         if isinstance(c, EditMessageText) and c.chat_id == CHAT and c.message_id == mid
     ]
-    assert edits and edits[-1].reply_markup is None
-    text = edits[-1].text
+    assert not edits
+    controls = [
+        c
+        for c in calls
+        if isinstance(c, EditMessageReplyMarkup) and c.chat_id == CHAT and c.message_id == mid
+    ]
+    assert controls and controls[-1].reply_markup is None
+    assert HEADINGS[kind] in receipt.text and "original-reason" in receipt.text
+    text = public[0].text
     assert text.startswith(HEADINGS["UNBAN" if kind == "BAN" else "UNMUTE"])
     assert text.endswith(BRAND) and "original-reason" not in text
     with use_language(lang):
@@ -82,11 +89,19 @@ async def test_release_rewrites_original_and_command_sends_new_confirmation(
         await Service(settings, session).observe(42, "initial_admin", "Initial")
         await Service(settings, session).observe(43, "releasing_admin", "Release admin")
         row = await session.get(GroupSanction, origin.sanction_id)
-        rendered = await success_message(session, origin, row)
+        release = await session.scalar(
+            select(GroupModerationDraft).where(
+                GroupModerationDraft.kind == ("UNBAN" if kind == "BAN" else "UNMUTE")
+            )
+        )
+        assert release.actor_id == 43 and release.panel_message_id != origin.panel_message_id
+        rendered = await success_message(session, release, row)
         assert "@releasing_admin" in rendered and "42" not in rendered
 
 
-async def test_warning_clear_rewrites_original_and_keeps_history_button(username_journey, database):
+async def test_warning_clear_preserves_original_and_keeps_history_button(
+    username_journey, database
+):
     journey, _ = username_journey
     await journey.send("/warn 51 old-warning-reason", actor=42, chat=CHAT)
     receipt = sent(journey)[-1]
@@ -102,10 +117,15 @@ async def test_warning_clear_rewrites_original_and_keeps_history_button(username
         for c in journey.transport.calls
         if isinstance(c, EditMessageText) and c.chat_id == CHAT and c.message_id == mid
     ]
-    assert edits and edits[-1].text.startswith(HEADINGS["UNWARN"])
-    assert edits[-1].text.endswith(BRAND) and "old-warning-reason" not in edits[-1].text
-    assert len(edits[-1].reply_markup.inline_keyboard[0]) == 1
-    assert "history" in edits[-1].reply_markup.inline_keyboard[0][0].callback_data
+    assert not edits
+    assert "1/3" in receipt.text and "old-warning-reason" in receipt.text
+    controls = [
+        c
+        for c in journey.transport.calls
+        if isinstance(c, EditMessageReplyMarkup) and c.chat_id == CHAT and c.message_id == mid
+    ]
+    assert controls and len(controls[-1].reply_markup.inline_keyboard[0]) == 1
+    assert "history" in controls[-1].reply_markup.inline_keyboard[0][0].callback_data
     announcements = [
         m
         for m in sent(journey)
