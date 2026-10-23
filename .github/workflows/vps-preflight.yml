@@ -1,4 +1,4 @@
-name: SAFECheck ad group read-only diagnostics
+name: SAFECheck automatic ad detachment verification
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -45,6 +45,13 @@ jobs:
               print(name+'"'"'='"'"'+json.dumps(value,default=str,ensure_ascii=True))
           
           async def main():
+              import hashlib,importlib.util
+              from pathlib import Path
+              expected_sources={'"'"'app/ads_audience.py'"'"': '"'"'e798f1a83e6c97eb8f51de3dbf3eb0fddaafaa71b0a70c228db0dc29dcc1ab0b'"'"', '"'"'app/group_services.py'"'"': '"'"'71b490170d7068d5bec8e4579df9c6ee0251c3aa7b5d5e7df03015e3914f5994'"'"', '"'"'app/bot/ads_publisher.py'"'"': '"'"'63b2f340e2e8840f96847f1ab7ef21a0ce80d5d3832caa7ca01244a514725be0'"'"'}
+              for name,digest in expected_sources.items():
+                  location=importlib.util.find_spec(name[:-3].replace('"'"'/'"'"','"'"'.'"'"')).origin
+                  assert hashlib.sha256(Path(location).read_bytes()).hexdigest()==digest,name
+              emit('"'"'AutoDetachRuntime'"'"',{'"'"'sources_verified'"'"':len(expected_sources)})
               settings=Settings()
               db=await asyncpg.connect(settings.database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
               try:
