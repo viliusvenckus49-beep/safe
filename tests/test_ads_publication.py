@@ -559,15 +559,19 @@ async def test_empty_new_revision_pauses_and_notifies_once_without_resetting_sch
     assert len(bot.calls) == 1 and bot.calls[0][1]["chat_id"] == 900
 
 
-async def test_disabled_group_is_notified_once_after_restart(database, settings, clock):
+async def test_disabled_group_is_detached_after_restart_without_error_spam(
+    database, settings, clock
+):
     _, _, bot, _, _ = await configured(database, settings, clock)
     async with database() as session:
         (await session.get(ManagedGroup, -100)).enabled = False
         await session.commit()
     for _ in range(3):
         await AdsPublisher(bot, settings, database).tick()
-    assert len(bot.calls) == 1 and bot.calls[0][1]["chat_id"] == 900
-    assert "AUTHORITY_LOST" in bot.calls[0][1]["text"]
+    assert bot.calls == []
+    schedules = (await snapshot(database, settings))[2]
+    assert schedules[0].excluded and schedules[0].status == "STOPPED"
+    assert schedules[0].last_error == "GROUP_UNAVAILABLE"
 
 
 async def test_global_admin_cannot_bypass_actual_group_rights(database, settings, clock):
@@ -657,7 +661,8 @@ async def test_existing_removed_group_marker_overrides_stale_enabled_flags(
         await session.commit()
     await AdsPublisher(bot, settings, database).tick()
     assert not any(args["chat_id"] < 0 for _, args in bot.calls)
-    assert (await snapshot(database, settings))[2][0].status == "PAUSED"
+    row = (await snapshot(database, settings))[2][0]
+    assert row.excluded and row.status == "STOPPED"
 
 
 @pytest.mark.parametrize("state", ["PENDING", "CLAIMED", "DEFERRED", "PARTIAL"])

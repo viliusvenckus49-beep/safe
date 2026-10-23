@@ -175,6 +175,9 @@ class GroupService:
             .values(status="OBSOLETE", completed_at=now(), claimed_at=None)
             .execution_options(synchronize_session=False)
         )
+        from app.ads_audience import detach_group_ads
+
+        await detach_group_ads(self.session, self.settings, chat_id, actor=actor)
         self.core._audit(actor, "group_removed", None, chat_id=chat_id)
         await self.session.commit()
 
@@ -303,8 +306,10 @@ class GroupService:
         await self.session.commit()
 
     async def disable_group(self, chat_id: int) -> None:
+        from app.ads_audience import detach_group_ads
         from app.models import GroupModerationSettings
 
+        await self.core.repo.lock_identity_metadata()
         await self.session.execute(
             update(ManagedGroup)
             .where(ManagedGroup.chat_id == chat_id)
@@ -315,6 +320,7 @@ class GroupService:
             .where(GroupModerationSettings.chat_id == chat_id)
             .values(local_auto_enabled=False)
         )
+        await detach_group_ads(self.session, self.settings, chat_id, reason="BOT_LEFT_GROUP")
         await self.session.commit()
 
     async def observe_member(

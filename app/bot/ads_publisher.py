@@ -104,6 +104,29 @@ class AdsPublisher:
         self.background = False
         self.inflight: set[asyncio.Task] = set()
 
+    async def detach_absent_bot(self, chat: int) -> bool:
+        """A failed read/network call is not proof that the bot left the group."""
+        absent = False
+        try:
+            member = await asyncio.wait_for(self.bot.get_chat_member(chat, self.bot.id), 5)
+            absent = member.status in {"left", "kicked"}
+        except TelegramForbiddenError as error:
+            absent = any(
+                value in error.message.lower()
+                for value in (
+                    "bot was kicked",
+                    "bot is not a member",
+                )
+            )
+        except (TelegramAPIError, TimeoutError, OSError):
+            return False
+        if absent:
+            from app.group_services import GroupService
+
+            async with self.sessions() as session:
+                await GroupService(self.settings, session).disable_group(chat)
+        return absent
+
     async def execute(self, claim: tuple[int, str, int]) -> None:
         aid, token, fence = claim
         while True:
@@ -131,6 +154,8 @@ class AdsPublisher:
                     await PublicationService(self.settings, session).preflight_failure(
                         aid, token, fence, diagnostic(error), retry=delay
                     )
+                if isinstance(error, (DomainError, TelegramForbiddenError, TelegramBadRequest)):
+                    await self.detach_absent_bot(chat)
                 await self.notify(aid)
                 return
             async with self.sessions() as session:
@@ -139,12 +164,14 @@ class AdsPublisher:
                 return
             row, part, version = prepared
             status, ids, reason, delay = "SENT", None, None, 0
+            check_absence = False
             try:
                 ids = await asyncio.wait_for(send_part(self.bot, row, part, version), API_TIMEOUT)
             except TelegramRetryAfter as error:
                 status, delay = "DEFERRED", error.retry_after
                 reason = "TelegramRetryAfter: " + safe_telegram_reason(error.message)
             except (TelegramBadRequest, TelegramForbiddenError, DomainError) as error:
+                check_absence = isinstance(error, TelegramForbiddenError)
                 status, reason = "FAILED", type(error).__name__
                 if hasattr(error, "message"):
                     reason += ": " + safe_telegram_reason(error.message)
@@ -159,6 +186,8 @@ class AdsPublisher:
                 )
                 recorded = await session.get(AdPublicationAttempt, aid, populate_existing=True)
                 stored_status = recorded.status
+            if check_absence:
+                await self.detach_absent_bot(chat)
             log.info(
                 "ads_publication_result",
                 attempt_id=aid,
@@ -250,6 +279,9 @@ class AdsPublisher:
             await self.pool_tick()
             return
         async with self.sessions() as session:
+            from app.ads_audience import prune_unavailable_groups
+
+            await prune_unavailable_groups(session, self.settings)
             await PublicationService(self.settings, session).enqueue()
         for _ in range(20):
             async with self.sessions() as session:
@@ -308,6 +340,9 @@ class AdsPublisher:
         while True:
             try:
                 async with self.sessions() as session:
+                    from app.ads_audience import prune_unavailable_groups
+
+                    await prune_unavailable_groups(session, self.settings)
                     await PublicationService(self.settings, session).enqueue(limit=128)
                 self.on_progress("plan")
             except Exception as error:
