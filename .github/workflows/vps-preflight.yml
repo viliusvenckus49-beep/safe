@@ -66,6 +66,10 @@ jobs:
                           assert all(len(b.callback_data.encode())<=64 for b in buttons)
                           assert not any(b.callback_data.startswith('"'"'sg|'"'"') for b in buttons)
                           assert icons[lang]=={}
+                  from app.operations_status import status as operations_status
+                  metrics=await operations_status(Settings())
+                  assert set(metrics)=={'"'"'ban_terminal'"'"','"'"'oldest_pending_seconds'"'"','"'"'pending_reports'"'"','"'"'pending_rep'"'"'}
+                  emit('"'"'OperationalMetrics'"'"',metrics)
                   assert not hasattr(states,'"'"'RecoveryFlow'"'"')
                   assert not any(hasattr(GroupService,name) for name in ('"'"'queue_recovery'"'"','"'"'subscribe'"'"','"'"'export_members'"'"','"'"'claim_deliveries'"'"'))
                   emit('"'"'NavigationStage2Runtime'"'"',{'"'"'state'"'"':'"'"'AFTER'"'"','"'"'unicode_labels'"'"':True,'"'"'legacy_recovery_runtime_removed'"'"':True,'"'"'locales'"'"':['"'"'lt'"'"','"'"'en'"'"','"'"'ru'"'"']})
