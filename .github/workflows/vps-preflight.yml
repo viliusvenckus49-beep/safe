@@ -1,4 +1,4 @@
-name: SAFECheck ad group read-only diagnostics
+name: SAFECheck authorized pranashas audience repair
 on:
   push:
     branches: [safecheck-2.13.1]
@@ -27,7 +27,7 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Inspect existing deployment without changing it
+      - name: Repair authorized ad 2 audience and resume only future Klaipeda slots
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
@@ -36,36 +36,63 @@ jobs:
           set -eu
           sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
           sudo -n docker exec safecheck-bot-1 python /run/configs/secret_entrypoint.py python -c 'import asyncio,json
-          import asyncpg
+          from sqlalchemy import select
           from aiogram import Bot
           from app.config import Settings
+          from app.db import create_database
           from app.bot.session import telegram_session
+          from app.ads_unified import UnifiedAds
+          from app.ads_publication import PublicationService
+          from app.models import AdCampaign,AdSchedule,AdPublicationAttempt,ManagedGroup,now
           
           def emit(name,value):
               print(name+'"'"'='"'"'+json.dumps(value,default=str,ensure_ascii=True))
           
           async def main():
               settings=Settings()
-              db=await asyncpg.connect(settings.database_url.replace('"'"'postgresql+asyncpg:'"'"','"'"'postgresql:'"'"'))
+              engine,sessions=create_database(settings.database_url)
               try:
-                  async with db.transaction(readonly=True,isolation='"'"'repeatable_read'"'"'):
-                      groups=await db.fetch("SELECT g.*, EXISTS(SELECT 1 FROM audit_events a WHERE a.action='"'"'group_removed'"'"' AND (a.details->>'"'"'chat_id'"'"')::bigint=g.chat_id) AS removed_history FROM managed_groups g ORDER BY g.chat_id")
-                      emit('"'"'Groups'"'"',[dict(r) for r in groups])
-                      emit('"'"'Campaigns'"'"',[dict(r) for r in await db.fetch("SELECT c.id,c.internal_name,c.status,c.version,c.client_telegram_id,c.created_at,c.updated_at,p.mode,p.auto_activate,p.interval_seconds,p.start_at,p.end_at,p.last_error, EXISTS(SELECT 1 FROM ad_content_versions v WHERE v.campaign_id=c.id AND v.content::text ILIKE '"'"'%pranashas%'"'"') AS mentions_pranashas FROM ad_campaigns c LEFT JOIN ad_assignment_policies p ON p.campaign_id=c.id ORDER BY c.id DESC LIMIT 30")])
-                      schedules=await db.fetch('"'"'SELECT id,campaign_id,chat_id,status,excluded,interval_seconds,start_at,end_at,next_run_at,last_dispatched_at,last_error,authorized_by,updated_at FROM ad_schedules ORDER BY campaign_id,id'"'"')
-                      emit('"'"'Schedules'"'"',[dict(r) for r in schedules])
-                      emit('"'"'RecentPublicationResults'"'"',[dict(r) for r in await db.fetch('"'"'SELECT a.id,s.campaign_id,a.schedule_id,a.chat_id,a.status,a.error,a.due_at,a.completed_at FROM ad_publication_attempts a JOIN ad_schedules s ON s.id=a.schedule_id ORDER BY a.id DESC LIMIT 20'"'"')])
-                      emit('"'"'GroupChangeAudit'"'"',[dict(r) for r in await db.fetch("SELECT id,actor_id,action,details->>'"'"'chat_id'"'"' AS chat_id,details->>'"'"'enabled'"'"' AS enabled,created_at FROM audit_events WHERE action IN ('"'"'group_removed'"'"','"'"'group_registered'"'"','"'"'group_staged'"'"','"'"'group_approved'"'"','"'"'group_disabled'"'"','"'"'group_enabled'"'"') ORDER BY id DESC LIMIT 25")])
                   async with Bot(settings.bot_token.get_secret_value(),session=telegram_session(settings)) as bot:
-                      ids=sorted({r['"'"'chat_id'"'"'] for r in schedules if r['"'"'chat_id'"'"'] and not r['"'"'excluded'"'"']})
-                      for chat in ids:
-                          try:
-                              member=await asyncio.wait_for(bot.get_chat_member(chat,bot.id),8)
-                              emit('"'"'BotGroupRights'"'"',{'"'"'chat_id'"'"':chat,'"'"'status'"'"':member.status,'"'"'can_post_messages'"'"':getattr(member,'"'"'can_post_messages'"'"',None),'"'"'can_manage_chat'"'"':getattr(member,'"'"'can_manage_chat'"'"',None)})
-                          except Exception as error:
-                              emit('"'"'BotGroupRights'"'"',{'"'"'chat_id'"'"':chat,'"'"'error_type'"'"':type(error).__name__,'"'"'message'"'"':getattr(error,'"'"'message'"'"','"'"''"'"')[:160]})
+                      async with sessions() as session:
+                          actor=settings.group_owner
+                          assert actor and bot.id==8403154035
+                          ad=await session.get(AdCampaign,2)
+                          assert ad.internal_name.lower()=='"'"'pranashas'"'"' and ad.status=='"'"'DRAFT'"'"'
+                          management=UnifiedAds(settings,session)
+                          policy=await management.policy(actor,2)
+                          rows=await management.schedules(2)
+                          selected=[]; withdrawn=[]
+                          for row in rows:
+                              if row.excluded or not row.chat_id:continue
+                              group=await session.get(ManagedGroup,row.chat_id)
+                              if group and group.approved and group.enabled:
+                                  selected.append(row.chat_id)
+                              else:
+                                  withdrawn.append(row.chat_id)
+                          assert set(withdrawn).issubset({-1004398786973,-1003985132354})
+                          assert -1004395482317 in selected
+                          emit('"'"'AudienceRepairPlan'"'"',{'"'"'campaign_id'"'"':2,'"'"'withdraw'"'"':sorted(withdrawn),'"'"'keep'"'"':sorted(selected)})
+                          if withdrawn:
+                              await management.groups(actor,2,policy.version,selected,bot,all_groups=policy.mode=='"'"'EXISTING'"'"')
+                          row=await session.get(AdSchedule,5,populate_existing=True)
+                          assert row.campaign_id==2 and row.chat_id==-1004395482317 and not row.excluded
+                          live=list(await session.scalars(select(AdPublicationAttempt.id).where(
+                              AdPublicationAttempt.schedule_id==5,
+                              AdPublicationAttempt.status.in_(['"'"'CLAIMED'"'"','"'"'SENDING'"'"','"'"'UNCERTAIN'"'"']))))
+                          assert not live, '"'"'Unresolved delivery evidence requires review; no resumption performed'"'"'
+                          if row.status=='"'"'PAUSED'"'"':
+                              assert row.last_error=='"'"'TelegramNetworkError'"'"'
+                              pub=PublicationService(settings,session,schedule_id=5)
+                              row=await pub.activate(actor,2,row.version,ad.version,bot)
+                              assert row.next_run_at and row.next_run_at>now()
+                              emit('"'"'KlaipedaResumed'"'"',{'"'"'schedule_id'"'"':5,'"'"'status'"'"':row.status,'"'"'next_run_at'"'"':row.next_run_at,'"'"'old_deliveries_retried'"'"':False})
+                          else:
+                              assert row.status=='"'"'ACTIVE'"'"'
+                              emit('"'"'KlaipedaAlreadyActive'"'"',{'"'"'schedule_id'"'"':5,'"'"'next_run_at'"'"':row.next_run_at})
+                          rows=await management.schedules(2)
+                          emit('"'"'AudienceAfter'"'"',[{'"'"'schedule_id'"'"':r.id,'"'"'chat_id'"'"':r.chat_id,'"'"'status'"'"':r.status,'"'"'excluded'"'"':r.excluded,'"'"'next_run_at'"'"':r.next_run_at} for r in rows])
               finally:
-                  await db.close()
+                  await engine.dispose()
           asyncio.run(main())'
           REMOTE
       - name: Remove runner key
