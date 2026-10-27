@@ -1,0 +1,14 @@
+[
+  {
+    "path": "/workspace/safecheck-redsafe-check/app/repositories.py",
+    "bytes": 24273,
+    "sha256": "f37632b175b3f0f5aeff37855d18ca7d895ae2a2fbec48afed2e14b8319bdb5c",
+    "credential_pattern_findings": {}
+  },
+  {
+    "path": "/workspace/safecheck_bot/CONTINUATION.md",
+    "bytes": 31977,
+    "sha256": "8d18c28e919ab5097369811d3213a27a6152a01ba7cce79fc77c446f6875701c",
+    "credential_pattern_findings": {}
+  }
+]
