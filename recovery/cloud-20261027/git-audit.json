@@ -1,0 +1,757 @@
+{
+  "github_branch_count": 76,
+  "main": "2f6b34b0667df7d95e8102d5285462bbc2934576",
+  "repositories": [
+    {
+      "directory": "/workspace/safecheck-3-foundation",
+      "branch": "safecheck-3-foundation-20261018",
+      "head": "869450693ddcca99e3f04c5a073fe1f31facaccc",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "safecheck-3-foundation-20261018"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-3-stage2",
+      "branch": "safecheck-3-stage2-20261018",
+      "head": "db449c5ed871aba8e7f411390644af1f8c70f517",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "safecheck-3-stage2-20261018"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-3-stage21",
+      "branch": "safecheck-3-stage21-20261018",
+      "head": "10c7938ac1b8fd1b7b812122fcd98856441a30b0",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "safecheck-3-stage21-20261018"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-auto-ads-unified",
+      "branch": "safecheck-moderation-reliability",
+      "head": "f952742ae751891c90ca116847392927b5947f89",
+      "head_in_github_history": true,
+      "changed_files": [
+        {
+          "path": "app/bot/external_releases.py",
+          "bytes": 5021,
+          "saved_on_remote_tips": [
+            "safecheck-ads-group-detach",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-moderation-reliability",
+            "safecheck-navigation-stage2",
+            "safecheck-warn-event-receipts",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/local_admin.py",
+          "bytes": 42470,
+          "saved_on_remote_tips": [
+            "safecheck-moderation-reliability"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/local_moderation.py",
+          "bytes": 36198,
+          "saved_on_remote_tips": [
+            "safecheck-group-help-menu",
+            "safecheck-moderation-reliability"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/moderation_controls.py",
+          "bytes": 22254,
+          "saved_on_remote_tips": [
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-moderation-reliability",
+            "safecheck-navigation-stage2",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/moderation_errors.py",
+          "bytes": 11896,
+          "saved_on_remote_tips": [
+            "safecheck-group-checks",
+            "safecheck-group-help-menu",
+            "safecheck-moderation-reliability",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/external_releases.py",
+          "bytes": 11701,
+          "saved_on_remote_tips": [
+            "safecheck-ads-group-detach",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-moderation-reliability",
+            "safecheck-navigation-stage2",
+            "safecheck-warn-event-receipts",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/locales/moderation_control.py",
+          "bytes": 15298,
+          "saved_on_remote_tips": [
+            "safecheck-group-help-menu",
+            "safecheck-moderation-reliability"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/moderation_services.py",
+          "bytes": 32264,
+          "saved_on_remote_tips": [
+            "safecheck-group-help-menu",
+            "safecheck-moderation-reliability"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "docs/MODERATION_RELIABILITY_REVIEW.md",
+          "bytes": 4338,
+          "saved_on_remote_tips": [
+            "safecheck-ads-group-detach",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-moderation-reliability",
+            "safecheck-navigation-stage2",
+            "safecheck-warn-event-receipts",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "tests/test_external_releases.py",
+          "bytes": 16466,
+          "saved_on_remote_tips": [
+            "safecheck-ads-group-detach",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-moderation-reliability",
+            "safecheck-navigation-stage2",
+            "safecheck-warn-event-receipts",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "tests/test_sanction_replacements.py",
+          "bytes": 12587,
+          "saved_on_remote_tips": [
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-moderation-reliability",
+            "safecheck-navigation-stage2",
+            "safecheck-warning-settings"
+          ],
+          "blob_exists_in_remote_history": true
+        }
+      ]
+    },
+    {
+      "directory": "/workspace/safecheck-auto-ads31",
+      "branch": "auto-ads-3-1-20261018",
+      "head": "9ffc0b4d6e88668bb9b9ec2330df038d514b8531",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "auto-ads-3-1-20261018"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-auto-ads32",
+      "branch": "auto-ads-3-2-20261019",
+      "head": "c6ec4025f60edf5714fe75877f3ef7734b1c9741",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "auto-ads-3-2-20261019"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-auto-ads33",
+      "branch": "auto-ads-3-3-20261019",
+      "head": "529102f21c5f017a37a073bec10f7a7a42436c6c",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "auto-ads-3-3-20261019"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-auto-ads34",
+      "branch": "auto-ads-3-4-20261019",
+      "head": "df80a56655c81a2aad7827626853efd674cad972",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "auto-ads-3-4-20261019"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-ban-boundary-fix",
+      "branch": "fix/moderation-duration-clock-20261019",
+      "head": "056070452eb6a44428ca2beae73f21517611073d",
+      "head_in_github_history": true,
+      "changed_files": [
+        {
+          "path": "tests/test_group_moderation_foundation.py",
+          "bytes": 28207,
+          "saved_on_remote_tips": [
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "safecheck-moderation-usernames",
+            "safecheck-release-db-preparation-20261019"
+          ],
+          "blob_exists_in_remote_history": true
+        }
+      ]
+    },
+    {
+      "directory": "/workspace/safecheck-boundary-stage35",
+      "branch": "validation/ban-boundary-stage35",
+      "head": "b6ab2807f246074b01d54af97dab21bf836d4461",
+      "head_in_github_history": true,
+      "changed_files": [
+        {
+          "path": "tests/test_group_moderation_foundation.py",
+          "bytes": 28207,
+          "saved_on_remote_tips": [
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "safecheck-moderation-usernames",
+            "safecheck-release-db-preparation-20261019"
+          ],
+          "blob_exists_in_remote_history": true
+        }
+      ]
+    },
+    {
+      "directory": "/workspace/safecheck-client-menu-diagnostics",
+      "branch": "safecheck-moderation-audit-diagnostics",
+      "head": "76f60281dc38fc40dc2029ba374f3cd14ff526c8",
+      "head_in_github_history": true,
+      "changed_files": []
+    },
+    {
+      "directory": "/workspace/safecheck-github-review",
+      "branch": "main",
+      "head": "2058ed3b09220e172b01b886d2102c911f77d611",
+      "head_in_github_history": true,
+      "changed_files": []
+    },
+    {
+      "directory": "/workspace/safecheck-moderation-professional",
+      "branch": "safecheck-moderation-professional",
+      "head": "0206827ac06cdf926010df4893ff0eaa12c82e31",
+      "head_in_github_history": true,
+      "changed_files": []
+    },
+    {
+      "directory": "/workspace/safecheck-moderation-usernames",
+      "branch": "safecheck-warn-controls",
+      "head": "29a0e827243c883927bb8188191460173bbb6d0b",
+      "head_in_github_history": true,
+      "changed_files": []
+    },
+    {
+      "directory": "/workspace/safecheck-redsafe-check",
+      "branch": "redsafe-check-design-20261010",
+      "head": "f1e3e32c9a8dcfdbdd1554df0e27f49f4bb14fdb",
+      "head_in_github_history": false,
+      "changed_files": [
+        {
+          "path": "app/repositories.py",
+          "bytes": 24273,
+          "saved_on_remote_tips": [],
+          "blob_exists_in_remote_history": false
+        }
+      ],
+      "identical_remote_tree_branches": [
+        "redsafe-check-navigation-20261011"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-redsafe-profile",
+      "branch": "redsafe-profile-20261010",
+      "head": "117b8ada8e0a6691ce9e9dc6a0dc6b5b9fc98614",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "redsafe-profile-20261010"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck-release-db",
+      "branch": "safecheck-release-db-preparation-20261019",
+      "head": "b769d35ffbd44292e6c6270acd1e8a2b99426dc0",
+      "head_in_github_history": true,
+      "changed_files": []
+    },
+    {
+      "directory": "/workspace/safecheck-rep-fix",
+      "branch": "rep-caption-main-20261010",
+      "head": "4a1582449a9aad667d25edf3319f39ecfa347bb2",
+      "head_in_github_history": true,
+      "changed_files": [
+        {
+          "path": "app/bot/handlers.py",
+          "bytes": 43839,
+          "saved_on_remote_tips": [
+            "rep-media-fix-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/middleware.py",
+          "bytes": 15011,
+          "saved_on_remote_tips": [
+            "rep-media-fix-20261010",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/rep_vote.py",
+          "bytes": 3955,
+          "saved_on_remote_tips": [
+            "auto-ads-3-1-20261018",
+            "auto-ads-3-2-20261019",
+            "auto-ads-3-3-20261019",
+            "auto-ads-3-4-20261019",
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "rep-media-fix-20261010",
+            "safecheck-3-5-20261019",
+            "safecheck-3-foundation-20261018",
+            "safecheck-3-stage2-20261018",
+            "safecheck-3-stage21-20261018",
+            "safecheck-ads-detach-release-diagnostics",
+            "safecheck-ads-detach-verification",
+            "safecheck-ads-group-detach",
+            "safecheck-auto-ads-unified",
+            "safecheck-checks-diagnostics",
+            "safecheck-client-menu-diagnostics",
+            "safecheck-client-my-ads-menu",
+            "safecheck-controls-blocker-diagnostics",
+            "safecheck-controls-diagnostics",
+            "safecheck-controls-human-reconcile",
+            "safecheck-controls-release-diagnostics",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-home-copy-diagnostics",
+            "safecheck-moderation-audit-diagnostics",
+            "safecheck-moderation-professional",
+            "safecheck-moderation-reliability",
+            "safecheck-moderation-usernames",
+            "safecheck-navigation-stage2",
+            "safecheck-navigation-stage2-diagnostics",
+            "safecheck-pranashas-ads-diagnostics",
+            "safecheck-pranashas-ads-repair",
+            "safecheck-production-3-0",
+            "safecheck-release-db-preparation-20261019",
+            "safecheck-retire-redtrust-test",
+            "safecheck-warn-controls",
+            "safecheck-warn-event-receipts",
+            "safecheck-warn-events-diagnostics",
+            "safecheck-warning-settings",
+            "safecheck-warning-settings-diagnostics",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/validation.py",
+          "bytes": 618,
+          "saved_on_remote_tips": [
+            "auto-ads-3-1-20261018",
+            "auto-ads-3-2-20261019",
+            "auto-ads-3-3-20261019",
+            "auto-ads-3-4-20261019",
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "rep-media-fix-20261010",
+            "safecheck-3-5-20261019",
+            "safecheck-3-foundation-20261018",
+            "safecheck-3-stage2-20261018",
+            "safecheck-3-stage21-20261018",
+            "safecheck-ads-detach-release-diagnostics",
+            "safecheck-ads-detach-verification",
+            "safecheck-ads-group-detach",
+            "safecheck-auto-ads-unified",
+            "safecheck-checks-diagnostics",
+            "safecheck-client-menu-diagnostics",
+            "safecheck-client-my-ads-menu",
+            "safecheck-controls-blocker-diagnostics",
+            "safecheck-controls-diagnostics",
+            "safecheck-controls-human-reconcile",
+            "safecheck-controls-release-diagnostics",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-home-copy-diagnostics",
+            "safecheck-moderation-audit-diagnostics",
+            "safecheck-moderation-professional",
+            "safecheck-moderation-reliability",
+            "safecheck-moderation-usernames",
+            "safecheck-navigation-stage2",
+            "safecheck-navigation-stage2-diagnostics",
+            "safecheck-pranashas-ads-diagnostics",
+            "safecheck-pranashas-ads-repair",
+            "safecheck-production-3-0",
+            "safecheck-release-db-preparation-20261019",
+            "safecheck-retire-redtrust-test",
+            "safecheck-warn-controls",
+            "safecheck-warn-event-receipts",
+            "safecheck-warn-events-diagnostics",
+            "safecheck-warning-settings",
+            "safecheck-warning-settings-diagnostics",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "tests/test_rep_media.py",
+          "bytes": 8019,
+          "saved_on_remote_tips": [
+            "auto-ads-3-1-20261018",
+            "auto-ads-3-2-20261019",
+            "auto-ads-3-3-20261019",
+            "auto-ads-3-4-20261019",
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "rep-media-fix-20261010",
+            "safecheck-3-5-20261019",
+            "safecheck-3-foundation-20261018",
+            "safecheck-3-stage2-20261018",
+            "safecheck-3-stage21-20261018",
+            "safecheck-ads-detach-release-diagnostics",
+            "safecheck-ads-detach-verification",
+            "safecheck-ads-group-detach",
+            "safecheck-auto-ads-unified",
+            "safecheck-checks-diagnostics",
+            "safecheck-client-menu-diagnostics",
+            "safecheck-client-my-ads-menu",
+            "safecheck-controls-blocker-diagnostics",
+            "safecheck-controls-diagnostics",
+            "safecheck-controls-human-reconcile",
+            "safecheck-controls-release-diagnostics",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-home-copy-diagnostics",
+            "safecheck-moderation-audit-diagnostics",
+            "safecheck-moderation-professional",
+            "safecheck-moderation-reliability",
+            "safecheck-moderation-usernames",
+            "safecheck-navigation-stage2",
+            "safecheck-navigation-stage2-diagnostics",
+            "safecheck-pranashas-ads-diagnostics",
+            "safecheck-pranashas-ads-repair",
+            "safecheck-production-3-0",
+            "safecheck-release-db-preparation-20261019",
+            "safecheck-retire-redtrust-test",
+            "safecheck-warn-controls",
+            "safecheck-warn-event-receipts",
+            "safecheck-warn-events-diagnostics",
+            "safecheck-warning-settings",
+            "safecheck-warning-settings-diagnostics",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        }
+      ]
+    },
+    {
+      "directory": "/workspace/safecheck-scam-announcements",
+      "branch": "scam-group-announcements-20261010",
+      "head": "58a309a7f2e52652f26a525d5cd2d8b85504aa91",
+      "head_in_github_history": true,
+      "changed_files": [
+        {
+          "path": "app/bot/group_runtime.py",
+          "bytes": 9970,
+          "saved_on_remote_tips": [
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/handlers.py",
+          "bytes": 44167,
+          "saved_on_remote_tips": [
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/scam_broadcasts.py",
+          "bytes": 6775,
+          "saved_on_remote_tips": [
+            "auto-ads-3-1-20261018",
+            "auto-ads-3-2-20261019",
+            "auto-ads-3-3-20261019",
+            "auto-ads-3-4-20261019",
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "safecheck-3-5-20261019",
+            "safecheck-3-foundation-20261018",
+            "safecheck-3-stage2-20261018",
+            "safecheck-3-stage21-20261018",
+            "safecheck-ads-detach-release-diagnostics",
+            "safecheck-ads-detach-verification",
+            "safecheck-ads-group-detach",
+            "safecheck-auto-ads-unified",
+            "safecheck-checks-diagnostics",
+            "safecheck-client-menu-diagnostics",
+            "safecheck-client-my-ads-menu",
+            "safecheck-controls-blocker-diagnostics",
+            "safecheck-controls-diagnostics",
+            "safecheck-controls-human-reconcile",
+            "safecheck-controls-release-diagnostics",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-home-copy-diagnostics",
+            "safecheck-moderation-audit-diagnostics",
+            "safecheck-moderation-professional",
+            "safecheck-moderation-reliability",
+            "safecheck-moderation-usernames",
+            "safecheck-navigation-stage2",
+            "safecheck-navigation-stage2-diagnostics",
+            "safecheck-pranashas-ads-diagnostics",
+            "safecheck-pranashas-ads-repair",
+            "safecheck-production-3-0",
+            "safecheck-release-db-preparation-20261019",
+            "safecheck-retire-redtrust-test",
+            "safecheck-warn-controls",
+            "safecheck-warn-event-receipts",
+            "safecheck-warn-events-diagnostics",
+            "safecheck-warning-settings",
+            "safecheck-warning-settings-diagnostics",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/bot/scam_notices.py",
+          "bytes": 2088,
+          "saved_on_remote_tips": [
+            "auto-ads-3-1-20261018",
+            "auto-ads-3-2-20261019",
+            "auto-ads-3-3-20261019",
+            "auto-ads-3-4-20261019",
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "safecheck-3-5-20261019",
+            "safecheck-3-foundation-20261018",
+            "safecheck-3-stage2-20261018",
+            "safecheck-3-stage21-20261018",
+            "safecheck-ads-detach-release-diagnostics",
+            "safecheck-ads-detach-verification",
+            "safecheck-ads-group-detach",
+            "safecheck-auto-ads-unified",
+            "safecheck-checks-diagnostics",
+            "safecheck-client-menu-diagnostics",
+            "safecheck-client-my-ads-menu",
+            "safecheck-controls-blocker-diagnostics",
+            "safecheck-controls-diagnostics",
+            "safecheck-controls-human-reconcile",
+            "safecheck-controls-release-diagnostics",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-home-copy-diagnostics",
+            "safecheck-moderation-audit-diagnostics",
+            "safecheck-moderation-professional",
+            "safecheck-moderation-reliability",
+            "safecheck-moderation-usernames",
+            "safecheck-navigation-stage2",
+            "safecheck-navigation-stage2-diagnostics",
+            "safecheck-pranashas-ads-diagnostics",
+            "safecheck-pranashas-ads-repair",
+            "safecheck-production-3-0",
+            "safecheck-release-db-preparation-20261019",
+            "safecheck-retire-redtrust-test",
+            "safecheck-warn-controls",
+            "safecheck-warn-event-receipts",
+            "safecheck-warn-events-diagnostics",
+            "safecheck-warning-settings",
+            "safecheck-warning-settings-diagnostics",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/locales/presentation.py",
+          "bytes": 70982,
+          "saved_on_remote_tips": [
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "app/presentation.py",
+          "bytes": 16413,
+          "saved_on_remote_tips": [
+            "redsafe-profile-20261010",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        },
+        {
+          "path": "tests/test_scam_broadcasts.py",
+          "bytes": 10489,
+          "saved_on_remote_tips": [
+            "auto-ads-3-1-20261018",
+            "auto-ads-3-2-20261019",
+            "auto-ads-3-3-20261019",
+            "auto-ads-3-4-20261019",
+            "fix/moderation-duration-clock-20261019",
+            "main",
+            "redsafe-check-design-20261010",
+            "redsafe-check-navigation-20261011",
+            "redsafe-check-profile-polish-20261010",
+            "redsafe-check-reference-spacing-20261011",
+            "redsafe-profile-20261010",
+            "safecheck-3-5-20261019",
+            "safecheck-3-foundation-20261018",
+            "safecheck-3-stage2-20261018",
+            "safecheck-3-stage21-20261018",
+            "safecheck-ads-detach-release-diagnostics",
+            "safecheck-ads-detach-verification",
+            "safecheck-ads-group-detach",
+            "safecheck-auto-ads-unified",
+            "safecheck-checks-diagnostics",
+            "safecheck-client-menu-diagnostics",
+            "safecheck-client-my-ads-menu",
+            "safecheck-controls-blocker-diagnostics",
+            "safecheck-controls-diagnostics",
+            "safecheck-controls-human-reconcile",
+            "safecheck-controls-release-diagnostics",
+            "safecheck-group-checks",
+            "safecheck-group-help-controls",
+            "safecheck-group-help-menu",
+            "safecheck-home-copy",
+            "safecheck-home-copy-diagnostics",
+            "safecheck-moderation-audit-diagnostics",
+            "safecheck-moderation-professional",
+            "safecheck-moderation-reliability",
+            "safecheck-moderation-usernames",
+            "safecheck-navigation-stage2",
+            "safecheck-navigation-stage2-diagnostics",
+            "safecheck-pranashas-ads-diagnostics",
+            "safecheck-pranashas-ads-repair",
+            "safecheck-production-3-0",
+            "safecheck-release-db-preparation-20261019",
+            "safecheck-retire-redtrust-test",
+            "safecheck-warn-controls",
+            "safecheck-warn-event-receipts",
+            "safecheck-warn-events-diagnostics",
+            "safecheck-warning-settings",
+            "safecheck-warning-settings-diagnostics",
+            "scam-group-announcements-20261010"
+          ],
+          "blob_exists_in_remote_history": true
+        }
+      ]
+    },
+    {
+      "directory": "/workspace/safecheck-stage35",
+      "branch": "safecheck-3-5-20261019",
+      "head": "441026e4ce3e601540f7eef19ac188cc7d4d4f25",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [
+        "safecheck-3-5-20261019"
+      ],
+      "head_files_absent_remote_history": []
+    },
+    {
+      "directory": "/workspace/safecheck_bot",
+      "branch": "test-ui-editor-20261009",
+      "head": "a360ab45d197f3ddc6df7f2bfb7fd9730b5756ef",
+      "head_in_github_history": false,
+      "changed_files": [],
+      "identical_remote_tree_branches": [],
+      "head_files_absent_remote_history": [
+        "CONTINUATION.md"
+      ]
+    }
+  ]
+}
