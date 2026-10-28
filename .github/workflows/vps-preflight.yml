@@ -50,7 +50,7 @@ jobs:
           for name in ('"'"'safecheck-bot-1'"'"','"'"'safecheck-postgres-1'"'"','"'"'safecheck-redis-1'"'"'):
            value=run(D+['"'"'inspect'"'"','"'"'--format'"'"','"'"'{{.State.Health.Status}}'"'"',name]).strip();emit('"'"'ServiceHealth'"'"',{'"'"'name'"'"':name,'"'"'health'"'"':value});assert value=='"'"'healthy'"'"'
           image=run(D+['"'"'inspect'"'"','"'"'--format'"'"','"'"'{{.Config.Image}}'"'"','"'"'safecheck-bot-1'"'"']).strip()
-          expected='"'"'safecheck:2.15.4-'"'"'+('"'"'088ff2c52166'"'"' if phase=='"'"'preflight'"'"' else '"'"'b7178198f45a'"'"');assert image==expected
+          expected='"'"'safecheck:2.15.4-'"'"'+('"'"'088ff2c52166'"'"' if phase=='"'"'preflight'"'"' else '"'"'6d7ed89f17b9'"'"');assert image==expected
           emit('"'"'ExpectedImageVerified'"'"',image)
           emit('"'"'DiskUsage'"'"',dict(zip(('"'"'total'"'"','"'"'used'"'"','"'"'free'"'"'),shutil.disk_usage('"'"'/home/ubuntu'"'"'))))
           if phase=='"'"'verify'"'"':
