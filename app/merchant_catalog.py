@@ -8,7 +8,7 @@ from app.errors import DomainError
 CITIES = ("vilnius", "kaunas", "klaipeda", "siauliai", "panevezys", "pajurys")
 REGIONS = frozenset({"pajurys"})
 PAGE_SIZE = 6
-REVIEW_PAGE_SIZE = 2  # Two complete 1500-character comments fit Telegram's 4096 limit.
+REVIEW_PAGE_SIZE = 1  # A full 1500-codepoint emoji review can occupy 3000 UTF-16 units.
 INPUT_TTL = 600
 DRAFT_TTL = 3600
 

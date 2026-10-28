@@ -1,5 +1,7 @@
 """Merchant directory text; each row provides LT, EN and RU together."""
 
+from app.locales.merchant_workflows import ROWS as WORKFLOWS
+
 ROWS = {
     "button": ("🏪 PREKEIVIAI", "🏪 MERCHANTS", "🏪 ПРОДАВЦЫ"),
     "admin": ("🏪 PREKEIVIŲ VALDYMAS", "🏪 MERCHANT MANAGEMENT", "🏪 УПРАВЛЕНИЕ ПРОДАВЦАМИ"),
@@ -52,7 +54,12 @@ ROWS = {
     "cities_back": ("◀ MIESTAI", "◀ CITIES", "◀ ГОРОДА"),
     "mine": ("👤 MANO ĮRAŠAS", "👤 MY LISTING", "👤 МОЯ ЗАПИСЬ"),
 }
+
+ROWS.update(WORKFLOWS)
 CATALOGS = {
-    lang: {"mc." + key: values[i] for key, values in ROWS.items()}
+    lang: {
+        ("error.merchant_" + key[4:] if key.startswith("err_") else "mc." + key): values[i]
+        for key, values in ROWS.items()
+    }
     for i, lang in enumerate(("lt", "en", "ru"))
 }

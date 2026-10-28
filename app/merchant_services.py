@@ -160,7 +160,16 @@ class MerchantService:
         )
         self.session.add(proposal)
         await self.session.flush()
-        self._audit(actor, "draft_created", entry, proposal_id=proposal.id, kind=kind)
+        self._audit(
+            actor,
+            "draft_created",
+            entry,
+            proposal_id=proposal.id,
+            kind=kind,
+            lawful_consent=bool(consent),
+            consent_actor=actor,
+            policy_version=1,
+        )
         await self.session.commit()
         return proposal
 
@@ -258,6 +267,8 @@ class MerchantService:
         if not approve:
             reason = bounded(reason, 3, 600)
         if approve:
+            if entry.owner.telegram_id is None:
+                raise DomainError("merchant_identity")
             if entry.version != proposal.base_version:
                 raise DomainError("merchant_stale")
             if proposal.kind == "REMOVE":

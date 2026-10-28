@@ -212,3 +212,33 @@ async def test_postgres_concurrent_approval_has_one_audit_and_one_listing(
             )
             == 1
         )
+
+
+async def test_username_reassignment_keeps_listing_and_rep_with_numeric_owner(database, settings):
+    from test_merchants_data import merchant
+
+    async with database() as s:
+        entry, owner = await merchant(s, settings, 42, "Studio")
+        cat = MerchantService(Service(settings, s))
+        await cat.core.observe(42, "new_seller", "Owner")
+        await cat.core.observe(43, "seller42", "New username owner")
+        await s.commit()
+        assert (await cat.repo.mine(42)).id == entry.id
+        assert (await cat.listing(query="seller42"))[1] == 0
+        rows, total, _ = await cat.listing(query="NEW_SELLER")
+        assert total == 1 and rows[0][1].telegram_id == 42
+
+
+async def test_approval_of_edits_updates_search_index_without_changing_trust(database, settings):
+    async with database() as s:
+        cat = await setup(s, settings)
+        p = await submitted(cat)
+        await cat.moderate(900, p.id, p.version, True)
+        entry = await cat.repo.mine(42)
+        p = await cat.begin(42, "EDIT", entry_id=entry.id)
+        p = await cat.update_draft(42, p.id, "name", "Baltic Works", p.version)
+        p = await cat.update_draft(42, p.id, "city_code", "kaunas", p.version)
+        p = await cat.submit(42, p.id, p.version)
+        await cat.moderate(900, p.id, p.version, True)
+        assert (await cat.listing(query="north"))[1] == 0
+        assert (await cat.listing(city_code="kaunas", query="tic wor"))[1] == 1

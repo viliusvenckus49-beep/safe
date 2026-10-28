@@ -63,6 +63,14 @@ class MerchantRepository:
             .execution_options(populate_existing=True)
         )
 
+    async def latest_proposal(self, entry_id: int):
+        return await self.session.scalar(
+            select(MerchantProposal)
+            .where(MerchantProposal.entry_id == entry_id)
+            .order_by(MerchantProposal.id.desc())
+            .limit(1)
+        )
+
     async def listing(self, *, city="", query="", page=0, admin=False):
         conditions = [] if admin else [public_entry()]
         if city:

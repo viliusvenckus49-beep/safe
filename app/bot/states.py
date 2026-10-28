@@ -75,3 +75,7 @@ class AutoAdsFlow(StatesGroup):
 
 class AdMessageFlow(StatesGroup):
     input = State()
+
+
+class MerchantFlow(StatesGroup):
+    input = State()
