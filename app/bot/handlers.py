@@ -228,6 +228,10 @@ def create_router(settings: Any, session_factory: Any) -> Router:
 
     @router.message(CommandStart())
     async def start(message: Message, state: FSMContext, service: Service) -> None:
+        if message.chat.type == "private":
+            assert message.bot is not None
+            # Old per-chat menus override updated global menus until replaced.
+            await user_commands(message.bot, actor_id(message), language.get())
         parts = (message.text or "").split(maxsplit=1)
         if len(parts) == 2 and parts[1].startswith(("ai_", "ae_")):
             from app.bot.auto_ads import open_link as open_auto_ad
