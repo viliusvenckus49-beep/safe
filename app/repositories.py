@@ -26,6 +26,43 @@ from app.models import (
 )
 
 
+def reputation_ledger():
+    legacy = select(
+        ReputationEvent.receiver_user_id.label("user_id"),
+        case((ReputationEvent.value == 1, 1), else_=0).label("positive"),
+        case((ReputationEvent.value == -1, 1), else_=0).label("negative"),
+    )
+    approved = select(
+        ReputationRequest.receiver_user_id.label("user_id"),
+        case((ReputationRequest.value == 1, 1), else_=0).label("positive"),
+        case((ReputationRequest.value == -1, 1), else_=0).label("negative"),
+    ).where(ReputationRequest.status == "APPROVED")
+    adjustments = select(
+        ReputationAdjustment.target_id.label("user_id"),
+        ReputationAdjustment.positive_delta.label("positive"),
+        ReputationAdjustment.negative_delta.label("negative"),
+    )
+    return legacy.union_all(approved, adjustments).subquery()
+
+
+def scam_identity_exists(user_id, username):
+    target = aliased(User)
+    return (
+        select(ScamRecord.id)
+        .join(target, target.id == ScamRecord.target_id)
+        .where(
+            ScamRecord.status == "ACTIVE",
+            (ScamRecord.target_id == user_id)
+            | (
+                target.telegram_id.is_(None)
+                & target.username.is_not(None)
+                & (target.username == username)
+            ),
+        )
+        .exists()
+    )
+
+
 class Repository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -108,27 +145,13 @@ class Repository:
     async def rep_stats(self, user_id: int) -> tuple[int, int, int]:
         # A single SQL statement provides a coherent READ COMMITTED snapshot,
         # even when moderation or a compensating reset commits concurrently.
-        legacy = select(
-            case((ReputationEvent.value == 1, 1), else_=0).label("positive"),
-            case((ReputationEvent.value == -1, 1), else_=0).label("negative"),
-        ).where(ReputationEvent.receiver_user_id == user_id)
-        approved = select(
-            case((ReputationRequest.value == 1, 1), else_=0).label("positive"),
-            case((ReputationRequest.value == -1, 1), else_=0).label("negative"),
-        ).where(
-            ReputationRequest.receiver_user_id == user_id, ReputationRequest.status == "APPROVED"
-        )
-        adjustments = select(
-            ReputationAdjustment.positive_delta.label("positive"),
-            ReputationAdjustment.negative_delta.label("negative"),
-        ).where(ReputationAdjustment.target_id == user_id)
-        ledger = legacy.union_all(approved, adjustments).subquery()
+        ledger = reputation_ledger()
         positive, negative = (
             await self.session.execute(
                 select(
                     func.coalesce(func.sum(ledger.c.positive), 0),
                     func.coalesce(func.sum(ledger.c.negative), 0),
-                )
+                ).where(ledger.c.user_id == user_id)
             )
         ).one()
         return int(positive) - int(negative), int(positive), int(negative)
@@ -509,25 +532,7 @@ class Repository:
         )
 
     async def has_scam_identity(self, user: User) -> bool:
-        target = aliased(User)
-        return bool(
-            await self.session.scalar(
-                select(
-                    select(ScamRecord.id)
-                    .join(target, target.id == ScamRecord.target_id)
-                    .where(
-                        ScamRecord.status == "ACTIVE",
-                        (ScamRecord.target_id == user.id)
-                        | (
-                            target.telegram_id.is_(None)
-                            & target.username.is_not(None)
-                            & (target.username == user.username)
-                        ),
-                    )
-                    .exists()
-                )
-            )
-        )
+        return bool(await self.session.scalar(select(scam_identity_exists(user.id, user.username))))
 
     async def trusted_candidates(
         self, offset: int, limit: int, query: str, owner_id: int | None, admin_ids: frozenset[int]

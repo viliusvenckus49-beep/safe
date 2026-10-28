@@ -33,7 +33,7 @@ def city(value: str) -> str:
 
 
 def search(value: str) -> str:
-    return normalized(bounded(value, 2, 64)).lstrip("@")
+    return bounded(normalized(bounded(value, 2, 64)).lstrip("@"), 2, 64)
 
 
 def grams(value: str) -> set[str]:

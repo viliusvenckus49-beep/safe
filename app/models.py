@@ -1005,3 +1005,99 @@ class AdClientInvitation(Base):
             postgresql_where=text("status = 'ACTIVE'"),
         ),
     )
+
+
+class MerchantEntry(Base):
+    """One directory identity per existing user; no reputation balance is stored."""
+
+    __tablename__ = "merchant_entries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
+    name: Mapped[str | None] = mapped_column(String(64))
+    name_key: Mapped[str | None] = mapped_column(String(128), index=True)
+    city_code: Mapped[str | None] = mapped_column(String(16))
+    description: Mapped[str | None] = mapped_column(String(600))
+    status: Mapped[str] = mapped_column(String(12), default="DRAFT")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[int | None] = mapped_column(BigInteger)
+    reason: Mapped[str | None] = mapped_column(String(600))
+    owner: Mapped[User] = relationship()
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('DRAFT','PENDING','APPROVED','REJECTED','SUSPENDED','REMOVED')",
+            name="ck_merchant_status",
+        ),
+        CheckConstraint("version > 0", name="ck_merchant_version"),
+        CheckConstraint(
+            "city_code IS NULL OR city_code IN ('vilnius','kaunas','klaipeda','siauliai','panevezys','pajurys')",
+            name="ck_merchant_city",
+        ),
+        CheckConstraint(
+            "status <> 'APPROVED' OR (name IS NOT NULL AND name_key IS NOT NULL AND city_code IS NOT NULL AND description IS NOT NULL AND approved_at IS NOT NULL AND approved_by IS NOT NULL)",
+            name="ck_merchant_published",
+        ),
+        Index("ix_merchant_city_status", "city_code", "status", "id"),
+    )
+
+
+class MerchantProposal(Base):
+    """Durable drafts and moderation requests; unpublished content stays private."""
+
+    __tablename__ = "merchant_proposals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entry_id: Mapped[int] = mapped_column(ForeignKey("merchant_entries.id"), index=True)
+    actor_id: Mapped[int] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(10), default="DRAFT")
+    name: Mapped[str | None] = mapped_column(String(64))
+    city_code: Mapped[str | None] = mapped_column(String(16))
+    description: Mapped[str | None] = mapped_column(String(600))
+    base_version: Mapped[int] = mapped_column(Integer)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    request_key: Mapped[str] = mapped_column(String(32), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    moderated_by: Mapped[int | None] = mapped_column(BigInteger)
+    moderated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str | None] = mapped_column(String(600))
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('DRAFT','PENDING','APPROVED','REJECTED','CANCELLED')",
+            name="ck_merchant_proposal_status",
+        ),
+        CheckConstraint("kind IN ('CREATE','EDIT','REMOVE')", name="ck_merchant_proposal_kind"),
+        CheckConstraint("base_version > 0 AND actor_id > 0", name="ck_merchant_proposal_identity"),
+        Index(
+            "uq_merchant_open_proposal",
+            "entry_id",
+            unique=True,
+            sqlite_where=text("status IN ('DRAFT','PENDING')"),
+            postgresql_where=text("status IN ('DRAFT','PENDING')"),
+        ),
+        Index("ix_merchant_proposal_queue", "status", "created_at", "id"),
+        Index("ix_merchant_proposal_actor_time", "actor_id", "created_at"),
+    )
+
+
+class MerchantSearchGram(Base):
+    """Indexed two-character postings allow substring name search without pg_trgm."""
+
+    __tablename__ = "merchant_search_grams"
+    entry_id: Mapped[int] = mapped_column(ForeignKey("merchant_entries.id"), primary_key=True)
+    token: Mapped[str] = mapped_column(String(2), primary_key=True)
+    __table_args__ = (Index("ix_merchant_gram_lookup", "token", "entry_id"),)
+
+
+class MerchantSettings(Base):
+    __tablename__ = "merchant_settings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    enabled: Mapped[bool] = mapped_column(default=True)
+    registrations: Mapped[bool] = mapped_column(default=True)
+    publish_authors: Mapped[bool] = mapped_column(default=False)
+    copy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    __table_args__ = (CheckConstraint("id = 1 AND version > 0", name="ck_merchant_settings"),)
