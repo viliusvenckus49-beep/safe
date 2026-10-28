@@ -9,4 +9,4 @@ Private `/start`, including client deep links, refreshes the user's chat-specifi
 
 No callback, business rule, schema, environment variable or runtime credential was changed. This branch is not deployed or merged by this task. After installing the updated application and restarting it normally, Telegram group/admin-group menus are overwritten automatically; an old private menu may require `/start`. Telegram clients may briefly cache command suggestions.
 
-Validation: 129 command-menu, lookup-policy, navigation and Telegram-dispatch tests passed locally. Ruff lint/format checks and `git diff --check` passed. Further validation is recorded in the PR/CI.
+Validation: 129 command-menu, lookup-policy, navigation and Telegram-dispatch tests passed locally. Ruff lint/format checks and `git diff --check` passed. The optional test-sandbox operator also embeds the updated handler and command-menu module with byte-exact hashes; its archived source identity is preserved for compatibility. Further validation is recorded in the PR/CI.
