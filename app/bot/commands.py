@@ -12,20 +12,9 @@ from aiogram.types import (
 
 from app.i18n import LANGUAGES, t
 
-PUBLIC = ("start", "ask", "rep", "report")
+PUBLIC = ("start", "ask", "report")
 GROUP = (*PUBLIC, "help")
 ADMIN: tuple[str, ...] = ()
-LOCAL_COMMANDS = (
-    "ban",
-    "unban",
-    "mute",
-    "unmute",
-    "warn",
-    "unwarn",
-    "kick",
-    "warns",
-    "moderation",
-)
 
 
 def commands(lang: str, *, admin: bool = False, group: bool = False) -> list[BotCommand]:
@@ -40,28 +29,14 @@ async def group_commands(bot: Bot) -> None:
     await bot.set_my_commands(commands("lt", group=True), scope=scope)
     for lang in sorted(LANGUAGES):
         await bot.set_my_commands(commands(lang, group=True), scope=scope, language_code=lang)
-    # Telegram displays these only to group administrators. Execution checks live
-    # can_restrict_members independently; display scope never grants authority.
+    # Replace the previously registered administrator menus too: changing only
+    # the public scope leaves Telegram's more-specific old menu visible.
+    # Hidden commands keep their existing handlers and permission checks.
     admin_scope = BotCommandScopeAllChatAdministrators()
     for selected in (None, *sorted(LANGUAGES)):
-        lang = selected or "lt"
-        menu = commands(lang, group=True) + [
-            BotCommand(
-                command=name,
-                description=t(
-                    "lm.history"
-                    if name in {"warns"}
-                    else "lm.control.unwarn"
-                    if name == "unwarn"
-                    else "lm.title_command"
-                    if name == "moderation"
-                    else "lm." + name.upper(),
-                    lang,
-                ),
-            )
-            for name in LOCAL_COMMANDS
-        ]
-        await bot.set_my_commands(menu, scope=admin_scope, language_code=selected)
+        await bot.set_my_commands(
+            commands(selected or "lt", group=True), scope=admin_scope, language_code=selected
+        )
 
 
 async def user_commands(bot: Bot, actor: int, lang: str, *, admin: bool = False) -> None:
