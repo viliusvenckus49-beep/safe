@@ -30,3 +30,22 @@ def test_search_and_names_are_unicode_normalized_without_html_execution():
     assert bounded("<b>Studio</b>", 2, 64) == "<b>Studio</b>"  # Escaping is a rendering boundary.
     with pytest.raises(DomainError):
         bounded("bad\x00name", 2, 64)
+
+
+@pytest.mark.parametrize(
+    "text,accepted",
+    [
+        ("+Repair Studio", True),
+        ("-Repair Studio", True),
+        ("+REP @user", False),
+        ("-rep @user", False),
+        ("/ask 42", False),
+        ("/rep 42", False),
+        ("Studio", True),
+    ],
+)
+def test_registration_words_are_not_confused_with_rep_commands(text, accepted):
+    from types import SimpleNamespace
+    from app.bot.merchants import ordinary_input
+
+    assert ordinary_input(SimpleNamespace(text=text)) is accepted

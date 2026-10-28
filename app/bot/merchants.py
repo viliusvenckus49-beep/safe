@@ -151,8 +151,12 @@ async def show_admin_entry(message, state, cat, actor, entry_id):
 
 
 def ordinary_input(message):
-    return bool(
-        message.text and not message.text.lstrip().lower().startswith(("/", "+rep", "-rep"))
+    if not message.text:
+        return False
+    text = message.text.lstrip()
+    return not text.startswith("/") and text.lower().split(maxsplit=1)[:1] not in (
+        ["+rep"],
+        ["-rep"],
     )
 
 
