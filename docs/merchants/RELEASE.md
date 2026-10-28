@@ -125,6 +125,7 @@ docs/merchants/IMPLEMENTATION.md
 docs/merchants/RELEASE.md
 migrations/versions/0024_merchant_directory.py
 tests/test_auto_ads_live_operator.py
+tests/test_auto_ads_migration.py
 tests/test_merchants_data.py
 tests/test_merchants_foundation.py
 tests/test_merchants_migration.py
