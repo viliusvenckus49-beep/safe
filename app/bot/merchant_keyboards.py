@@ -92,7 +92,9 @@ def terms(admin=False):
 def draft(proposal, admin=False):
     prefix = "a_" if admin else ""
     rows = []
-    if proposal.status == "DRAFT":
+    if proposal.status == "DRAFT" and proposal.kind == "REMOVE":
+        rows = [[button("submit", prefix + "submit", proposal.id, version=proposal.version)]]
+    elif proposal.status == "DRAFT":
         rows = [
             [
                 button("edit_name", prefix + "name", proposal.id, version=proposal.version),

@@ -5,7 +5,7 @@ from html import escape
 from app.bot.redsafe_profile import BRAND
 from app.i18n import language, t
 from app.merchant_catalog import utc
-from app.presentation import display_text
+from app.presentation import display_name, display_text
 
 
 def heading(key):
@@ -13,7 +13,7 @@ def heading(key):
 
 
 def identity(user, limit=80):
-    label = display_text("@" + user.username if user.username else user.display_name, limit)
+    label = display_text("@" + user.username if user.username else display_name(user), limit)
     if user.telegram_id is None:
         return escape(label) + " · " + t("mc.limited")
     return f'<a href="tg://user?id={user.telegram_id}">{escape(label)}</a> [<code>{user.telegram_id}</code>]'
@@ -137,7 +137,7 @@ def proposal_card(proposal, entry):
         + "\n\n<b>"
         + t("mc." + proposal.kind)
         + "</b>\n\n"
-        + fields(proposal)
+        + fields(entry if proposal.kind == "REMOVE" else proposal)
     )
     result += "\n\n<b>" + t("mc.status") + ":</b> " + t("mc.status_" + proposal.status)
     if proposal.status == "PENDING":
@@ -145,3 +145,20 @@ def proposal_card(proposal, entry):
     if proposal.reason:
         result += "\n\n<b>" + t("mc.reason") + ":</b> " + escape(proposal.reason)
     return result
+
+
+def settings_card(row):
+    copy = row.copy.get(language.get(), {})
+    return (
+        heading("settings")
+        + "\n\n"
+        + t("mc.privacy_notice")
+        + "\n\n<b>"
+        + t("mc.setting_title")
+        + ":</b> "
+        + escape(copy.get("title", t("mc.title")))
+        + "\n\n<b>"
+        + t("mc.setting_intro")
+        + ":</b> "
+        + escape(copy.get("intro", t("mc.intro")))
+    )

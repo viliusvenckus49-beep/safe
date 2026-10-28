@@ -199,6 +199,8 @@ class MerchantService:
 
     async def update_draft(self, actor, proposal_id, field, value, version, *, admin=False):
         proposal, entry = await self.proposal(actor, proposal_id, admin=admin, lock=True)
+        if proposal.kind == "REMOVE":
+            raise DomainError("merchant_invalid")
         if proposal.status != "DRAFT" or proposal.version != version:
             raise DomainError("merchant_stale")
         if utc(proposal.expires_at) < now():

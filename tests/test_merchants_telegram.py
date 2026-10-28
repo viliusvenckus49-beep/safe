@@ -283,3 +283,82 @@ async def test_pending_rejection_reason_owner_edit_and_admin_settings(journey, d
     await tap(journey, "mine", actor=42)
     assert "More details are required" in screen(journey)[1].text
     assert "seller" not in screen(journey)[1].text  # No invented username.
+
+
+async def test_expired_input_clears_session_and_cannot_run_a_query(journey):
+    import time
+
+    await open_catalog(journey)
+    await tap(journey, "search")
+    ctx = journey.dp.fsm.get_context(bot=journey.bot, chat_id=1, user_id=1)
+    state = await ctx.get_data()
+    data = state["mc_input"]
+    data["until"] = time.time() - 1
+    await ctx.update_data(mc_input=data)
+    await journey.send("Valid Query")
+    assert "laikas baigėsi" in screen(journey)[1].text
+    assert await journey.state() is None
+
+
+async def test_invalid_registration_input_can_be_corrected_without_an_extra_panel(journey):
+    await open_catalog(journey, 42)
+    anchor, _ = screen(journey)
+    await tap(journey, "terms", actor=42)
+    await tap(journey, "begin", actor=42)
+    await tap(journey, "setcity", actor=42, value="kaunas")
+    await journey.send("x", actor=42)
+    assert "Netinkama įvestis" in screen(journey)[1].text
+    await journey.send("Correct Studio", actor=42)
+    await journey.send("Lawful business description", actor=42)
+    assert "Correct Studio" in screen(journey)[1].text
+    assert screen(journey)[0] == anchor
+
+
+async def test_storage_error_returns_a_localized_popup_without_private_details(
+    journey, monkeypatch
+):
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    await open_catalog(journey)
+    monkeypatch.setattr(
+        MerchantService, "listing", AsyncMock(side_effect=SQLAlchemyError("PRIVATE_DSN"))
+    )
+    await tap(journey, "cities")
+    before = screen(journey)[1].text
+    await tap(journey, "list", value="vilnius")
+    assert screen(journey)[1].text == before
+    assert journey.transport.calls[-1].show_alert
+    assert "PRIVATE_DSN" not in str(journey.transport.calls[-1])
+
+
+async def test_redis_search_limit_uses_atomic_bot_specific_key():
+    from unittest.mock import AsyncMock
+
+    from app.bot.merchant_limits import SearchLimiter
+    from app.errors import DomainError
+
+    storage = SimpleNamespace(redis=SimpleNamespace(set=AsyncMock(return_value=True)))
+    state = SimpleNamespace(storage=storage, key=SimpleNamespace(bot_id=7))
+    limiter = SearchLimiter()
+    await limiter.admit(state, 42)
+    storage.redis.set.assert_awaited_once_with(
+        "safecheck:merchants:search:7:42", "1", nx=True, ex=2
+    )
+    storage.redis.set.return_value = None
+    with pytest.raises(DomainError, match="merchant_rate"):
+        await limiter.admit(state, 42)
+
+
+async def test_disabled_directory_has_a_working_exit_to_main_menu(journey, database, settings):
+    async with database() as s:
+        core = Service(settings, s)
+        await core.set_language(900, "lt")
+        await MerchantService(core).configure(900, 1, "enabled", False)
+    await open_catalog(journey)
+    assert "išjungtas" in screen(journey)[1].text
+    buttons = [
+        b.callback_data for row in screen(journey)[1].reply_markup.inline_keyboard for b in row
+    ]
+    assert "sc|home|" in buttons

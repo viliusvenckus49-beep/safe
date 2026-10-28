@@ -242,3 +242,37 @@ async def test_approval_of_edits_updates_search_index_without_changing_trust(dat
         await cat.moderate(900, p.id, p.version, True)
         assert (await cat.listing(query="north"))[1] == 0
         assert (await cat.listing(city_code="kaunas", query="tic wor"))[1] == 1
+
+
+async def test_approved_edit_never_resumes_a_suspended_entry(database, settings):
+    async with database() as s:
+        cat = await setup(s, settings)
+        p = await submitted(cat)
+        await cat.moderate(900, p.id, p.version, True)
+        entry = await cat.repo.mine(42)
+        entry = await cat.change_status(900, entry.id, entry.version, "SUSPENDED", "Policy review")
+        p = await cat.begin(42, "EDIT", entry_id=entry.id)
+        p = await cat.update_draft(42, p.id, "name", "Reviewed New Name", p.version)
+        p = await cat.submit(42, p.id, p.version)
+        await cat.moderate(900, p.id, p.version, True)
+        assert (await cat.repo.mine(42)).status == "SUSPENDED"
+        assert (await cat.listing())[1] == 0
+
+
+async def test_postgres_registration_double_click_creates_one_durable_draft(
+    postgres_contract, settings
+):
+    import asyncio
+
+    sessions, _ = postgres_contract
+    async with sessions() as s:
+        await setup(s, settings)
+
+    async def begin():
+        async with sessions() as s:
+            return (await MerchantService(Service(settings, s)).begin(42, consent=True)).id
+
+    ids = await asyncio.gather(begin(), begin())
+    assert ids[0] == ids[1]
+    async with sessions() as s:
+        assert await s.scalar(select(func.count()).select_from(MerchantProposal)) == 1

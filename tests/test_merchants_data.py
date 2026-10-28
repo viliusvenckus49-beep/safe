@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-import pytest
-
 from app.merchant_catalog import grams, normalized
 from app.merchant_repository import MerchantRepository
 from app.models import (

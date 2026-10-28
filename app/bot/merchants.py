@@ -177,6 +177,12 @@ def register_merchant_handlers(router: Router):
                 raise DomainError("merchant_private")
             if admin:
                 await service.require_admin(actor)
+            if not (
+                0 <= data.entry <= 2147483647
+                and -1 <= data.page <= 2147483647
+                and 0 <= data.version <= 2147483647
+            ):
+                raise DomainError("merchant_invalid")
             context = await state.get_data()
             if route == "root":
                 if not any(
@@ -199,8 +205,16 @@ def register_merchant_handlers(router: Router):
                 if admin:
                     await panel(message, state, view.heading("admin"), kb.admin_root())
                 else:
-                    await cat.available()
                     settings = await cat.settings()
+                    if not settings.enabled:
+                        await panel(
+                            message,
+                            state,
+                            t("error.merchant_disabled"),
+                            base_kb.keyboard([[(t("mc.home"), base_kb.action("home"))]]),
+                        )
+                        await callback.answer()
+                        return
                     await panel(
                         message,
                         state,
@@ -401,7 +415,7 @@ def register_merchant_handlers(router: Router):
                 await show_admin_entry(message, state, cat, actor, data.entry)
             elif route == "settings" and admin:
                 row = await cat.settings()
-                await panel(message, state, view.heading("settings"), kb.settings(row))
+                await panel(message, state, view.settings_card(row), kb.settings(row))
             elif route == "toggle" and admin:
                 if data.value not in ("enabled", "registrations", "publish_authors"):
                     raise DomainError("merchant_invalid")
@@ -409,7 +423,7 @@ def register_merchant_handlers(router: Router):
                 row = await cat.configure(
                     actor, data.version, data.value, not getattr(row, data.value)
                 )
-                await panel(message, state, view.heading("settings"), kb.settings(row))
+                await panel(message, state, view.settings_card(row), kb.settings(row))
             elif route == "copy" and admin:
                 if data.value not in ("title", "intro"):
                     raise DomainError("merchant_invalid")
@@ -509,7 +523,7 @@ def register_merchant_handlers(router: Router):
                 row = await cat.configure(
                     actor, draft["version"], mode[5:], message.text, lang=language.get()
                 )
-                await panel(target, state, view.heading("settings"), kb.settings(row))
+                await panel(target, state, view.settings_card(row), kb.settings(row))
             else:
                 raise DomainError("merchant_stale")
             # A guided form may have advanced to another prompt. Keep that newer state.

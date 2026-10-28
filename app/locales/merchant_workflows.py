@@ -1,6 +1,11 @@
 """Localized workflow and privacy policy wording for the merchant directory."""
 
 ROWS = {
+    "privacy_notice": (
+        "Atsiliepimų autoriai pagal nutylėjimą neviešinami. Įjunk jų rodymą tik pagal taikomą privatumo politiką ir turint teisėtą pagrindą.",
+        "Review authors are anonymous by default. Enable their publication only under your privacy policy and with a lawful basis.",
+        "По умолчанию авторы отзывов не публикуются. Включайте публикацию только в соответствии с политикой конфиденциальности и при наличии законного основания.",
+    ),
     "audit_draft_created": ("Juodraštis sukurtas", "Draft created", "Черновик создан"),
     "audit_draft_updated": ("Juodraštis pakeistas", "Draft changed", "Черновик изменён"),
     "audit_draft_expired": ("Juodraščio laikas baigėsi", "Draft expired", "Черновик истёк"),
@@ -66,7 +71,7 @@ ROWS = {
     "filter_neg": ("− REP", "− REP", "− REP"),
     "profile_back": ("👤 PREKEIVIO PROFILIS", "👤 MERCHANT PROFILE", "👤 ПРОФИЛЬ ПРОДАВЦА"),
     "check": ("🔎 REDSAFE PATIKRA", "🔎 REDSAFE CHECK", "🔎 ПРОВЕРКА REDSAFE"),
-    "activity": ("🪪 REDSAFE PROFILIS", "🪪 REDSAFE PROFILE", "🪪 ПРОФИЛЬ REDSAFE"),
+    "activity": ("👤 REDSAFE PROFILIS", "👤 REDSAFE PROFILE", "👤 ПРОФИЛЬ REDSAFE"),
     "info_body": (
         "Katalogas skirtas tik teisėtų prekių ir paslaugų teikėjams. Registracija ir vieši profilio pakeitimai tikrinami administratorių. Patvirtinimas reiškia įrašo priėmimą į katalogą, o ne sąžiningumo garantiją ar TRUSTED statusą. SCAM apribojimas turi pirmenybę. Reputacija ir patvirtinti atsiliepimai gaunami iš bendros SAFECheck sistemos. Neviešinkite telefono numerių, gyvenamosios vietos adresų ar kitų privačių duomenų. Pajūrys yra katalogo regionas.",
         "This directory is for lawful goods and services only. Administrators review registrations and public profile changes. Approval accepts a listing; it is not a guarantee of honesty or TRUSTED status. SCAM restrictions take priority. Reputation and accepted reviews come from the shared SAFECheck system. Do not publish phone numbers, home addresses or other private data. The coast is a directory region.",
