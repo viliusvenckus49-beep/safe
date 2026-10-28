@@ -46,6 +46,7 @@ def test_search_and_names_are_unicode_normalized_without_html_execution():
 )
 def test_registration_words_are_not_confused_with_rep_commands(text, accepted):
     from types import SimpleNamespace
+
     from app.bot.merchants import ordinary_input
 
     assert ordinary_input(SimpleNamespace(text=text)) is accepted
