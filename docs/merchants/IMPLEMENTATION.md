@@ -26,3 +26,9 @@ E. Finish private input flows, search/review filters and pagination, LT/EN/RU an
 One merchant entry per stable existing user; historical removed entries can be re-submitted for review. Public edits remain unchanged until approved. Catalog approval is not TRUSTED and never overrides SCAM. Active SCAM identities are excluded at query time, including unresolved username-linked SCAM according to the existing identity policy. Ordinary registrations require a known numeric ID. Review authors are anonymous by default until an administrator enables publication under their privacy policy. Individual proposal cancellation and owner removal requests preserve audit/history.
 
 Registration drafts are durable proposals with a bounded lifetime; submitted proposals persist across bot restarts. No production seeding or destructive migration. Source/schema compatibility in `production_release.py` must be reviewed separately for 0024 before a production deployment; this task does not silently extend the existing 0023 production guard.
+
+## Recorded phase validation
+
+- A: 3 foundation tests passed (city catalog, input bounds, language keys and callback sizes). Navigation entry points remain unmounted until the transactional module is ready, so no incomplete UI is exposed.
+- B: 31 data, reputation-regression and migration tests passed. SQLite migration reaches 0024 and matches model metadata; downgrade guards retain any catalog data.
+- C: 8 transactional service tests passed; one PostgreSQL-only simultaneous approval test awaits CI. Draft resumption, replay, authorization, edits, soft removal, SCAM exclusion, policy controls and daily limits covered.
