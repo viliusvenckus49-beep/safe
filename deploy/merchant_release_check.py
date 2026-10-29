@@ -31,6 +31,43 @@ for lang in ('lt','en','ru'):
 print(json.dumps(result,sort_keys=True))
 """
 
+PROFILE_PROBE = """
+import json
+from datetime import UTC,datetime
+from html import escape
+from types import SimpleNamespace
+from app import presentation as p
+from app.bot import merchant_views as views
+from app.i18n import t,use_language
+owner=SimpleNamespace(id=1,telegram_id=1,username='format_probe',display_name='Format probe')
+description='Legal & <description>'+chr(10)*2+'Second paragraph.'
+entry=SimpleNamespace(name='Format probe',owner=owner,description=description,
+                      city_code='vilnius',status='APPROVED',reason=None)
+record=SimpleNamespace(id=1,report_id=None,created_at=datetime.now(UTC),reason='In-memory check')
+result={}
+for lang in ('lt','en','ru'):
+ with use_language(lang):
+  data=dict(user=owner,score=2,positive=3,negative=1,trusted=False,scam=None,unresolved_scam=None)
+  card=views.profile(entry,data)
+  quote='<blockquote><i>'+escape(description)+'</i></blockquote>'
+  assert quote in card and quote in views.fields(entry) and quote in views.private_entry(entry)
+  assert '<blockquote><i><b>' in card and '<b>+2</b>' in card
+  assert t('mc.disclaimer') in card and t('p.lookup_warning') in p.profile(data)
+  assert all(t(key) in card for key in ('mc.about','mc.rep_title','mc.security_title','mc.catalog_approved'))
+  data['trusted']=True
+  assert t('mc.disclaimer') not in views.profile(entry,data)
+  assert t('p.lookup_warning') not in p.profile(data)
+  assert '<b>'+t('mc.trusted')+'</b>' in views.profile(entry,data)
+  for kind in ('scam','unresolved_scam'):
+   data['scam']=data['unresolved_scam']=None;data[kind]=record
+   assert t('mc.disclaimer') in views.profile(entry,data)
+   assert t('p.lookup_warning') in p.profile(data)
+   assert '<b>'+t('mc.trusted')+'</b>' not in views.profile(entry,data)
+  assert entry.description==description
+  result[lang]={'description_quote':True,'reputation_quote':True,'trusted_warning_rule':True,'scam_precedence':True}
+print(json.dumps(result,sort_keys=True))
+"""
+
 
 def run(args):
     return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL, timeout=90)
@@ -131,6 +168,10 @@ def main():
         emit(
             "CatalogNavigation",
             json.loads(run(D + ["exec", "safecheck-bot-1", "python", "-c", MENU_PROBE])),
+        )
+        emit(
+            "MerchantProfileFormatting",
+            json.loads(run(D + ["exec", "safecheck-bot-1", "python", "-c", PROFILE_PROBE])),
         )
         emit("MerchantDeploymentVerified", {"sha": sha, "healthy": True})
 
