@@ -22,12 +22,10 @@ def back(admin=False):
 def root(mine=False):
     rows = [
         [button("cities", "cities")],
-        [button("search", "search")],
-        [button("register", "terms")],
     ]
     if mine:
         rows.append([button("mine", "mine")])
-    return keyboard([*rows, [button("info", "info")], [(t("mc.home"), action("home"))]])
+    return keyboard([*rows, [(t("mc.home"), action("home"))]])
 
 
 def cities():
@@ -55,7 +53,8 @@ def listing(rows, total, page, *, admin=False):
         for entry, user, score in rows
     ]
     result.append(pages(route, page, total, 6))
-    result.append([button("search", "a_search" if admin else "search")])
+    if admin:
+        result.append([button("search", "a_search")])
     result.append([back(True)] if admin else [button("cities_back", "cities")])
     return keyboard(result)
 
@@ -94,7 +93,7 @@ def draft(proposal, admin=False):
     rows = []
     if proposal.status == "DRAFT" and proposal.kind == "REMOVE":
         rows = [[button("submit", prefix + "submit", proposal.id, version=proposal.version)]]
-    elif proposal.status == "DRAFT":
+    elif proposal.status == "DRAFT" and (admin or proposal.kind != "CREATE"):
         rows = [
             [
                 button("edit_name", prefix + "name", proposal.id, version=proposal.version),
@@ -151,8 +150,6 @@ def mine(entry, proposal, *, blocked=False):
         rows.append([button("remove_request", "removal", entry.id)])
     if entry.status == "APPROVED" and not blocked:
         rows.append([button("profile_back", "profile", entry.id)])
-    if entry.status in ("REMOVED", "REJECTED"):
-        rows.append([button("register", "terms")])
     return keyboard([*rows, [back()]])
 
 

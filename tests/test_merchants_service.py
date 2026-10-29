@@ -29,14 +29,14 @@ async def setup(session, settings):
 
 
 async def submitted(cat, actor=42):
-    p = await cat.begin(actor, consent=True)
+    p = await cat.begin(900, target_id=actor, consent=True)
     for field, value in (
         ("city_code", "vilnius"),
         ("name", "North Studio"),
         ("description", "Legal professional services"),
     ):
-        p = await cat.update_draft(actor, p.id, field, value, p.version)
-    return await cat.submit(actor, p.id, p.version)
+        p = await cat.update_draft(900, p.id, field, value, p.version, admin=True)
+    return await cat.submit(900, p.id, p.version, admin=True)
 
 
 async def test_registration_persists_and_only_approval_publishes(database, settings):
@@ -110,6 +110,7 @@ async def test_scam_suspension_restore_and_disabled_registration(database, setti
         p = await submitted(cat)
         await cat.moderate(900, p.id, p.version, True)
         entry = await cat.repo.mine(42)
+        entry_id = entry.id
         entry = await cat.change_status(900, entry.id, entry.version, "SUSPENDED", "Policy review")
         assert (await cat.listing())[1] == 0
         entry = await cat.change_status(900, entry.id, entry.version, "APPROVED")
@@ -124,15 +125,18 @@ async def test_scam_suspension_restore_and_disabled_registration(database, setti
         row = await cat.settings()
         await cat.configure(900, row.version, "registrations", False)
         with pytest.raises(DomainError, match="merchant_disabled"):
-            await cat.begin(43, consent=True)
+            await cat.begin(42, "EDIT", entry_id=entry_id)
 
 
 async def test_stale_draft_preview_expiry_and_daily_limit(database, settings):
     async with database() as s:
         cat = await setup(s, settings)
-        p = await cat.begin(42, consent=True)
+        initial = await submitted(cat)
+        await cat.moderate(900, initial.id, initial.version, True)
+        entry = await cat.repo.mine(42)
+        p = await cat.begin(42, "EDIT", entry_id=entry.id)
         pid = p.id
-        assert (await cat.begin(42, consent=True)).id == pid
+        assert (await cat.begin(42, "EDIT", entry_id=entry.id)).id == pid
         p = await cat.update_draft(42, pid, "name", "Current Name", p.version)
         with pytest.raises(DomainError, match="merchant_stale"):
             await cat.submit(42, pid, p.version - 1)
@@ -146,10 +150,10 @@ async def test_stale_draft_preview_expiry_and_daily_limit(database, settings):
         p = await s.get(MerchantProposal, pid)
         await cat.cancel(42, pid, p.version)
         for _ in range(2):
-            p = await cat.begin(42, consent=True)
+            p = await cat.begin(42, "EDIT", entry_id=entry.id)
             await cat.cancel(42, p.id, p.version)
         with pytest.raises(DomainError, match="merchant_rate"):
-            await cat.begin(42, consent=True)
+            await cat.begin(42, "EDIT", entry_id=entry.id)
 
 
 async def test_admin_manual_add_uses_existing_numeric_identity(database, settings):
@@ -270,9 +274,32 @@ async def test_postgres_registration_double_click_creates_one_durable_draft(
 
     async def begin():
         async with sessions() as s:
-            return (await MerchantService(Service(settings, s)).begin(42, consent=True)).id
+            return (
+                await MerchantService(Service(settings, s)).begin(900, target_id=42, consent=True)
+            ).id
 
     ids = await asyncio.gather(begin(), begin())
     assert ids[0] == ids[1]
     async with sessions() as s:
         assert await s.scalar(select(func.count()).select_from(MerchantProposal)) == 1
+
+
+async def test_self_registration_and_legacy_create_submission_are_closed(database, settings):
+    async with database() as s:
+        cat = await setup(s, settings)
+        with pytest.raises(DomainError, match="merchant_registration_closed"):
+            await cat.begin(42, consent=True)
+        assert await s.scalar(select(func.count()).select_from(MerchantEntry)) == 0
+        p = await cat.begin(900, target_id=42, consent=True)
+        pid, version = p.id, p.version
+        for op in ("update", "submit"):
+            with pytest.raises(DomainError, match="merchant_registration_closed"):
+                if op == "update":
+                    await cat.update_draft(42, pid, "name", "Self registration", version)
+                else:
+                    await cat.submit(42, pid, version)
+            await s.rollback()
+        p = await s.get(MerchantProposal, pid)
+        assert p.status == "DRAFT" and p.version == version
+        await cat.cancel(42, pid, version)
+        assert (await s.get(MerchantProposal, pid)).status == "CANCELLED"

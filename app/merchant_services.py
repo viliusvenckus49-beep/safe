@@ -96,6 +96,8 @@ class MerchantService:
         admin = target_id is not None
         if kind not in ("CREATE", "EDIT", "REMOVE") or (kind == "CREATE" and not consent):
             raise DomainError("merchant_invalid")
+        if kind == "CREATE" and not admin:
+            raise DomainError("merchant_registration_closed")
         await self._write(actor, admin)
         settings = await self.settings()
         if not admin and (not settings.enabled or not settings.registrations) and kind != "REMOVE":
@@ -199,6 +201,8 @@ class MerchantService:
 
     async def update_draft(self, actor, proposal_id, field, value, version, *, admin=False):
         proposal, entry = await self.proposal(actor, proposal_id, admin=admin, lock=True)
+        if proposal.kind == "CREATE" and not admin:
+            raise DomainError("merchant_registration_closed")
         if proposal.kind == "REMOVE":
             raise DomainError("merchant_invalid")
         if proposal.status != "DRAFT" or proposal.version != version:
@@ -223,6 +227,8 @@ class MerchantService:
 
     async def submit(self, actor, proposal_id, version, *, admin=False):
         proposal, entry = await self.proposal(actor, proposal_id, admin=admin, lock=True)
+        if proposal.kind == "CREATE" and not admin:
+            raise DomainError("merchant_registration_closed")
         if (
             proposal.status != "DRAFT"
             or proposal.version != version

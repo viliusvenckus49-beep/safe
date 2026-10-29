@@ -71,14 +71,30 @@ async def open_catalog(j, actor=1):
     await tap(j, "root", actor=actor)
 
 
+async def open_admin_catalog(j):
+    await initial_menu(j, 900)
+    anchor, _ = screen(j)
+    await j.click("sc|admin|", actor=900, message_id=anchor)
+    await tap(j, "a_root", actor=900)
+
+
+async def start_admin_registration(j, actor=42):
+    await initial_menu(j, actor)
+    await open_admin_catalog(j)
+    await tap(j, "a_terms", actor=900)
+    await tap(j, "a_target", actor=900)
+    await j.send(str(actor), actor=900)
+
+
 async def registration(j, actor=42):
+    await start_admin_registration(j, actor)
+    await tap(j, "a_setcity", actor=900, value="vilnius")
+    await j.send("North Studio", actor=900)
+    await j.send("Lawful professional service description", actor=900)
+    await tap(j, "a_submit", actor=900)
     await open_catalog(j, actor)
-    await tap(j, "terms", actor=actor)
-    await tap(j, "begin", actor=actor)
-    await tap(j, "setcity", actor=actor, value="vilnius")
-    await j.send("North Studio", actor=actor)
-    await j.send("Lawful professional service description", actor=actor)
-    await tap(j, "submit", actor=actor)
+    await tap(j, "mine", actor=actor)
+    await tap(j, "draft", actor=actor)
 
 
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
@@ -89,6 +105,9 @@ async def test_home_catalog_cities_empty_state_and_single_panel(journey, databas
     anchor, _ = screen(journey)
     with use_language(lang):
         assert CATALOGS[lang]["mc.title"] in screen(journey)[1].text
+    assert CATALOGS[lang]["mc.register"] not in str(screen(journey)[1].reply_markup)
+    assert CATALOGS[lang]["mc.info"] not in str(screen(journey)[1].reply_markup)
+    assert CATALOGS[lang]["mc.search"] not in str(screen(journey)[1].reply_markup)
     await tap(journey, "cities")
     for code in ("vilnius", "kaunas", "klaipeda", "siauliai", "panevezys", "pajurys"):
         await tap(journey, "list", value=code)
@@ -119,28 +138,28 @@ async def test_registration_guided_form_pending_and_admin_approval(journey, data
         assert (await s.scalar(select(MerchantEntry))).name == "North Studio"
 
 
-async def test_search_not_found_and_no_automatic_general_lookup(journey):
-    await open_catalog(journey)
-    await tap(journey, "search")
-    await journey.send("Missing Company")
+async def test_admin_search_not_found_and_no_automatic_general_lookup(journey):
+    await open_admin_catalog(journey)
+    await tap(journey, "a_search", actor=900)
+    await journey.send("Missing Company", actor=900)
     call = screen(journey)[1]
-    assert "PREKEIVIS NERASTAS" in call.text
-    assert "Tai nereiškia" in call.text
+    assert "Įrašų kol kas nėra" in call.text
+    assert "Missing Company" in call.text
     assert all(
         not (b.callback_data or "").startswith("sc|lookup")
         for row in call.reply_markup.inline_keyboard
         for b in row
     )
-    assert await journey.state() is None
+    assert await journey.state(900) is None
 
 
 async def test_search_state_does_not_capture_ask_and_rep_commands(journey):
     for command in ("/ask 42", "/rep 42"):
-        await open_catalog(journey)
-        await tap(journey, "search")
-        await journey.send(command)
+        await open_admin_catalog(journey)
+        await tap(journey, "a_search", actor=900)
+        await journey.send(command, actor=900)
         assert "42" in screen(journey)[1].text
-        assert await journey.state() != MerchantFlow.input.state
+        assert await journey.state(900) != MerchantFlow.input.state
 
 
 async def test_private_proposal_and_admin_callbacks_cannot_be_forged(journey, database, settings):
@@ -169,11 +188,11 @@ async def test_owner_can_cancel_pending_application(journey, database):
 
 
 async def test_search_rate_limiter_survives_flow_data_clearing(journey):
-    await open_catalog(journey)
-    await tap(journey, "search")
-    await journey.send("No Match")
-    await tap(journey, "search")
-    await journey.send("Other Match")
+    await open_admin_catalog(journey)
+    await tap(journey, "a_search", actor=900)
+    await journey.send("No Match", actor=900)
+    await tap(journey, "a_search", actor=900)
+    await journey.send("Other Match", actor=900)
     assert "Per daug užklausų" in screen(journey)[1].text
 
 
@@ -250,9 +269,9 @@ async def test_search_query_preserved_for_profiles_and_pagination(
     async with database() as s:
         for i in range(8):
             await merchant(s, settings, 100 + i, name + " " + str(i))
-    await open_catalog(journey)
-    await tap(journey, "search")
-    await journey.send(query)
+    await open_admin_catalog(journey)
+    await tap(journey, "a_search", actor=900)
+    await journey.send(query, actor=900)
     assert "Registruoti prekeiviai: 8" in screen(journey)[1].text
     # Generic update budgets apply too, while the search limiter is reset only for test time.
     import app.bot.merchant_limits as limits
@@ -260,12 +279,12 @@ async def test_search_query_preserved_for_profiles_and_pagination(
     original = limits.monotonic
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(limits, "monotonic", lambda: original() + 3)
-        await tap(journey, forged=Merchant(action="list", page=1).pack())
+        await tap(journey, actor=900, forged=Merchant(action="a_list", page=1).pack())
     assert "2 / 2" in str(screen(journey)[1].reply_markup)
-    await tap(journey, "profile")
+    await tap(journey, "a_entry", actor=900)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(limits, "monotonic", lambda: original() + 6)
-        await tap(journey, "list")
+        await tap(journey, "a_list", actor=900)
     assert "2 / 2" in str(screen(journey)[1].reply_markup)
 
 
@@ -291,30 +310,89 @@ async def test_pending_rejection_reason_owner_edit_and_admin_settings(journey, d
 async def test_expired_input_clears_session_and_cannot_run_a_query(journey):
     import time
 
-    await open_catalog(journey)
-    await tap(journey, "search")
-    ctx = journey.dp.fsm.get_context(bot=journey.bot, chat_id=1, user_id=1)
+    await open_admin_catalog(journey)
+    await tap(journey, "a_search", actor=900)
+    ctx = journey.dp.fsm.get_context(bot=journey.bot, chat_id=900, user_id=900)
     state = await ctx.get_data()
     data = state["mc_input"]
     data["until"] = time.time() - 1
     await ctx.update_data(mc_input=data)
-    await journey.send("Valid Query")
+    await journey.send("Valid Query", actor=900)
     assert "laikas baigėsi" in screen(journey)[1].text
-    assert await journey.state() is None
+    assert await journey.state(900) is None
 
 
 async def test_invalid_registration_input_can_be_corrected_without_an_extra_panel(journey):
-    await open_catalog(journey, 42)
+    await start_admin_registration(journey)
     anchor, _ = screen(journey)
-    await tap(journey, "terms", actor=42)
-    await tap(journey, "begin", actor=42)
-    await tap(journey, "setcity", actor=42, value="kaunas")
-    await journey.send("x", actor=42)
+    await tap(journey, "a_setcity", actor=900, value="kaunas")
+    await journey.send("x", actor=900)
     assert "Netinkama įvestis" in screen(journey)[1].text
-    await journey.send("Correct Studio", actor=42)
-    await journey.send("Lawful business description", actor=42)
+    await journey.send("Correct Studio", actor=900)
+    await journey.send("Lawful business description", actor=900)
     assert "Correct Studio" in screen(journey)[1].text
     assert screen(journey)[0] == anchor
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_old_registration_callbacks_are_rejected_without_creating_entries(
+    journey, database, settings, lang
+):
+    async with database() as s:
+        await Service(settings, s).set_language(1, lang)
+    await open_catalog(journey)
+    anchor, call = screen(journey)
+    for action in ("terms", "begin", "info", "search"):
+        await tap(journey, forged=Merchant(action=action).pack())
+        result = journey.transport.calls[-1]
+        assert isinstance(result, AnswerCallbackQuery) and result.show_alert
+        error = "merchant_registration_closed" if action in ("terms", "begin") else "merchant_stale"
+        assert result.text == CATALOGS[lang]["error." + error]
+        assert screen(journey)[0] == anchor and screen(journey)[1].text == call.text
+    async with database() as s:
+        assert await s.scalar(select(MerchantEntry)) is None
+        assert await s.scalar(select(MerchantProposal)) is None
+
+
+async def test_public_city_pagination_drops_old_search_and_keeps_return_page(
+    journey, database, settings
+):
+    from test_merchants_data import merchant
+
+    async with database() as s:
+        for i in range(8):
+            await merchant(s, settings, 100 + i, "City Studio " + str(i))
+    await open_catalog(journey)
+    await tap(journey, "cities")
+    await tap(journey, "list", value="vilnius")
+    ctx = journey.dp.fsm.get_context(bot=journey.bot, chat_id=1, user_id=1)
+    context = (await ctx.get_data())["mc_context"]
+    context["query"] = "old unmatched search"
+    await ctx.update_data(mc_context=context)
+    await tap(journey, forged=Merchant(action="list", page=1).pack())
+    assert "Registruoti prekeiviai: 8" in screen(journey)[1].text
+    assert "2 / 2" in str(screen(journey)[1].reply_markup)
+    assert "IEŠKOTI" not in str(screen(journey)[1].reply_markup)
+    assert not (await ctx.get_data())["mc_context"]["query"]
+    await tap(journey, "profile")
+    await tap(journey, "list")
+    assert "2 / 2" in str(screen(journey)[1].reply_markup)
+
+
+async def test_old_public_search_input_is_closed_without_query(journey, monkeypatch):
+    import time
+    from unittest.mock import AsyncMock
+
+    await open_catalog(journey)
+    ctx = journey.dp.fsm.get_context(bot=journey.bot, chat_id=1, user_id=1)
+    await ctx.set_state(MerchantFlow.input)
+    await ctx.update_data(mc_input={"mode": "search", "admin": False, "until": time.time() + 60})
+    listing = AsyncMock()
+    monkeypatch.setattr(MerchantService, "listing", listing)
+    await journey.send("Previous public search")
+    assert "valdiklis paseno" in screen(journey)[1].text
+    assert await journey.state() is None
+    listing.assert_not_awaited()
 
 
 async def test_storage_error_returns_a_localized_popup_without_private_details(
