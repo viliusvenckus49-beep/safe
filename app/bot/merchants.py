@@ -1,7 +1,6 @@
 """Private merchant directory, owner forms and existing-admin catalog management."""
 
 import time
-from html import escape
 
 import structlog
 from aiogram import F, Router
@@ -56,7 +55,8 @@ async def show_list(message, state, cat, actor, limiter, *, page=0, admin=False,
         context = {"city": city, "query": "", "admin": admin}
     if context.get("admin", False) != admin:
         context = {"city": "", "query": "", "admin": admin}
-    query = context.get("query", "")
+    query = context.get("query", "") if admin else ""
+    context["query"] = query
     if query:
         await limiter.admit(state, actor)
     rows, total, page = await cat.listing(
@@ -67,19 +67,6 @@ async def show_list(message, state, cat, actor, limiter, *, page=0, admin=False,
     await state.update_data(mc_context=context)
     text = view.listing(rows, total, page, context.get("city", ""), query, admin)
     markup = kb.listing(rows, total, page, admin=admin)
-    if query and not total and not admin:
-        text = (
-            view.heading("search_title")
-            + "\n\n"
-            + t("mc.query", query=escape(query))
-            + "\n\n<b>"
-            + t("mc.not_found")
-            + "</b>\n\n"
-            + t("mc.no_results")
-        )
-        markup = base_kb.keyboard(
-            [[kb.button("again", "search")], [kb.button("cities", "cities")], [kb.back()]]
-        )
     await panel(message, state, text, markup)
 
 
@@ -254,6 +241,8 @@ def register_merchant_handlers(router: Router):
                     else None,
                 )
             elif route == "search":
+                if not admin:
+                    raise DomainError("merchant_stale")
                 await state.update_data(mc_context={"city": "", "query": "", "admin": admin})
                 await prompt(
                     message,
@@ -484,6 +473,8 @@ def register_merchant_handlers(router: Router):
             if admin:
                 await service.require_admin(actor)
             if mode == "search":
+                if not admin:
+                    raise DomainError("merchant_stale")
                 from app.merchant_catalog import search
 
                 query = message.text.strip()

@@ -1,8 +1,8 @@
 # Prekeivių meniu patikslinimas
 
-2026-10-29 naudotojo nurodymu pašalinti „＋ REGISTRUOTIS“ ir „ⓘ INFORMACIJA“ iš viešo prekeivių meniu. Pagrindinio boto meniu informacijos mygtukas nekeičiamas.
+2026-10-29 naudotojo nurodymu pašalinti „＋ REGISTRUOTIS“, „ⓘ INFORMACIJA“ ir „🔎 IEŠKOTI PREKEIVIO“ iš viešo prekeivių meniu. Pagrindinio boto meniu informacijos ir patikros mygtukai nekeičiami.
 
-Viešame prekeivių meniu lieka miestai, paieška, „Mano įrašas“ turintiems įrašą ir grįžimas į pagrindinį meniu. Pašalintas ir pakartotinės registracijos mygtukas atmestų ar pašalintų įrašų ekrane.
+Viešame prekeivių meniu lieka miestai, „Mano įrašas“ turintiems įrašą ir grįžimas į pagrindinį meniu. Paieškos nėra ir viešuose prekeivių sąrašuose. Pašalintas ir pakartotinės registracijos mygtukas atmestų ar pašalintų įrašų ekrane. Administratoriaus paieška išlieka. Senos viešos paieškos įvestys ir callback'ai saugiai atmetami, o ankstesnės sesijos paieškos filtras pašalinamas naršant miestus.
 
 Naujus prekeivius prideda esamas administratorius per „Prekeivių valdymas → Pridėti prekeivį“. Tapatybė toliau siejama su jau žinomu Telegram ID, o viešinimas vyksta per esamą patvirtinimą. Savarankiškas CREATE juodraščio pradėjimas, keitimas ir pateikimas blokuojami serveryje. Seni registracijos callback'ai pateikia lokalizuotą paaiškinimą; pašalintas informacijos callback'as laikomas pasenusiu.
 

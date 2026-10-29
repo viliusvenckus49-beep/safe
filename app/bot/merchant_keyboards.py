@@ -22,7 +22,6 @@ def back(admin=False):
 def root(mine=False):
     rows = [
         [button("cities", "cities")],
-        [button("search", "search")],
     ]
     if mine:
         rows.append([button("mine", "mine")])
@@ -54,7 +53,8 @@ def listing(rows, total, page, *, admin=False):
         for entry, user, score in rows
     ]
     result.append(pages(route, page, total, 6))
-    result.append([button("search", "a_search" if admin else "search")])
+    if admin:
+        result.append([button("search", "a_search")])
     result.append([back(True)] if admin else [button("cities_back", "cities")])
     return keyboard(result)
 
