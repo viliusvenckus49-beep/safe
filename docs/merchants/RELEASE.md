@@ -127,6 +127,7 @@ migrations/versions/0024_merchant_directory.py
 tests/test_auto_ads_live_operator.py
 tests/test_auto_ads_migration.py
 tests/test_crimson_telegram.py
+tests/test_group_moderation_migration.py
 tests/test_keyboards.py
 tests/test_merchants_data.py
 tests/test_merchants_foundation.py
