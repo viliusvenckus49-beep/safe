@@ -9,6 +9,28 @@ from pathlib import Path
 
 D = ["docker", "--host=unix:///var/run/docker.sock"]
 
+MENU_PROBE = """
+import json
+from app.bot import keyboards as base
+from app.bot import merchant_keyboards as kb
+from app.bot.callbacks import Merchant
+from app.i18n import use_language
+def routes(markup):
+    return [Merchant.unpack(b.callback_data).action for row in markup.inline_keyboard
+            for b in row if b.callback_data and b.callback_data.startswith('mt|')]
+result={}
+for lang in ('lt','en','ru'):
+    with use_language(lang):
+        public=routes(kb.root(False)); owner=routes(kb.root(True))
+        assert public==['cities'] and owner==['cities','mine']
+        assert not {'search','info','terms','begin'}.intersection(routes(kb.listing([],0,0)))
+        admin=routes(kb.admin_root()); assert {'a_terms','a_search'} <= set(admin)
+        home={b.callback_data for row in base.home().inline_keyboard for b in row}
+        assert {base.action('info'),base.action('lookup')} <= home
+        result[lang]={'public':public,'owner':owner,'admin_creation_and_search':True}
+print(json.dumps(result,sort_keys=True))
+"""
+
 
 def run(args):
     return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL, timeout=90)
@@ -106,6 +128,10 @@ def main():
             "merchant_settings",
         ):
             emit("CatalogRows", {"table": table, "count": sql("SELECT count(*) FROM " + table)})
+        emit(
+            "CatalogNavigation",
+            json.loads(run(D + ["exec", "safecheck-bot-1", "python", "-c", MENU_PROBE])),
+        )
         emit("MerchantDeploymentVerified", {"sha": sha, "healthy": True})
 
 
