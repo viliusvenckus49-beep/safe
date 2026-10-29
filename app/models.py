@@ -1017,6 +1017,7 @@ class MerchantEntry(Base):
     name_key: Mapped[str | None] = mapped_column(String(128), index=True)
     city_code: Mapped[str | None] = mapped_column(String(16))
     description: Mapped[str | None] = mapped_column(String(600))
+    contact: Mapped[str | None] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(12), default="DRAFT")
     version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -1044,7 +1045,7 @@ class MerchantEntry(Base):
 
 
 class MerchantProposal(Base):
-    """Durable drafts and moderation requests; unpublished content stays private."""
+    """Historical applications retained for data compatibility; no active workflow."""
 
     __tablename__ = "merchant_proposals"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1096,6 +1097,7 @@ class MerchantSettings(Base):
     __tablename__ = "merchant_settings"
     id: Mapped[int] = mapped_column(primary_key=True)
     enabled: Mapped[bool] = mapped_column(default=True)
+    # Historical schema compatibility only; applications have no active route or setting.
     registrations: Mapped[bool] = mapped_column(default=True)
     publish_authors: Mapped[bool] = mapped_column(default=False)
     copy: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

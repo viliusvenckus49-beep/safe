@@ -36,18 +36,22 @@ ROWS = {
     "query": ("Ieškota: {query}", "Search: {query}", "Запрос: {query}"),
     "not_found": ("× PREKEIVIS NERASTAS", "× MERCHANT NOT FOUND", "× ПРОДАВЕЦ НЕ НАЙДЕН"),
     "no_results": (
-        "Pagal pateiktą užklausą REDSAFE kataloge registruotų prekeivių nerasta.\n\nTai nereiškia, kad naudotojas yra nepatikimas arba įtrauktas į SCAM registrą.",
-        "No registered REDSAFE merchants match this query.\n\nThis does not mean that the user is untrustworthy or listed in the SCAM registry.",
-        "В каталоге REDSAFE нет продавцов по этому запросу.\n\nЭто не означает, что пользователь ненадёжен или внесён в SCAM-реестр.",
+        "Pagal pateiktą užklausą REDSAFE kataloge registruotų prekeivių nerasta.\n"
+        "\n"
+        "Tai nereiškia, kad naudotojas yra nepatikimas arba įtrauktas į SCAM registrą.",
+        "No registered REDSAFE merchants match this query.\n"
+        "\n"
+        "This does not mean that the user is untrustworthy or listed in the SCAM "
+        "registry.",
+        "В каталоге REDSAFE нет продавцов по этому запросу.\n"
+        "\n"
+        "Это не означает, что пользователь ненадёжен или внесён в SCAM-реестр.",
     ),
     "empty_city": (
         "Šiame mieste registruotų prekeivių kol kas nėra.",
         "There are no registered merchants in this city yet.",
         "В этом городе пока нет зарегистрированных продавцов.",
     ),
-    "again": ("🔎 IEŠKOTI DAR KARTĄ", "🔎 SEARCH AGAIN", "🔎 ИСКАТЬ СНОВА"),
-    "register": ("＋ REGISTRUOTIS", "＋ REGISTER", "＋ РЕГИСТРАЦИЯ"),
-    "info": ("ⓘ INFORMACIJA", "ⓘ INFORMATION", "ⓘ ИНФОРМАЦИЯ"),
     "back": ("◀ PREKEIVIŲ MENIU", "◀ MERCHANT MENU", "◀ МЕНЮ ПРОДАВЦОВ"),
     "home": ("◀ PAGRINDINIS MENIU", "◀ MAIN MENU", "◀ ГЛАВНОЕ МЕНЮ"),
     "list_back": ("◀ PREKEIVIŲ SĄRAŠAS", "◀ MERCHANT LIST", "◀ СПИСОК ПРОДАВЦОВ"),

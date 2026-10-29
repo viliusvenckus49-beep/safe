@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backup-first additive 0024 release. No staging runtime, automatic DB restore or Redis reset."""
+"""Backup-first additive 0025 release. No staging runtime, automatic DB restore or Redis reset."""
 
 import argparse
 import hashlib
@@ -14,9 +14,10 @@ import tomllib
 from pathlib import Path
 from uuid import uuid4
 
-TARGET_SCHEMA = "0024"
+TARGET_SCHEMA = "0025"
 
 PINS = {
+    "0025_merchant_public_contact.py": "237bb7198474df670bd5348fac884b0d764dc9057268ec49ec45dc1c0ec971ca",
     "0024_merchant_directory.py": "60c94303267021b73c1332a63a1050b6a5f601a2d23ccf77d37f7a15d9a6fd9c",
     "0023_group_help_controls.py": "90ee738c1aafc75f3d6192a0a130d68fa39d9eebdd489f2f09e64f5460244a76",
     "0010_redsafe_profile.py": "47431ef8207005336c163c73c611ecadf70dafdeb03597f7aedc76df5e2ae214",

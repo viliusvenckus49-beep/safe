@@ -67,20 +67,19 @@ def merchant(description):
 )
 def test_every_description_view_quotes_the_full_escaped_text(lang, description):
     entry, data = merchant(description)
-    proposal = SimpleNamespace(**{**vars(entry), "kind": "EDIT", "status": "DRAFT"})
     with use_language(lang):
         public = views.profile(entry, data)
         for card in (
             public,
             views.fields(entry),
             views.private_entry(entry),
-            views.proposal_card(proposal, entry),
+            views.editor_card({k: getattr(entry, k) for k in ("name", "description", "city_code")}),
         ):
             parsed = CardHtml(card)
             assert parsed.quotes[0] == description
             assert "<blockquote><i>" in card
             assert len(parsed.plain.encode("utf-16-le")) // 2 <= 4096
-        assert entry.description == proposal.description == description
+        assert entry.description == description
         assert "&lt;&amp;&gt;" in public
         assert t("mc.about") in public and t("mc.security_title") in public
         assert (
