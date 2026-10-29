@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backup-first 0023 release. No staging runtime, automatic DB restore or Redis reset."""
+"""Backup-first additive 0024 release. No staging runtime, automatic DB restore or Redis reset."""
 
 import argparse
 import hashlib
@@ -14,7 +14,10 @@ import tomllib
 from pathlib import Path
 from uuid import uuid4
 
+TARGET_SCHEMA = "0024"
+
 PINS = {
+    "0024_merchant_directory.py": "60c94303267021b73c1332a63a1050b6a5f601a2d23ccf77d37f7a15d9a6fd9c",
     "0023_group_help_controls.py": "90ee738c1aafc75f3d6192a0a130d68fa39d9eebdd489f2f09e64f5460244a76",
     "0010_redsafe_profile.py": "47431ef8207005336c163c73c611ecadf70dafdeb03597f7aedc76df5e2ae214",
     "0011_group_moderation.py": "9e8e28f9842dee7990043ddc42ce95ee6dc3ab1a3fff3dab0949be7f70249b8d",
@@ -127,8 +130,10 @@ class Release:
         if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", self.version):
             raise RuntimeError("Invalid release version")
         self.image = "safecheck:" + self.version + "-" + sha[:12]
-        self.backup_dir = Path("/var/backups/safecheck") / ("production-0023-" + uuid4().hex)
-        self.state = Path("/var/lib/safecheck") / ("production-0023-" + sha)
+        self.backup_dir = Path("/var/backups/safecheck") / (
+            "production-" + TARGET_SCHEMA + "-" + uuid4().hex
+        )
+        self.state = Path("/var/lib/safecheck") / ("production-" + TARGET_SCHEMA + "-" + sha)
         self.fingerprints = {
             name: self.service_fingerprint(name)
             for name in ("safecheck-postgres-1", "safecheck-redis-1")
@@ -512,7 +517,10 @@ class Release:
                         flush=True,
                     )
                 raise
-        print("PRODUCTION_RELEASE=HEALTHY; Schema=0023; Image=" + self.image, flush=True)
+        print(
+            "PRODUCTION_RELEASE=HEALTHY; Schema=" + TARGET_SCHEMA + "; Image=" + self.image,
+            flush=True,
+        )
 
 
 def main():

@@ -93,7 +93,7 @@ class Journey:
         )
         await self.dp.feed_update(self.bot, Update(update_id=self.sequence, message=message))
 
-    async def click(self, data, actor=1, chat=None, message_id=100):
+    async def click(self, data, actor=1, chat=None, message_id=100, reply_markup=None):
         self.sequence += 1
         callback = CallbackQuery(
             id=str(self.sequence),
@@ -104,6 +104,7 @@ class Journey:
                 message_id=message_id,
                 date=datetime.now(UTC),
                 chat=Chat(id=chat or actor, type="private" if chat is None else "supergroup"),
+                reply_markup=reply_markup,
             ),
         )
         await self.dp.feed_update(

@@ -19,6 +19,7 @@ from app.locales.core import CATALOGS as CORE
 from app.locales.diagnostics import CATALOGS as DIAGNOSTICS
 from app.locales.group_help import DATA as GROUP_HELP
 from app.locales.local_moderation import CATALOGS as LOCAL_MODERATION
+from app.locales.merchants import CATALOGS as MERCHANTS
 from app.locales.moderation_control import CATALOGS as MODERATION_CONTROL
 from app.locales.navigation import CATALOGS as NAVIGATION
 from app.locales.navigation import standardize
@@ -66,6 +67,7 @@ CATALOGS = {
         **CHECKS[lang],
         **GROUP_HELP[lang],
         **NAVIGATION[lang],
+        **MERCHANTS[lang],
     }
     for lang in LANGUAGES
 }

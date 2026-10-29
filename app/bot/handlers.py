@@ -209,6 +209,9 @@ def create_router(settings: Any, session_factory: Any) -> Router:
     from app.bot.group_help import register_group_help
 
     register_group_help(router)
+    from app.bot.merchants import register_merchant_handlers
+
+    register_merchant_handlers(router)
     register_local_handlers(router)
     from app.bot.warning_settings import register_warning_settings_handlers
 

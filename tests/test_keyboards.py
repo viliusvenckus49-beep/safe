@@ -1,5 +1,5 @@
 from app.bot import keyboards
-from app.bot.callbacks import Action, CustomerAd, ReportStep
+from app.bot.callbacks import Action, CustomerAd, Merchant, ReportStep
 from app.bot.group_keyboards import GroupAction
 from app.i18n import use_language
 
@@ -33,6 +33,7 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
             ["⭐ ĮVERTINTI", "ⓘ INFORMACIJA"],
             ["🌐 KALBA"],
             ["📢 MANO REKLAMOS"],
+            ["🏪 PREKEIVIAI"],
             ["× UŽDARYTI"],
         ]
         assert [[button.callback_data for button in row] for row in rows] == [
@@ -42,6 +43,7 @@ def test_crimson_lithuanian_home_layout_preserves_callbacks():
             [keyboards.action("rep"), keyboards.action("info")],
             [keyboards.action("language")],
             [CustomerAd(action="list").pack()],
+            [Merchant(action="root").pack()],
             [keyboards.action("close")],
         ]
 

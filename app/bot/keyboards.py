@@ -11,6 +11,7 @@ from app.bot.callbacks import (
     AdminRepStep,
     CustomerAd,
     Language,
+    Merchant,
     Moderation,
     ReportStep,
     ReputationModeration,
@@ -43,6 +44,7 @@ def home(admin: bool = False, *, private: bool = True, owner: bool = False) -> I
     rows.append([(t("button.language"), action("language"))])
     if private:
         rows.append([(t("ac.mine"), CustomerAd(action="list").pack())])
+        rows.append([(t("mc.button"), Merchant(action="root").pack())])
     if admin and private:
         rows.append([(t("button.admin"), action("admin"))])
     rows.append([(t("button.close"), action("close"))])
@@ -126,6 +128,7 @@ def _admin_rows(owner: bool) -> list[list[tuple[str, str]]]:
         [(t("nav.reputation"), action("rep_admin"))],
         [(t("nav.group"), action("group_help"))],
         [(t("nav.ads"), AutoAd(action="root").pack())],
+        [(t("mc.admin"), Merchant(action="a_root").pack())],
         [(t("nav.users"), action("admin_section", "users"))],
         [(t("nav.system"), action("admin_section", "system"))],
     ]

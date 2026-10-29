@@ -135,3 +135,11 @@ class AutoAd(CallbackData, prefix="ua"):
     ad: int = 0
     version: int = 0
     value: str = ""
+
+
+class Merchant(CallbackData, prefix="mt", sep="|"):
+    action: str
+    entry: int = 0
+    page: int = 0
+    value: str = ""
+    version: int = 0

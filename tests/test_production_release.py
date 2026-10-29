@@ -151,7 +151,7 @@ async def test_postgres_probe_detects_a_changed_legacy_user(postgres_contract):
         await session.execute(
             text("CREATE TABLE alembic_version(version_num varchar(32) PRIMARY KEY)")
         )
-        await session.execute(text("INSERT INTO alembic_version VALUES('0023')"))
+        await session.execute(text("INSERT INTO alembic_version VALUES('0024')"))
         await session.commit()
         await Service(settings, session).observe(42, "original", "Original")
     connection = await asyncpg.connect(
@@ -169,7 +169,7 @@ async def test_postgres_probe_detects_a_changed_legacy_user(postgres_contract):
         await connection.close()
 
 
-@pytest.mark.parametrize("revision", range(10, 23))
+@pytest.mark.parametrize("revision", range(10, 25))
 def test_release_accepts_only_pinned_complete_migrations(revision):
     candidate = release.migrations(ROOT)
     previous = {name: value for name, value in candidate.items() if int(name[:4]) <= revision}
@@ -227,7 +227,7 @@ def test_retention_fails_on_changed_or_missing_legacy_rows(change):
             }
         },
     }
-    actual = {"head": "0023", "tables": {"users": {"original": {"count": 2, "sha256": "same"}}}}
+    actual = {"head": "0024", "tables": {"users": {"original": {"count": 2, "sha256": "same"}}}}
     probe.verify(baseline, actual)
     if change == "head":
         actual["head"] = "0010"
