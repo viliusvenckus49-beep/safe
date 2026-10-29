@@ -42,7 +42,7 @@ def session(*args,**kwargs):
 def test_payload_is_pinned_reviewed_current_runtime_not_new_dependencies():
     base = op.predecessor()
     patches = op.incoming(base)
-    assert len(patches) == 80
+    assert len(patches) == 81
     assert "app/bot/commands.py" in patches
     for name in op.PAYLOAD:
         assert patches[name] == (ROOT / name).read_bytes()

@@ -26,6 +26,13 @@ ROWS = {
     "telegram": ("Telegram", "Telegram", "Telegram"),
     "city": ("Miestas", "City / region", "Город / регион"),
     "description": ("Aprašymas", "Description", "Описание"),
+    "about": ("▤ APIE PREKEIVĮ", "▤ ABOUT THE MERCHANT", "▤ О ПРОДАВЦЕ"),
+    "security_title": ("🛡 SAUGUMO STATUSAS", "🛡 SECURITY STATUS", "🛡 СТАТУС БЕЗОПАСНОСТИ"),
+    "catalog_approved": (
+        "✓ Katalogo įrašas patvirtintas",
+        "✓ Directory listing approved",
+        "✓ Запись в каталоге одобрена",
+    ),
     "rep_title": (
         "⭐ REPUTACIJOS STATISTIKA",
         "⭐ REPUTATION STATISTICS",
