@@ -51,7 +51,7 @@ Adityvi Alembic migracija: `0024_merchant_directory.py`, pirmtakas `0023`.
 
 Naudojama bendra `AuditEvent` lentelė. Išsaugomi veikėjas, data, įrašo / paraiškos ID ir veiksmo rūšis. Slapti tokenai nesaugomi. Esamos REP, naudotojų, grupių ir SCAM lentelės netrinamos; REP sumos į katalogo lenteles nekopijuojamos. Tuščias katalogas po migracijos lieka tuščias, demonstracinių prekeivių nėra.
 
-Užpildyto katalogo `downgrade` atsisako trinti duomenis. Produkinio diegimo apsauga papildyta tik tiksliu šios migracijos hash; pakeistos, nežinomos ar naujesnės migracijos vis tiek atmetamos. Duomenų išsaugojimo zondas po migracijos tikisi `0024`.
+Užpildyto katalogo `downgrade` atsisako trinti duomenis. Produkcinio diegimo apsauga papildyta tik tiksliu šios migracijos hash; pakeistos, nežinomos ar naujesnės migracijos vis tiek atmetamos. Duomenų išsaugojimo zondas po migracijos tikisi `0024`.
 
 ## 4. Registracijos ir administravimo politika
 
@@ -126,11 +126,14 @@ docs/merchants/RELEASE.md
 migrations/versions/0024_merchant_directory.py
 tests/test_auto_ads_live_operator.py
 tests/test_auto_ads_migration.py
+tests/test_crimson_telegram.py
+tests/test_keyboards.py
 tests/test_merchants_data.py
 tests/test_merchants_foundation.py
 tests/test_merchants_migration.py
 tests/test_merchants_service.py
 tests/test_merchants_telegram.py
 tests/test_production_release.py
+tests/test_telegram.py
 tools/auto_ads_live_test.py
 ```

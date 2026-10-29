@@ -19,7 +19,7 @@ from aiogram.types import User as TelegramUser
 from sqlalchemy import func, select
 from test_telegram import Journey, Transport
 
-from app.bot.callbacks import Action, CustomerAd, ScamAdmin
+from app.bot.callbacks import Action, CustomerAd, Merchant, ScamAdmin
 from app.bot.handlers import create_router
 from app.bot.states import RepVoteFlow, ScamAdminFlow
 from app.group_services import GroupService
@@ -408,6 +408,7 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
         ["sc|rep|", "sc|info|"],
         ["sc|language|"],
         [CustomerAd(action="list").pack()],
+        [Merchant(action="root").pack()],
         ["sc|close|"],
     ]
     if lang == "lt":
@@ -418,11 +419,12 @@ async def test_main_menu_callback_contract_survives_crimson_labels(
             ["⭐ ĮVERTINTI", "ⓘ INFORMACIJA"],
             ["🌐 KALBA"],
             ["📢 MANO REKLAMOS"],
+            ["🏪 PREKEIVIAI"],
             ["× UŽDARYTI"],
         ]
     for callback in [value for row in rows[:-1] for value in row]:
         before = len(crimson.transport.calls)
-        await crimson.click(callback)
+        await crimson.click(callback, reply_markup=markup)
         calls = crimson.transport.calls[before:]
         assert any(isinstance(call, AnswerCallbackQuery) for call in calls)
         if callback == CustomerAd(action="list").pack():

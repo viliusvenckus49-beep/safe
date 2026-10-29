@@ -26,6 +26,7 @@ def test_locales_and_compact_callback_contract():
 def test_search_and_names_are_unicode_normalized_without_html_execution():
     assert search("@PARTNER") == "partner"
     assert search("  Urban Studio ") == "urban studio"
+    assert search("ß" * 40) == "ss" * 40
     assert grams("urban") == {"ur", "rb", "ba", "an"}
     assert bounded("<b>Studio</b>", 2, 64) == "<b>Studio</b>"  # Escaping is a rendering boundary.
     with pytest.raises(DomainError):

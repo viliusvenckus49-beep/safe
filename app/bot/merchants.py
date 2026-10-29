@@ -491,7 +491,8 @@ def register_merchant_handlers(router: Router):
             if mode == "search":
                 from app.merchant_catalog import search
 
-                query = search(message.text)
+                query = message.text.strip()
+                search(query)
                 await state.update_data(mc_context={"city": "", "query": query, "admin": admin})
                 await show_list(target, state, cat, actor, limiter, admin=admin)
             elif mode in ("name", "description"):

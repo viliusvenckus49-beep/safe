@@ -241,15 +241,18 @@ async def test_real_profile_reviews_filters_and_check_activity_use_one_message(
     assert sum(isinstance(call, SendMessage) for call in journey.transport.calls) == 1
 
 
-async def test_search_query_preserved_for_profiles_and_pagination(journey, database, settings):
+@pytest.mark.parametrize("name,query", [("Urban Studio", "URBAN"), ("ß" * 40, "ß" * 40)])
+async def test_search_query_preserved_for_profiles_and_pagination(
+    journey, database, settings, name, query
+):
     from test_merchants_data import merchant
 
     async with database() as s:
         for i in range(8):
-            await merchant(s, settings, 100 + i, "Urban Studio " + str(i))
+            await merchant(s, settings, 100 + i, name + " " + str(i))
     await open_catalog(journey)
     await tap(journey, "search")
-    await journey.send("URBAN")
+    await journey.send(query)
     assert "Registruoti prekeiviai: 8" in screen(journey)[1].text
     # Generic update budgets apply too, while the search limiter is reset only for test time.
     import app.bot.merchant_limits as limits

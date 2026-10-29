@@ -33,7 +33,8 @@ def city(value: str) -> str:
 
 
 def search(value: str) -> str:
-    return bounded(normalized(bounded(value, 2, 64)).lstrip("@"), 2, 64)
+    # Case folding can expand a valid 64-character public name (e.g. ß → ss).
+    return bounded(normalized(bounded(value, 2, 64)).lstrip("@"), 2, 128)
 
 
 def grams(value: str) -> set[str]:
