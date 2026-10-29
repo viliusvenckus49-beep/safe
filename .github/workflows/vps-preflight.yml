@@ -9,6 +9,10 @@ on:
         description: Read-only inspect or post-deployment verify
         required: true
         default: inspect
+      source_sha:
+        description: Exact deployed or candidate source SHA to verify
+        required: true
+        default: bf4ecd2916eece36dece81881656bd7cabab4dd8
 permissions:
   contents: read
 concurrency:
@@ -40,10 +44,12 @@ jobs:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
           PHASE: ${{ inputs.phase }}
+          EXPECTED_SHA: ${{ inputs.source_sha }}
         run: |
           set -eu
           case "$PHASE" in inspect|verify) ;; *) exit 1;; esac
-          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" "sudo -n python3 - $PHASE 30799ede9c9514124e2e97a16a199f89f88f4692" < deploy/merchant_release_check.py
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" "sudo -n python3 - $PHASE $EXPECTED_SHA" < deploy/merchant_release_check.py
       - name: Remove runner key
         if: always()
         run: rm -f "$HOME/.ssh/safecheck_deploy"
