@@ -148,9 +148,9 @@ ROWS = {
     "empty": ("Įrašų kol kas nėra.", "No records yet.", "Записей пока нет."),
     "enabled": ("Katalogas", "Directory", "Каталог"),
     "registrations": (
-        "Naujos paraiškos ir pakeitimai",
-        "Applications and changes",
-        "Заявки и изменения",
+        "Profilio pakeitimų prašymai",
+        "Profile change requests",
+        "Запросы на изменение профиля",
     ),
     "publish_authors": (
         "Viešinti atsiliepimų autorius",
@@ -189,6 +189,11 @@ ROWS = {
         "Katalogas arba paraiškų priėmimas šiuo metu išjungtas.",
         "The directory or application intake is currently disabled.",
         "Каталог или приём заявок сейчас отключён.",
+    ),
+    "err_registration_closed": (
+        "Prekeivius į katalogą prideda tik administratorius.",
+        "Only administrators can add merchants to the directory.",
+        "Добавлять продавцов в каталог может только администратор.",
     ),
     "err_missing": (
         "Įrašas nepasiekiamas, pašalintas arba nepatvirtintas.",

@@ -262,13 +262,6 @@ def register_merchant_handlers(router: Router):
                     view.heading("search_title") + "\n\n" + t("mc.search_prompt"),
                     admin=admin,
                 )
-            elif route == "info" and not admin:
-                await panel(
-                    message,
-                    state,
-                    view.heading("info") + "\n\n" + t("mc.info_body"),
-                    base_kb.keyboard([[kb.back()]]),
-                )
             elif route == "profile" and not admin:
                 entry, stats = await cat.profile(data.entry)
                 await panel(message, state, view.profile(entry, stats), kb.profile(entry))
@@ -314,6 +307,8 @@ def register_merchant_handlers(router: Router):
             elif route == "mine" and not admin:
                 await show_mine(message, state, cat, actor)
             elif route == "terms":
+                if not admin:
+                    raise DomainError("merchant_registration_closed")
                 await panel(
                     message,
                     state,
@@ -543,7 +538,12 @@ def register_merchant_handlers(router: Router):
                     pass
         except DomainError as error:
             await service.session.rollback()
-            if error.code in ("merchant_expired", "merchant_stale", "forbidden"):
+            if error.code in (
+                "merchant_expired",
+                "merchant_stale",
+                "forbidden",
+                "merchant_registration_closed",
+            ):
                 await state.set_state(None)
                 await state.update_data(mc_input=None)
             await panel(target, state, error_text(error), base_kb.keyboard([[kb.back(admin)]]))

@@ -71,14 +71,26 @@ async def open_catalog(j, actor=1):
     await tap(j, "root", actor=actor)
 
 
+async def start_admin_registration(j, actor=42):
+    await initial_menu(j, actor)
+    await initial_menu(j, 900)
+    anchor, _ = screen(j)
+    await j.click("sc|admin|", actor=900, message_id=anchor)
+    await tap(j, "a_root", actor=900)
+    await tap(j, "a_terms", actor=900)
+    await tap(j, "a_target", actor=900)
+    await j.send(str(actor), actor=900)
+
+
 async def registration(j, actor=42):
+    await start_admin_registration(j, actor)
+    await tap(j, "a_setcity", actor=900, value="vilnius")
+    await j.send("North Studio", actor=900)
+    await j.send("Lawful professional service description", actor=900)
+    await tap(j, "a_submit", actor=900)
     await open_catalog(j, actor)
-    await tap(j, "terms", actor=actor)
-    await tap(j, "begin", actor=actor)
-    await tap(j, "setcity", actor=actor, value="vilnius")
-    await j.send("North Studio", actor=actor)
-    await j.send("Lawful professional service description", actor=actor)
-    await tap(j, "submit", actor=actor)
+    await tap(j, "mine", actor=actor)
+    await tap(j, "draft", actor=actor)
 
 
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
@@ -89,6 +101,8 @@ async def test_home_catalog_cities_empty_state_and_single_panel(journey, databas
     anchor, _ = screen(journey)
     with use_language(lang):
         assert CATALOGS[lang]["mc.title"] in screen(journey)[1].text
+    assert CATALOGS[lang]["mc.register"] not in str(screen(journey)[1].reply_markup)
+    assert CATALOGS[lang]["mc.info"] not in str(screen(journey)[1].reply_markup)
     await tap(journey, "cities")
     for code in ("vilnius", "kaunas", "klaipeda", "siauliai", "panevezys", "pajurys"):
         await tap(journey, "list", value=code)
@@ -304,17 +318,35 @@ async def test_expired_input_clears_session_and_cannot_run_a_query(journey):
 
 
 async def test_invalid_registration_input_can_be_corrected_without_an_extra_panel(journey):
-    await open_catalog(journey, 42)
+    await start_admin_registration(journey)
     anchor, _ = screen(journey)
-    await tap(journey, "terms", actor=42)
-    await tap(journey, "begin", actor=42)
-    await tap(journey, "setcity", actor=42, value="kaunas")
-    await journey.send("x", actor=42)
+    await tap(journey, "a_setcity", actor=900, value="kaunas")
+    await journey.send("x", actor=900)
     assert "Netinkama įvestis" in screen(journey)[1].text
-    await journey.send("Correct Studio", actor=42)
-    await journey.send("Lawful business description", actor=42)
+    await journey.send("Correct Studio", actor=900)
+    await journey.send("Lawful business description", actor=900)
     assert "Correct Studio" in screen(journey)[1].text
     assert screen(journey)[0] == anchor
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_old_registration_callbacks_are_rejected_without_creating_entries(
+    journey, database, settings, lang
+):
+    async with database() as s:
+        await Service(settings, s).set_language(1, lang)
+    await open_catalog(journey)
+    anchor, call = screen(journey)
+    for action in ("terms", "begin", "info"):
+        await tap(journey, forged=Merchant(action=action).pack())
+        result = journey.transport.calls[-1]
+        assert isinstance(result, AnswerCallbackQuery) and result.show_alert
+        error = "merchant_stale" if action == "info" else "merchant_registration_closed"
+        assert result.text == CATALOGS[lang]["error." + error]
+        assert screen(journey)[0] == anchor and screen(journey)[1].text == call.text
+    async with database() as s:
+        assert await s.scalar(select(MerchantEntry)) is None
+        assert await s.scalar(select(MerchantProposal)) is None
 
 
 async def test_storage_error_returns_a_localized_popup_without_private_details(
