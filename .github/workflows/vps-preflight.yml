@@ -1,9 +1,14 @@
-name: SAFECheck VPS preflight
+name: SAFECheck merchants release diagnostics
 on:
   push:
     branches: [safecheck-2.13.1]
     paths: ['.github/workflows/vps-preflight.yml']
   workflow_dispatch:
+    inputs:
+      phase:
+        description: Read-only inspect or post-deployment verify
+        required: true
+        default: inspect
 permissions:
   contents: read
 concurrency:
@@ -14,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Prepare pinned SSH access
         env:
           DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -27,23 +35,15 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Inspect existing deployment without changing it
+      - name: Read-only main bot and deployment guards
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
+          PHASE: ${{ inputs.phase }}
         run: |
-          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
           set -eu
-          sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker inspect safecheck-bot-1 --format 'Root={{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-          sudo -n docker inspect safecheck-bot-1 --format 'Compose={{index .Config.Labels "com.docker.compose.project.config_files"}}'
-          sudo -n test -f /etc/safecheck/compose.env && echo ComposeEnvironment=present
-          sudo -n docker inspect safecheck-postgres-1 --format 'PostgresHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
-          sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          df -h /home/ubuntu
-          REMOTE
+          case "$PHASE" in inspect|verify) ;; *) exit 1;; esac
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" "sudo -n python3 - $PHASE 30799ede9c9514124e2e97a16a199f89f88f4692" < deploy/merchant_release_check.py
       - name: Remove runner key
         if: always()
         run: rm -f "$HOME/.ssh/safecheck_deploy"
