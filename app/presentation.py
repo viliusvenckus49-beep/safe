@@ -184,9 +184,16 @@ def reputation_score(value: int) -> str:
     return f"+{value}" if value >= 0 else f"−{abs(value)}"
 
 
+def trusted_without_scam(data: dict[str, Any]) -> bool:
+    """Use the service's current status; confirmed and unresolved SCAM take precedence."""
+    return (
+        bool(data.get("trusted")) and data.get("scam") is None and not data.get("unresolved_scam")
+    )
+
+
 def profile(data: dict[str, Any]) -> str:
     user, scam = data["user"], data["scam"]
-    trusted = bool(data.get("trusted")) and scam is None
+    trusted = trusted_without_scam(data)
     user_text = (
         f"👤 {label(user, max_units=120)}\n"
         f"🆔 ID: <code>{user.telegram_id if user.telegram_id is not None else escape(t('p.lookup_id_unknown'))}</code>"
@@ -244,7 +251,7 @@ def profile(data: dict[str, Any]) -> str:
         + "\n\n"
         + t("p.lookup_identity_unknown" if user.telegram_id is None else "p.lookup_identity_known")
     )
-    return result + "\n\n" + t("p.lookup_warning")
+    return result if trusted else result + "\n\n" + t("p.lookup_warning")
 
 
 def identity_lookup_note(lookup: Any, *, known: bool = False) -> str:

@@ -98,7 +98,10 @@ def test_result_identity_and_status_are_factual(locale, known, status):
         else:
             assert t("p.lookup_identity_unknown") in result
             assert t("p.lookup_identity_known") not in result
-        assert result.endswith(t("p.lookup_warning"))
+        if status in ("manual", "top"):
+            assert t("p.lookup_warning") not in result
+        else:
+            assert result.endswith(t("p.lookup_warning"))
         assert len(parsed(result).encode("utf-16-le")) // 2 < 4096
 
 
@@ -311,5 +314,8 @@ def test_reference_spacing_and_quote_boundaries(locale, source):
         assert t("p.lookup_trusted_role") not in card
         assert t("p.role_moderator") not in card
         assert "2026-10-04" not in card
-        assert card.endswith(t("p.lookup_warning"))
+        if source:
+            assert t("p.lookup_warning") not in card
+        else:
+            assert card.endswith(t("p.lookup_warning"))
         parsed(card)

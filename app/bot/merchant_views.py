@@ -5,7 +5,7 @@ from html import escape
 from app.bot.redsafe_profile import BRAND
 from app.i18n import language, t
 from app.merchant_catalog import utc
-from app.presentation import display_name, display_text
+from app.presentation import display_name, display_text, trusted_without_scam
 
 
 def heading(key):
@@ -61,12 +61,17 @@ def listing(rows, total, page, city="", query="", admin=False):
     return result
 
 
+def description_block(value):
+    return "<blockquote><i>" + escape(value) + "</i></blockquote>"
+
+
 def fields(obj):
     return "\n\n".join(
         (
             f"<b>{t('mc.name')}:</b> <b>{escape(obj.name or t('mc.not_set'))}</b>",
             f"<b>{t('mc.city')}:</b> {city_name(obj.city_code)}",
-            f"<b>{t('mc.description')}:</b> {escape(obj.description or t('mc.not_set'))}",
+            f"<b>{t('mc.description')}:</b>\n"
+            + description_block(obj.description or t("mc.not_set")),
         )
     )
 
@@ -75,12 +80,19 @@ def profile(entry, data):
     result = (
         heading("profile_title")
         + "\n\n"
-        + f"<b>{t('mc.name')}:</b> <b>{escape(entry.name)}</b>\n\n<b>{t('mc.telegram')}:</b> {identity(entry.owner)}\n\n<b>{t('mc.city')}:</b> {city_name(entry.city_code)}\n\n<b>{t('mc.description')}:</b> {escape(entry.description)}"
+        + f"<b>{t('mc.name')}:</b> <b>{escape(entry.name)}</b>\n<b>{t('mc.telegram')}:</b> {identity(entry.owner)}\n<b>{t('mc.city')}:</b> {city_name(entry.city_code)}"
     )
-    result += "\n\n<b>" + t("mc.rep_title") + "</b>\n\n" + stats(data)
-    result += "\n\n<b>" + t("mc.status") + ":</b> " + t("mc.status_APPROVED")
-    if data["trusted"]:
-        result += "\n" + t("mc.trusted")
+    result += "\n\n<b>" + t("mc.about") + "</b>\n\n" + description_block(entry.description)
+    result += (
+        "\n\n<b>"
+        + t("mc.rep_title")
+        + "</b>\n\n<blockquote><i>"
+        + stats(data)
+        + "</i></blockquote>"
+    )
+    result += "\n\n<b>" + t("mc.security_title") + "</b>\n\n<b>" + t("mc.catalog_approved") + "</b>"
+    if trusted_without_scam(data):
+        return result + "\n<b>" + t("mc.trusted") + "</b>"
     return result + "\n\n<i>" + t("mc.disclaimer") + "</i>"
 
 
