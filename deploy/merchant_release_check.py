@@ -24,7 +24,17 @@ for lang in ('lt','en','ru'):
         public=routes(kb.root(False)); owner=routes(kb.root(True))
         assert public==['cities'] and owner==['cities','mine']
         assert not {'search','info','terms','begin'}.intersection(routes(kb.listing([],0,0)))
-        admin=routes(kb.admin_root()); assert {'a_terms','a_search'} <= set(admin)
+        admin=routes(kb.admin_root()); assert admin==['a_list','a_create','a_search','a_settings']
+        from types import SimpleNamespace
+        entry=SimpleNamespace(id=1,version=1,status='APPROVED')
+        assert routes(kb.admin_entry(entry))==['a_editor','a_suspend','a_remove','a_root']
+        entry.status='SUSPENDED'
+        assert routes(kb.admin_entry(entry))==['a_editor','a_restore','a_remove','a_root']
+        editor={'entry':1,'revision':1}
+        assert routes(kb.editor(editor))==['a_field']*4+['a_commit','a_discard']
+        assert routes(kb.editor_cities(editor))[-1]=='a_editback'
+        for markup in (kb.admin_root(),kb.admin_entry(entry),kb.editor(editor),kb.editor_cities(editor)):
+            assert all(len(b.callback_data.encode())<=64 for row in markup.inline_keyboard for b in row if b.callback_data)
         home={b.callback_data for row in base.home().inline_keyboard for b in row}
         assert {base.action('info'),base.action('lookup')} <= home
         result[lang]={'public':public,'owner':owner,'admin_creation_and_search':True}
@@ -157,7 +167,7 @@ def main():
     if phase == "verify":
         row = inspect("safecheck-bot-1")
         assert row["Config"]["Image"].endswith("-" + sha[:12])
-        assert sql("SELECT version_num FROM alembic_version") == ["0024"]
+        assert sql("SELECT version_num FROM alembic_version") == ["0025"]
         for table in (
             "merchant_entries",
             "merchant_proposals",
