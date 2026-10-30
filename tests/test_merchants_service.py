@@ -275,3 +275,22 @@ async def test_username_changes_preserve_merchant_owner_and_reputation_identity(
         assert (await cat.listing(query="seller42"))[1] == 0
         rows, total, _ = await cat.listing(query="RENAMED_SELLER")
         assert total == 1 and rows[0][0].owner_user_id == owner_id
+
+
+async def test_edit_preserves_unchanged_historical_whitespace_and_approval_metadata(
+    database, settings
+):
+    async with database() as s:
+        cat = await setup(s, settings)
+        e = await created(cat)
+        description = "  Original paragraph\n\nLietuviškas aprašymas.  \n"
+        e.description = description
+        await s.commit()
+        approved_at, approved_by = e.approved_at, e.approved_by
+        snapshot = {
+            field: getattr(e, field) for field in ("name", "city_code", "description", "contact")
+        }
+        snapshot["name"] = "Changed name only"
+        e = await cat.save(900, e.id, e.version, snapshot)
+        assert e.description == description
+        assert e.approved_at == approved_at and e.approved_by == approved_by

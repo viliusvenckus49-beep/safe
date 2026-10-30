@@ -163,10 +163,13 @@ class MerchantService:
             user = await self.creation_target(actor, target_id)
             entry = MerchantEntry(owner_user_id=user.id, status="DRAFT", version=1)
             self.session.add(entry)
-        values = {
-            field: self.validate_field(field, changes.get(field, getattr(entry, field, None)))
-            for field in ("name", "city_code", "description", "contact")
-        }
+        values = {}
+        for field in ("name", "city_code", "description", "contact"):
+            original = getattr(entry, field, None)
+            candidate = changes.get(field, original)
+            validated = self.validate_field(field, candidate)
+            # Saving another field must not normalize or trim historical content.
+            values[field] = original if entry_id and candidate == original else validated
         if entry.owner_user_id is None:
             raise DomainError("merchant_identity")
         # Identity ownership and reputation never change when editing public contacts.
@@ -181,8 +184,8 @@ class MerchantService:
         entry.name_key = normalized(entry.name)
         if entry.status in ("DRAFT", "PENDING", "REJECTED"):
             entry.status = "APPROVED"
-        entry.approved_at = now()
-        entry.approved_by = actor
+            entry.approved_at = now()
+            entry.approved_by = actor
         entry.version += 1
         await self.session.flush()
         await self.session.execute(
