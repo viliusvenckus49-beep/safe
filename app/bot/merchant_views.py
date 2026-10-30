@@ -57,7 +57,14 @@ def listing(rows, total, page, city="", query="", admin=False):
         label = entry.name or user.display_name
         result += f"\n\n<b>{i:02d} · {escape(display_text(label, 64))}</b>\n⭐ {t('mc.score')}: <b>{score:+d}</b>"
         if admin:
-            result += " · " + t("mc.status_" + entry.status)
+            result += " · " + t(
+                "mc.status_"
+                + (
+                    entry.status
+                    if entry.status in ("APPROVED", "SUSPENDED", "REMOVED")
+                    else "UNPUBLISHED"
+                )
+            )
     return result
 
 
@@ -65,11 +72,24 @@ def description_block(value):
     return "<blockquote><i>" + escape(value) + "</i></blockquote>"
 
 
+def contact(obj):
+    value = getattr(obj, "contact", None)
+    if not value:
+        return (
+            identity(obj.owner)
+            if getattr(obj, "owner", None)
+            else escape(getattr(obj, "_default_contact", "") or t("mc.contact_default"))
+        )
+    url = "https://t.me/" + value[1:] if value.startswith("@") else value
+    return f'<a href="{escape(url, quote=True)}">{escape(value)}</a>'
+
+
 def fields(obj):
     return "\n\n".join(
         (
             f"<b>{t('mc.name')}:</b> <b>{escape(obj.name or t('mc.not_set'))}</b>",
             f"<b>{t('mc.city')}:</b> {city_name(obj.city_code)}",
+            f"<b>{t('mc.contact')}:</b> {contact(obj)}",
             f"<b>{t('mc.description')}:</b>\n"
             + description_block(obj.description or t("mc.not_set")),
         )
@@ -82,6 +102,8 @@ def profile(entry, data):
         + "\n\n"
         + f"<b>{t('mc.name')}:</b> <b>{escape(entry.name)}</b>\n<b>{t('mc.telegram')}:</b> {identity(entry.owner)}\n<b>{t('mc.city')}:</b> {city_name(entry.city_code)}"
     )
+    if getattr(entry, "contact", None):
+        result += "\n<b>" + t("mc.contact") + ":</b> " + contact(entry)
     result += "\n\n<b>" + t("mc.about") + "</b>\n\n" + description_block(entry.description)
     result += (
         "\n\n<b>"
@@ -118,45 +140,36 @@ def reviews(entry, data, rows, publish_authors):
     return result + "\n\n<i>" + t("mc.corrections") + "</i>"
 
 
-def private_entry(entry, proposal=None):
-    result = (
-        heading("mine")
-        + "\n\n"
-        + identity(entry.owner)
-        + "\n\n"
-        + fields(entry)
-        + "\n\n<b>"
-        + t("mc.status")
-        + ":</b> "
-        + t("mc.status_" + entry.status)
+def private_entry(entry, *, admin=False):
+    status = entry.status if entry.status in ("APPROVED", "SUSPENDED", "REMOVED") else "UNPUBLISHED"
+    result = heading("manage_title" if admin else "mine") + "\n\n" + identity(entry.owner)
+    result += (
+        "\n\n" + fields(entry) + "\n\n<b>" + t("mc.status") + ":</b> " + t("mc.status_" + status)
     )
     if entry.reason:
-        result += "\n\n<b>" + t("mc.reason") + ":</b> " + escape(display_text(entry.reason, 600))
-    if proposal:
-        result += "\n\n" + t("mc." + proposal.kind) + " · " + t("mc.status_" + proposal.status)
-        if proposal.reason:
-            result += (
-                "\n\n<b>" + t("mc.reason") + ":</b> " + escape(display_text(proposal.reason, 600))
-            )
+        result += "\n\n<b>" + t("mc.reason") + ":</b> " + escape(entry.reason)
     return result
 
 
-def proposal_card(proposal, entry):
-    result = (
-        heading("draft_title")
+def editor_card(values, default_contact=""):
+    from types import SimpleNamespace
+
+    return (
+        heading("editor_title")
         + "\n\n"
-        + identity(entry.owner)
-        + "\n\n<b>"
-        + t("mc." + proposal.kind)
-        + "</b>\n\n"
-        + fields(entry if proposal.kind == "REMOVE" else proposal)
+        + fields(SimpleNamespace(**values, _default_contact=default_contact))
     )
-    result += "\n\n<b>" + t("mc.status") + ":</b> " + t("mc.status_" + proposal.status)
-    if proposal.status == "PENDING":
-        result += "\n\n" + t("mc.pending_notice")
-    if proposal.reason:
-        result += "\n\n<b>" + t("mc.reason") + ":</b> " + escape(proposal.reason)
-    return result
+
+
+def field_prompt(field, values, default_contact=""):
+    current = values.get(field)
+    if field == "contact" and not current:
+        current = default_contact
+    shown = city_name(current) if field == "city_code" else escape(current or t("mc.not_set"))
+    if field == "description":
+        shown = description_block(current or t("mc.not_set"))
+    prompt_key = "city_prompt" if field == "city_code" else field + "_prompt"
+    return f"<b>{t('mc.current_value')}:</b>\n{shown}\n\n{t('mc.' + prompt_key)}"
 
 
 def settings_card(row):

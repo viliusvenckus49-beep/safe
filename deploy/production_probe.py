@@ -81,7 +81,7 @@ async def evidence(connection, baseline=None):
 
 
 def verify(baseline, actual, *, original=False):
-    expected_head = baseline["head"] if original else "0024"
+    expected_head = baseline["head"] if original else "0025"
     if actual["head"] != expected_head or actual["tables"].keys() != baseline["tables"].keys():
         raise RuntimeError("Database revision or table retention mismatch")
     for table, spec in baseline["tables"].items():

@@ -84,108 +84,79 @@ def reviews(entry, page, total, sign):
     )
 
 
-def terms(admin=False):
-    return keyboard([[button("agree", "a_target" if admin else "begin")], [back(admin)]])
+def mine(entry, *, blocked=False):
+    rows = (
+        [[button("profile_back", "profile", entry.id)]]
+        if entry.status == "APPROVED" and not blocked
+        else []
+    )
+    return keyboard([*rows, [back()]])
 
 
-def draft(proposal, admin=False):
-    prefix = "a_" if admin else ""
-    rows = []
-    if proposal.status == "DRAFT" and proposal.kind == "REMOVE":
-        rows = [[button("submit", prefix + "submit", proposal.id, version=proposal.version)]]
-    elif proposal.status == "DRAFT" and (admin or proposal.kind != "CREATE"):
-        rows = [
+def editor(session):
+    args = dict(entry=session["entry"], version=session["revision"])
+    return keyboard(
+        [
             [
-                button("edit_name", prefix + "name", proposal.id, version=proposal.version),
-                button(
-                    "edit_description",
-                    prefix + "description",
-                    proposal.id,
-                    version=proposal.version,
-                ),
+                button("edit_name", "a_field", value="name", **args),
+                button("edit_description", "a_field", value="description", **args),
             ],
-            [button("edit_city", prefix + "city", proposal.id, version=proposal.version)],
-            [button("submit", prefix + "submit", proposal.id, version=proposal.version)],
-        ]
-    elif proposal.status == "PENDING" and admin:
-        rows = [
             [
-                button("approve", "a_approve", proposal.id, version=proposal.version),
-                button("reject", "a_reject", proposal.id, version=proposal.version),
-            ]
+                button("edit_city", "a_field", value="city_code", **args),
+                button("edit_contact", "a_field", value="contact", **args),
+            ],
+            [button("confirm", "a_commit", **args)],
+            [button("cancel_edit", "a_discard", **args)],
         ]
-    if not admin and proposal.status in ("DRAFT", "PENDING"):
-        rows.append([button("cancel_request", "cancel", proposal.id, version=proposal.version)])
-    rows.append([back(True)] if admin else [button("back_mine", "mine")])
-    return keyboard(rows)
+    )
 
 
-def draft_cities(proposal, admin=False):
+def field_back(session):
+    return button("step_back", "a_editback", session["entry"], version=session["revision"])
+
+
+def editor_cities(session):
     return keyboard(
         [
             [
                 button(
-                    code,
-                    "a_setcity" if admin else "setcity",
-                    proposal.id,
-                    value=code,
-                    version=proposal.version,
+                    code, "a_cityvalue", session["entry"], value=code, version=session["revision"]
                 )
                 for code in CITIES[i : i + 2]
             ]
             for i in range(0, len(CITIES), 2)
         ]
-        + [[button("preview", "a_draft" if admin else "draft", proposal.id)]]
+        + [[field_back(session)]]
     )
-
-
-def mine(entry, proposal, *, blocked=False):
-    rows = []
-    if proposal:
-        rows.append([button("preview", "draft", proposal.id)])
-    if entry.status in ("APPROVED", "SUSPENDED") and (
-        not proposal or proposal.status not in ("DRAFT", "PENDING")
-    ):
-        rows.append([button("change", "edit", entry.id)])
-        rows.append([button("remove_request", "removal", entry.id)])
-    if entry.status == "APPROVED" and not blocked:
-        rows.append([button("profile_back", "profile", entry.id)])
-    return keyboard([*rows, [back()]])
 
 
 def admin_root():
     return keyboard(
         [
-            [button("queue", "a_queue")],
             [button("admin_list", "a_list", page=-1)],
-            [button("add", "a_terms")],
+            [button("add", "a_create")],
             [button("search", "a_search")],
             [button("settings", "a_settings")],
-            [button("audit", "a_audit")],
             [(t("mc.admin_back"), action("admin"))],
         ]
     )
 
 
 def admin_entry(entry):
-    rows = (
-        [[button("change", "a_edit", entry.id)]]
-        if entry.status in ("APPROVED", "SUSPENDED")
-        else []
-    )
-    if entry.status == "APPROVED":
-        rows.append([button("suspend", "a_suspend", entry.id, version=entry.version)])
-    if entry.status == "SUSPENDED":
-        rows.append([button("restore", "a_restore", entry.id, version=entry.version)])
-    if entry.status in ("APPROVED", "SUSPENDED"):
+    rows = []
+    if entry.status != "REMOVED":
+        rows.append([button("change", "a_editor", entry.id, version=entry.version)])
+        if entry.status == "APPROVED":
+            rows.append([button("suspend", "a_suspend", entry.id, version=entry.version)])
+        elif entry.status == "SUSPENDED":
+            rows.append([button("restore", "a_restore", entry.id, version=entry.version)])
         rows.append([button("remove", "a_remove", entry.id, version=entry.version)])
-    rows.append([button("audit", "a_audit", entry.id)])
-    return keyboard([*rows, [button("admin_list", "a_list", page=-1)], [back(True)]])
+    return keyboard([*rows, [back(True)]])
 
 
 def settings(row):
     rows = []
-    for field in ("enabled", "registrations", "publish_authors"):
+    for field in ("enabled", "publish_authors"):
         rows.append(
             [
                 (

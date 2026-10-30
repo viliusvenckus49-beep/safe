@@ -78,25 +78,6 @@ async def open_admin_catalog(j):
     await tap(j, "a_root", actor=900)
 
 
-async def start_admin_registration(j, actor=42):
-    await initial_menu(j, actor)
-    await open_admin_catalog(j)
-    await tap(j, "a_terms", actor=900)
-    await tap(j, "a_target", actor=900)
-    await j.send(str(actor), actor=900)
-
-
-async def registration(j, actor=42):
-    await start_admin_registration(j, actor)
-    await tap(j, "a_setcity", actor=900, value="vilnius")
-    await j.send("North Studio", actor=900)
-    await j.send("Lawful professional service description", actor=900)
-    await tap(j, "a_submit", actor=900)
-    await open_catalog(j, actor)
-    await tap(j, "mine", actor=actor)
-    await tap(j, "draft", actor=actor)
-
-
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
 async def test_home_catalog_cities_empty_state_and_single_panel(journey, database, settings, lang):
     async with database() as s:
@@ -105,8 +86,6 @@ async def test_home_catalog_cities_empty_state_and_single_panel(journey, databas
     anchor, _ = screen(journey)
     with use_language(lang):
         assert CATALOGS[lang]["mc.title"] in screen(journey)[1].text
-    assert CATALOGS[lang]["mc.register"] not in str(screen(journey)[1].reply_markup)
-    assert CATALOGS[lang]["mc.info"] not in str(screen(journey)[1].reply_markup)
     assert CATALOGS[lang]["mc.search"] not in str(screen(journey)[1].reply_markup)
     await tap(journey, "cities")
     for code in ("vilnius", "kaunas", "klaipeda", "siauliai", "panevezys", "pajurys"):
@@ -116,26 +95,6 @@ async def test_home_catalog_cities_empty_state_and_single_panel(journey, databas
         await tap(journey, "cities")
     assert not any(isinstance(call, SendPhoto) for call in journey.transport.calls)
     assert sum(isinstance(call, SendMessage) for call in journey.transport.calls) == 1
-
-
-async def test_registration_guided_form_pending_and_admin_approval(journey, database, settings):
-    await registration(journey)
-    assert "LAUKIA PATVIRTINIMO" in screen(journey)[1].text
-    async with database() as s:
-        entry = await s.scalar(select(MerchantEntry))
-        assert entry.status == "PENDING"
-        pid = await s.scalar(select(MerchantProposal.id))
-        assert (await MerchantService(Service(settings, s)).listing())[1] == 0
-    await initial_menu(journey, 900)
-    anchor, _ = screen(journey)
-    await journey.click("sc|admin|", actor=900, message_id=anchor)
-    await tap(journey, "a_root", actor=900)
-    await tap(journey, "a_queue", actor=900)
-    await tap(journey, "a_draft", actor=900)
-    await tap(journey, "a_approve", actor=900)
-    async with database() as s:
-        assert (await s.get(MerchantProposal, pid)).status == "APPROVED"
-        assert (await s.scalar(select(MerchantEntry))).name == "North Studio"
 
 
 async def test_admin_search_not_found_and_no_automatic_general_lookup(journey):
@@ -160,31 +119,6 @@ async def test_search_state_does_not_capture_ask_and_rep_commands(journey):
         await journey.send(command, actor=900)
         assert "42" in screen(journey)[1].text
         assert await journey.state(900) != MerchantFlow.input.state
-
-
-async def test_private_proposal_and_admin_callbacks_cannot_be_forged(journey, database, settings):
-    await registration(journey)
-    async with database() as s:
-        pid = await s.scalar(select(MerchantProposal.id))
-    await open_catalog(journey, 43)
-    before = screen(journey)[1].text
-    await tap(journey, actor=43, forged=Merchant(action="draft", entry=pid).pack())
-    assert (
-        isinstance(journey.transport.calls[-1], AnswerCallbackQuery)
-        and journey.transport.calls[-1].show_alert
-    )
-    assert screen(journey)[1].text == before
-    await tap(journey, actor=43, forged=Merchant(action="a_settings").pack())
-    assert journey.transport.calls[-1].show_alert
-    assert screen(journey)[1].text == before
-
-
-async def test_owner_can_cancel_pending_application(journey, database):
-    await registration(journey)
-    await tap(journey, "cancel", actor=42)
-    async with database() as s:
-        assert (await s.scalar(select(MerchantProposal))).status == "CANCELLED"
-        assert (await s.scalar(select(MerchantEntry))).status == "REMOVED"
 
 
 async def test_search_rate_limiter_survives_flow_data_clearing(journey):
@@ -284,27 +218,9 @@ async def test_search_query_preserved_for_profiles_and_pagination(
     await tap(journey, "a_entry", actor=900)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(limits, "monotonic", lambda: original() + 6)
+        await tap(journey, "a_root", actor=900)
         await tap(journey, "a_list", actor=900)
     assert "2 / 2" in str(screen(journey)[1].reply_markup)
-
-
-async def test_pending_rejection_reason_owner_edit_and_admin_settings(journey, database, settings):
-    await registration(journey)
-    await initial_menu(journey, 900)
-    anchor, _ = screen(journey)
-    await journey.click("sc|admin|", actor=900, message_id=anchor)
-    await tap(journey, "a_root", actor=900)
-    await tap(journey, "a_queue", actor=900)
-    await tap(journey, "a_draft", actor=900)
-    await tap(journey, "a_reject", actor=900)
-    await journey.send("More details are required", actor=900)
-    async with database() as s:
-        proposal = await s.scalar(select(MerchantProposal))
-        assert proposal.status == "REJECTED"
-    await open_catalog(journey, 42)
-    await tap(journey, "mine", actor=42)
-    assert "More details are required" in screen(journey)[1].text
-    assert "seller" not in screen(journey)[1].text  # No invented username.
 
 
 async def test_expired_input_clears_session_and_cannot_run_a_query(journey):
@@ -318,20 +234,8 @@ async def test_expired_input_clears_session_and_cannot_run_a_query(journey):
     data["until"] = time.time() - 1
     await ctx.update_data(mc_input=data)
     await journey.send("Valid Query", actor=900)
-    assert "laikas baigėsi" in screen(journey)[1].text
+    assert "sesija baigėsi" in screen(journey)[1].text
     assert await journey.state(900) is None
-
-
-async def test_invalid_registration_input_can_be_corrected_without_an_extra_panel(journey):
-    await start_admin_registration(journey)
-    anchor, _ = screen(journey)
-    await tap(journey, "a_setcity", actor=900, value="kaunas")
-    await journey.send("x", actor=900)
-    assert "Netinkama įvestis" in screen(journey)[1].text
-    await journey.send("Correct Studio", actor=900)
-    await journey.send("Lawful business description", actor=900)
-    assert "Correct Studio" in screen(journey)[1].text
-    assert screen(journey)[0] == anchor
 
 
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
@@ -346,7 +250,7 @@ async def test_old_registration_callbacks_are_rejected_without_creating_entries(
         await tap(journey, forged=Merchant(action=action).pack())
         result = journey.transport.calls[-1]
         assert isinstance(result, AnswerCallbackQuery) and result.show_alert
-        error = "merchant_registration_closed" if action in ("terms", "begin") else "merchant_stale"
+        error = "merchant_stale"
         assert result.text == CATALOGS[lang]["error." + error]
         assert screen(journey)[0] == anchor and screen(journey)[1].text == call.text
     async with database() as s:

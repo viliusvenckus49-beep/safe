@@ -1,20 +1,15 @@
-"""Localized workflow and privacy policy wording for the merchant directory."""
+"""Localized directory and direct administration texts (LT / EN / RU)."""
 
 ROWS = {
     "privacy_notice": (
-        "Atsiliepimų autoriai pagal nutylėjimą neviešinami. Įjunk jų rodymą tik pagal taikomą privatumo politiką ir turint teisėtą pagrindą.",
-        "Review authors are anonymous by default. Enable their publication only under your privacy policy and with a lawful basis.",
-        "По умолчанию авторы отзывов не публикуются. Включайте публикацию только в соответствии с политикой конфиденциальности и при наличии законного основания.",
+        "Atsiliepimų autoriai pagal nutylėjimą neviešinami. Įjunk jų rodymą tik "
+        "pagal taikomą privatumo politiką ir turint teisėtą pagrindą.",
+        "Review authors are anonymous by default. Enable their publication only "
+        "under your privacy policy and with a lawful basis.",
+        "По умолчанию авторы отзывов не публикуются. Включайте публикацию только в "
+        "соответствии с политикой конфиденциальности и при наличии законного "
+        "основания.",
     ),
-    "audit_draft_created": ("Juodraštis sukurtas", "Draft created", "Черновик создан"),
-    "audit_draft_updated": ("Juodraštis pakeistas", "Draft changed", "Черновик изменён"),
-    "audit_draft_expired": ("Juodraščio laikas baigėsi", "Draft expired", "Черновик истёк"),
-    "audit_submitted": ("Paraiška pateikta", "Application submitted", "Заявка отправлена"),
-    "audit_cancelled": ("Paraiška atšaukta", "Application cancelled", "Заявка отозвана"),
-    "audit_approved": ("Paraiška patvirtinta", "Application approved", "Заявка одобрена"),
-    "audit_rejected": ("Paraiška atmesta", "Application rejected", "Заявка отклонена"),
-    "audit_status": ("Būsena pakeista", "Status changed", "Статус изменён"),
-    "audit_settings": ("Nustatymai pakeisti", "Settings changed", "Настройки изменены"),
     "list_title": ("🏪 REDSAFE PREKEIVIAI", "🏪 REDSAFE MERCHANTS", "🏪 ПРОДАВЦЫ REDSAFE"),
     "count": (
         "Registruoti prekeiviai: {count}",
@@ -41,7 +36,7 @@ ROWS = {
     "score": ("Bendra reputacija", "Overall reputation", "Общая репутация"),
     "positive": ("+REP", "+REP", "+REP"),
     "negative": ("−REP", "−REP", "−REP"),
-    "status": ("Registracijos būsena", "Registration status", "Статус регистрации"),
+    "status": ("Įrašo būsena", "Listing status", "Статус записи"),
     "trusted": ("✓ TRUSTED", "✓ TRUSTED", "✓ TRUSTED"),
     "disclaimer": (
         "Reputacijos rezultatai negarantuoja patikimumo.",
@@ -69,9 +64,11 @@ ROWS = {
         "Историческая принятая оценка без комментария.",
     ),
     "corrections": (
-        "Statistika apima administratoriaus korekcijas; istorinių atsiliepimų skaičius gali skirtis.",
+        "Statistika apima administratoriaus korekcijas; istorinių atsiliepimų skaičius "
+        "gali skirtis.",
         "Statistics include administrative corrections; historical review counts may differ.",
-        "Статистика учитывает корректировки администратора; число исторических отзывов может отличаться.",
+        "Статистика учитывает корректировки администратора; число исторических отзывов "
+        "может отличаться.",
     ),
     "filter_all": ("▤ VISI", "▤ ALL", "▤ ВСЕ"),
     "filter_pos": ("＋ REP", "＋ REP", "＋ REP"),
@@ -79,19 +76,6 @@ ROWS = {
     "profile_back": ("👤 PREKEIVIO PROFILIS", "👤 MERCHANT PROFILE", "👤 ПРОФИЛЬ ПРОДАВЦА"),
     "check": ("🔎 REDSAFE PATIKRA", "🔎 REDSAFE CHECK", "🔎 ПРОВЕРКА REDSAFE"),
     "activity": ("👤 REDSAFE PROFILIS", "👤 REDSAFE PROFILE", "👤 ПРОФИЛЬ REDSAFE"),
-    "info_body": (
-        "Katalogas skirtas tik teisėtų prekių ir paslaugų teikėjams. Registracija ir vieši profilio pakeitimai tikrinami administratorių. Patvirtinimas reiškia įrašo priėmimą į katalogą, o ne sąžiningumo garantiją ar TRUSTED statusą. SCAM apribojimas turi pirmenybę. Reputacija ir patvirtinti atsiliepimai gaunami iš bendros SAFECheck sistemos. Neviešinkite telefono numerių, gyvenamosios vietos adresų ar kitų privačių duomenų. Pajūrys yra katalogo regionas.",
-        "This directory is for lawful goods and services only. Administrators review registrations and public profile changes. Approval accepts a listing; it is not a guarantee of honesty or TRUSTED status. SCAM restrictions take priority. Reputation and accepted reviews come from the shared SAFECheck system. Do not publish phone numbers, home addresses or other private data. The coast is a directory region.",
-        "Каталог предназначен только для законных товаров и услуг. Администраторы проверяют регистрацию и изменения публичного профиля. Одобрение означает приём записи, а не гарантию честности или статус TRUSTED. Ограничения SCAM имеют приоритет. Репутация и одобренные отзывы взяты из общей системы SAFECheck. Не публикуйте телефоны, домашние адреса и другие личные данные. Побережье является регионом каталога.",
-    ),
-    "terms_title": ("＋ REGISTRACIJA", "＋ REGISTRATION", "＋ РЕГИСТРАЦИЯ"),
-    "terms": (
-        "Patvirtinu, kad registruoju tik teisėtas prekes ar paslaugas ir turiu teisę pateikti šią informaciją viešai. Neteiksiu privačių kontaktų ar gyvenamosios vietos duomenų. Paraišką ir svarbius pakeitimus peržiūrės administratorius. Tai nesuteikia TRUSTED statuso. Atsiliepimų autorių viešinimą lemia katalogo privatumo nustatymas.",
-        "I confirm that I offer only lawful goods or services and may publish this information. I will not submit private contacts or home addresses. An administrator will review my application and important changes. This does not grant TRUSTED status. Review authors are published only under the directory privacy setting.",
-        "Подтверждаю, что предлагаю только законные товары или услуги и вправе публиковать эту информацию. Не буду указывать личные контакты и домашние адреса. Администратор проверит заявку и важные изменения. Это не даёт статус TRUSTED. Публикация авторов отзывов зависит от настроек конфиденциальности каталога.",
-    ),
-    "agree": ("✓ SUTINKU", "✓ I AGREE", "✓ СОГЛАСЕН"),
-    "draft_title": ("▤ PARAIŠKOS PERŽIŪRA", "▤ APPLICATION PREVIEW", "▤ ПРЕДПРОСМОТР ЗАЯВКИ"),
     "city_prompt": (
         "Pasirink prekeivio miestą arba regioną.",
         "Choose the merchant city or region.",
@@ -103,62 +87,38 @@ ROWS = {
         "Введите публичное название продавца (2–64 символа).",
     ),
     "description_prompt": (
-        "Įvesk trumpą teisėtų prekių ar paslaugų aprašymą (10–600 simbolių). Nerašyk privačių kontaktų.",
-        "Describe the lawful goods or services (10–600 characters). Do not include private contacts.",
-        "Кратко опишите законные товары или услуги (10–600 символов). Не указывайте личные контакты.",
+        "Įvesk trumpą teisėtų prekių ar paslaugų aprašymą (10–600 simbolių). "
+        "Nerašyk privačių kontaktų.",
+        "Describe the lawful goods or services (10–600 characters). Do not "
+        "include private contacts.",
+        "Кратко опишите законные товары или услуги (10–600 символов). Не "
+        "указывайте личные контакты.",
     ),
     "not_set": ("Nenustatyta", "Not set", "Не указано"),
-    "submit": ("✓ PATEIKTI PARAIŠKĄ", "✓ SUBMIT APPLICATION", "✓ ОТПРАВИТЬ ЗАЯВКУ"),
     "edit_name": ("✎ PAVADINIMAS", "✎ NAME", "✎ НАЗВАНИЕ"),
     "edit_description": ("✎ APRAŠYMAS", "✎ DESCRIPTION", "✎ ОПИСАНИЕ"),
     "edit_city": ("📍 PAKEISTI MIESTĄ", "📍 CHANGE CITY", "📍 ИЗМЕНИТЬ ГОРОД"),
-    "preview": ("👁 PERŽIŪRA", "👁 PREVIEW", "👁 ПРЕДПРОСМОТР"),
-    "pending_notice": (
-        "Paraiška pateikta administratoriaus peržiūrai. Nepatvirtinti pakeitimai viešai nerodomi.",
-        "Submitted for administrator review. Unapproved changes are not public.",
-        "Заявка отправлена администратору. Неодобренные изменения не публикуются.",
-    ),
-    "change": ("✎ PAKEITIMO PRAŠYMAS", "✎ REQUEST A CHANGE", "✎ ЗАПРОСИТЬ ИЗМЕНЕНИЕ"),
-    "remove_request": ("× PRAŠYTI PAŠALINTI", "× REQUEST REMOVAL", "× ЗАПРОСИТЬ УДАЛЕНИЕ"),
-    "cancel_request": ("× ATŠAUKTI PARAIŠKĄ", "× CANCEL APPLICATION", "× ОТОЗВАТЬ ЗАЯВКУ"),
-    "remove_confirm": (
-        "Ar pateikti administratoriui prašymą pašalinti įrašą? Istorija bus išsaugota.",
-        "Submit a removal request to an administrator? History will be retained.",
-        "Отправить администратору запрос на удаление записи? История сохранится.",
-    ),
+    "change": ("✎ REDAGUOTI PREKEIVĮ", "✎ EDIT MERCHANT", "✎ РЕДАКТИРОВАТЬ ПРОДАВЦА"),
     "confirm": ("✓ PATVIRTINTI", "✓ CONFIRM", "✓ ПОДТВЕРДИТЬ"),
-    "back_mine": ("◀ MANO ĮRAŠAS", "◀ MY LISTING", "◀ МОЯ ЗАПИСЬ"),
-    "cancelled": ("Paraiška atšaukta.", "Application cancelled.", "Заявка отозвана."),
     "reason": ("Priežastis", "Reason", "Причина"),
-    "reason_prompt": (
-        "Įvesk sprendimo priežastį (3–600 simbolių). Ji bus matoma įrašo savininkui.",
-        "Enter a decision reason (3–600 characters). The listing owner will see it.",
-        "Введите причину решения (3–600 символов). Её увидит владелец записи.",
-    ),
     "target_prompt": (
-        "Įvesk jau botui žinomo prekeivio skaitinį Telegram ID. Nauja, nepatvirtinta tapatybė nebus kuriama.",
-        "Enter a merchant Telegram numeric ID already known to the bot. An unknown identity will not be created.",
-        "Введите числовой Telegram ID продавца, уже известного боту. Неизвестная личность не будет создана.",
+        "Įvesk jau botui žinomo prekeivio skaitinį Telegram ID. Nauja, nepatvirtinta "
+        "tapatybė nebus kuriama.",
+        "Enter a merchant Telegram numeric ID already known to the bot. An unknown "
+        "identity will not be created.",
+        "Введите числовой Telegram ID продавца, уже известного боту. Неизвестная "
+        "личность не будет создана.",
     ),
-    "queue": ("📩 LAUKIANČIOS PARAIŠKOS", "📩 PENDING APPLICATIONS", "📩 ОЖИДАЮЩИЕ ЗАЯВКИ"),
     "admin_list": ("▤ PREKEIVIŲ SĄRAŠAS", "▤ MERCHANT LIST", "▤ СПИСОК ПРОДАВЦОВ"),
     "add": ("＋ PRIDĖTI PREKEIVĮ", "＋ ADD MERCHANT", "＋ ДОБАВИТЬ ПРОДАВЦА"),
     "settings": ("⚙ KATALOGO NUSTATYMAI", "⚙ DIRECTORY SETTINGS", "⚙ НАСТРОЙКИ КАТАЛОГА"),
-    "audit": ("▤ VEIKSMŲ ISTORIJA", "▤ ACTION HISTORY", "▤ ИСТОРИЯ ДЕЙСТВИЙ"),
     "admin_back": ("◀ ADMINISTRAVIMAS", "◀ ADMINISTRATION", "◀ АДМИНИСТРИРОВАНИЕ"),
     "manage_back": ("◀ PREKEIVIŲ VALDYMAS", "◀ MERCHANT MANAGEMENT", "◀ УПРАВЛЕНИЕ ПРОДАВЦАМИ"),
-    "approve": ("✓ PATVIRTINTI", "✓ APPROVE", "✓ ОДОБРИТЬ"),
-    "reject": ("× ATMESTI", "× REJECT", "× ОТКЛОНИТЬ"),
     "suspend": ("⏸ SUSTABDYTI", "⏸ SUSPEND", "⏸ ПРИОСТАНОВИТЬ"),
-    "restore": ("▶ ATKURTI ĮRAŠĄ", "▶ RESUME LISTING", "▶ ВОЗОБНОВИТЬ ЗАПИСЬ"),
-    "remove": ("× PAŠALINTI ĮRAŠĄ", "× REMOVE LISTING", "× УДАЛИТЬ ЗАПИСЬ"),
+    "restore": ("▶ ATNAUJINTI", "▶ RESUME", "▶ ВОЗОБНОВИТЬ"),
+    "remove": ("− PAŠALINTI ĮRAŠĄ", "− REMOVE LISTING", "− УДАЛИТЬ ЗАПИСЬ"),
     "empty": ("Įrašų kol kas nėra.", "No records yet.", "Записей пока нет."),
     "enabled": ("Katalogas", "Directory", "Каталог"),
-    "registrations": (
-        "Profilio pakeitimų prašymai",
-        "Profile change requests",
-        "Запросы на изменение профиля",
-    ),
     "publish_authors": (
         "Viešinti atsiliepimų autorius",
         "Publish review authors",
@@ -177,30 +137,18 @@ ROWS = {
         "Введите описание каталога на текущем языке (2–300 символов).",
     ),
     "saved": ("✓ IŠSAUGOTA", "✓ SAVED", "✓ СОХРАНЕНО"),
-    "CREATE": ("REGISTRACIJA", "REGISTRATION", "РЕГИСТРАЦИЯ"),
-    "EDIT": ("PAKEITIMAS", "CHANGE", "ИЗМЕНЕНИЕ"),
-    "REMOVE": ("PAŠALINIMO PRAŠYMAS", "REMOVAL REQUEST", "ЗАПРОС УДАЛЕНИЯ"),
-    "status_DRAFT": ("JUODRAŠTIS", "DRAFT", "ЧЕРНОВИК"),
-    "status_PENDING": ("LAUKIA PATVIRTINIMO", "PENDING", "ОЖИДАЕТ ОДОБРЕНИЯ"),
     "status_APPROVED": ("PATVIRTINTA", "APPROVED", "ОДОБРЕНО"),
-    "status_REJECTED": ("ATMESTA", "REJECTED", "ОТКЛОНЕНО"),
     "status_SUSPENDED": ("SUSTABDYTA", "SUSPENDED", "ПРИОСТАНОВЛЕНО"),
     "status_REMOVED": ("PAŠALINTA", "REMOVED", "УДАЛЕНО"),
-    "status_CANCELLED": ("ATŠAUKTA", "CANCELLED", "ОТОЗВАНО"),
     "err_invalid": (
         "Netinkama įvestis. Patikrink teksto ilgį ir pasirinktą reikšmę.",
         "Invalid input. Check the text length and selected value.",
         "Некорректные данные. Проверьте длину текста и выбранное значение.",
     ),
     "err_disabled": (
-        "Katalogas arba paraiškų priėmimas šiuo metu išjungtas.",
-        "The directory or application intake is currently disabled.",
-        "Каталог или приём заявок сейчас отключён.",
-    ),
-    "err_registration_closed": (
-        "Prekeivius į katalogą prideda tik administratorius.",
-        "Only administrators can add merchants to the directory.",
-        "Добавлять продавцов в каталог может только администратор.",
+        "Katalogas šiuo metu išjungtas.",
+        "The directory is currently disabled.",
+        "Каталог сейчас отключён.",
     ),
     "err_missing": (
         "Įrašas nepasiekiamas, pašalintas arba nepatvirtintas.",
@@ -218,9 +166,9 @@ ROWS = {
         "Активная запись SCAM не позволяет опубликовать этот профиль.",
     ),
     "err_duplicate": (
-        "Jau turi aktyvų įrašą arba laukiančią paraišką. Atidaryk „Mano įrašas“.",
-        "You already have a listing or open application. Open My Listing.",
-        "У вас уже есть запись или открытая заявка. Откройте «Моя запись».",
+        "Ši Telegram paskyra jau turi katalogo įrašą. Redaguok esamą įrašą.",
+        "This Telegram account already has a listing. Edit the existing listing.",
+        "У этого аккаунта Telegram уже есть запись. Отредактируйте существующую запись.",
     ),
     "err_stale": (
         "Šis valdiklis paseno. Atidaryk dabartinį įrašą arba meniu.",
@@ -228,9 +176,9 @@ ROWS = {
         "Этот элемент устарел. Откройте актуальную запись или меню.",
     ),
     "err_expired": (
-        "Įvesties arba juodraščio laikas baigėsi. Atidaryk meniu iš naujo.",
-        "The input session or draft expired. Reopen the menu.",
-        "Время ввода или черновика истекло. Откройте меню заново.",
+        "Redagavimo arba įvesties sesija baigėsi. Atidaryk redaktorių iš naujo.",
+        "The editing or input session expired. Reopen the editor.",
+        "Сессия редактирования или ввода истекла. Откройте редактор заново.",
     ),
     "err_rate": (
         "Per daug užklausų. Pabandyk vėliau.",
@@ -242,4 +190,33 @@ ROWS = {
         "Open the directory in a private chat with the bot.",
         "Откройте каталог в личном чате с ботом.",
     ),
+    "manage_title": ("PREKEIVIO VALDYMAS", "MERCHANT MANAGEMENT", "УПРАВЛЕНИЕ ПРОДАВЦОМ"),
+    "editor_title": ("PREKEIVIO REDAGAVIMAS", "EDIT MERCHANT", "РЕДАКТИРОВАНИЕ ПРОДАВЦА"),
+    "cancel_edit": ("× ATŠAUKTI", "× CANCEL", "× ОТМЕНА"),
+    "step_back": ("◀ ATGAL", "◀ BACK", "◀ НАЗАД"),
+    "delete_confirm": (
+        "Pašalinti prekeivį „<b>{name}</b>“ iš viešo katalogo? Informacija ir "
+        "reputacijos istorija bus išsaugota.",
+        "Remove merchant “<b>{name}</b>” from the public directory? Information and "
+        "reputation history will be retained.",
+        "Удалить продавца «<b>{name}</b>» из публичного каталога? Информация и "
+        "история репутации сохранятся.",
+    ),
+    "current_value": ("Dabartinė reikšmė", "Current value", "Текущее значение"),
+    "contact": ("Kontaktas", "Contact", "Контакт"),
+    "edit_contact": ("✎ KONTAKTAS", "✎ CONTACT", "✎ КОНТАКТ"),
+    "contact_default": (
+        "Susieta Telegram paskyra",
+        "Linked Telegram account",
+        "Связанный аккаунт Telegram",
+    ),
+    "contact_prompt": (
+        "Įvesk viešą @username arba HTTPS nuorodą (iki 200 simbolių). „-“ grąžina "
+        "susietos Telegram paskyros kontaktą; paskyros savininkas nesikeičia.",
+        "Enter a public @username or HTTPS link (up to 200 characters). “-” restores "
+        "the linked Telegram account contact; ownership stays unchanged.",
+        "Введите публичный @username или HTTPS-ссылку (до 200 символов). «-» "
+        "возвращает контакт связанного аккаунта Telegram; владелец не меняется.",
+    ),
+    "status_UNPUBLISHED": ("NEVIEŠINAMA", "NOT PUBLIC", "НЕ ОПУБЛИКОВАНО"),
 }

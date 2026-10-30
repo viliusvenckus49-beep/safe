@@ -1,17 +1,16 @@
 """Catalog transactions reuse existing identity/admin locks, REP and audit services."""
 
-import secrets
-from datetime import timedelta
+import re
+from urllib.parse import urlsplit
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete
 
 from app.errors import DomainError
-from app.merchant_catalog import DRAFT_TTL, bounded, city, grams, normalized, search, utc
+from app.merchant_catalog import bounded, city, grams, normalized, search
 from app.merchant_repository import MerchantRepository
 from app.models import (
     AuditEvent,
     MerchantEntry,
-    MerchantProposal,
     MerchantSearchGram,
     MerchantSettings,
     now,
@@ -73,14 +72,9 @@ class MerchantService:
         if admin:
             await self.core.require_admin(actor)
 
-    async def _owned(self, actor, entry_id, admin=False):
-        await self._write(actor, admin)
-        entry = await self.repo.entry(entry_id)
-        if entry is None:
-            raise DomainError("merchant_missing")
-        if not admin and entry.owner.telegram_id != actor:
-            raise DomainError("forbidden")
-        return entry
+    async def _locked_entry(self, actor, entry_id):
+        await self._write(actor, True)
+        return await self.editable(actor, entry_id)
 
     def _audit(self, actor, action, entry=None, **details):
         self.session.add(
@@ -92,231 +86,121 @@ class MerchantService:
             )
         )
 
-    async def begin(self, actor, kind="CREATE", *, entry_id=0, target_id=None, consent=False):
-        admin = target_id is not None
-        if kind not in ("CREATE", "EDIT", "REMOVE") or (kind == "CREATE" and not consent):
-            raise DomainError("merchant_invalid")
-        if kind == "CREATE" and not admin:
-            raise DomainError("merchant_registration_closed")
-        await self._write(actor, admin)
-        settings = await self.settings()
-        if not admin and (not settings.enabled or not settings.registrations) and kind != "REMOVE":
-            raise DomainError("merchant_disabled")
-        if entry_id:
-            entry = await self.repo.entry(entry_id)
-            if entry is None:
-                raise DomainError("merchant_missing")
-            if not admin and entry.owner.telegram_id != actor:
-                raise DomainError("forbidden")
-        else:
-            user = await self.core.repo.user_by_telegram(target_id or actor)
-            if user is None or user.telegram_id is None:
-                raise DomainError("merchant_identity")
-            entry = await self.repo.mine(user.telegram_id)
-            if entry is None:
-                entry = MerchantEntry(owner_user_id=user.id, status="DRAFT", version=1)
-                self.session.add(entry)
-                await self.session.flush()
-                entry = await self.repo.entry(entry.id)
-        if kind != "REMOVE" and await self.core.repo.has_scam_identity(entry.owner):
-            raise DomainError("merchant_blocked")
-        if kind == "CREATE" and entry.status not in ("DRAFT", "REJECTED", "REMOVED"):
-            raise DomainError("merchant_duplicate")
-        if kind in ("EDIT", "REMOVE") and entry.status not in ("APPROVED", "SUSPENDED"):
-            raise DomainError("merchant_stale")
-        old = await self.repo.open_proposal(entry.id)
-        if old:
-            if old.status == "DRAFT" and utc(old.expires_at) < now():
-                old.status = "CANCELLED"
-                old.version += 1
-                self._audit(actor, "draft_expired", entry, proposal_id=old.id)
-                await self.session.flush()
-            elif old.status == "DRAFT" and old.kind == kind:
-                await self.session.commit()
-                return old
-            else:
-                raise DomainError("merchant_duplicate")
-        if not admin:
-            count = await self.session.scalar(
-                select(func.count())
-                .select_from(MerchantProposal)
-                .where(
-                    MerchantProposal.actor_id == actor,
-                    MerchantProposal.created_at >= now() - timedelta(days=1),
-                )
-            )
-            if count >= 3:
-                raise DomainError("merchant_rate")
-        proposal = MerchantProposal(
-            entry_id=entry.id,
-            actor_id=actor,
-            kind=kind,
-            status="DRAFT",
-            name=entry.name if kind == "EDIT" else None,
-            city_code=entry.city_code if kind == "EDIT" else None,
-            description=entry.description if kind == "EDIT" else None,
-            base_version=entry.version,
-            version=1,
-            request_key=secrets.token_hex(16),
-            expires_at=now() + timedelta(seconds=DRAFT_TTL),
-        )
-        self.session.add(proposal)
-        await self.session.flush()
-        self._audit(
-            actor,
-            "draft_created",
-            entry,
-            proposal_id=proposal.id,
-            kind=kind,
-            lawful_consent=bool(consent),
-            consent_actor=actor,
-            policy_version=1,
-        )
-        await self.session.commit()
-        return proposal
-
-    async def proposal(self, actor, proposal_id, *, admin=False, lock=False):
-        if admin:
-            await self.core.require_admin(actor)
-        proposal = await self.session.get(MerchantProposal, proposal_id, populate_existing=True)
-        if proposal is None:
-            raise DomainError("merchant_missing")
-        entry = await (
-            self._owned(actor, proposal.entry_id, admin)
-            if lock
-            else self.repo.entry(proposal.entry_id)
-        )
-        if not admin and entry.owner.telegram_id != actor:
-            raise DomainError("forbidden")
-        if lock:
-            await self.session.refresh(proposal)
-        return proposal, entry
-
     @staticmethod
-    def validate_fields(name, city_code, description):
-        name = bounded(name or "", 2, 64)
-        if "\n" in name or len(normalized(name)) > 128:
-            raise DomainError("merchant_invalid")
-        return name, city(city_code or ""), bounded(description or "", 10, 600)
-
-    async def update_draft(self, actor, proposal_id, field, value, version, *, admin=False):
-        proposal, entry = await self.proposal(actor, proposal_id, admin=admin, lock=True)
-        if proposal.kind == "CREATE" and not admin:
-            raise DomainError("merchant_registration_closed")
-        if proposal.kind == "REMOVE":
-            raise DomainError("merchant_invalid")
-        if proposal.status != "DRAFT" or proposal.version != version:
-            raise DomainError("merchant_stale")
-        if utc(proposal.expires_at) < now():
-            raise DomainError("merchant_expired")
+    def validate_field(field, value):
         if field == "city_code":
-            value = city(value)
-        elif field == "name":
-            value = bounded(value, 2, 64)
+            return city(value)
+        if field == "name":
+            value = bounded(value or "", 2, 64)
             if "\n" in value or len(normalized(value)) > 128:
                 raise DomainError("merchant_invalid")
-        elif field == "description":
-            value = bounded(value, 10, 600)
-        else:
+            return value
+        if field == "description":
+            return bounded(value or "", 10, 600)
+        if field == "contact":
+            if value in (None, "", "-"):
+                return None
+            value = bounded(value, 5, 200)
+            if re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}", value):
+                return value
+            try:
+                url = urlsplit(value)
+            except ValueError:
+                raise DomainError("merchant_invalid") from None
+            if (
+                url.scheme != "https"
+                or not url.hostname
+                or url.username
+                or url.password
+                or any(c.isspace() for c in value)
+                or "\\" in value
+            ):
+                raise DomainError("merchant_invalid")
+            try:
+                if url.port not in (None, 443):
+                    raise ValueError
+                url.hostname.encode("idna")
+            except (ValueError, UnicodeError):
+                raise DomainError("merchant_invalid") from None
+            return value
+        raise DomainError("merchant_invalid")
+
+    async def editable(self, actor, entry_id):
+        await self.core.require_admin(actor)
+        entry = await self.repo.entry(entry_id)
+        if entry is None:
+            raise DomainError("merchant_missing")
+        return entry
+
+    async def creation_target(self, actor, target_id):
+        await self.core.require_admin(actor)
+        if type(target_id) is not int or not 0 < target_id <= 9223372036854775807:
+            raise DomainError("merchant_identity")
+        user = await self.core.repo.user_by_telegram(target_id)
+        if user is None:
+            raise DomainError("merchant_identity")
+        if await self.repo.mine(target_id) is not None:
+            raise DomainError("merchant_duplicate")
+        if await self.core.repo.has_scam_identity(user):
+            raise DomainError("merchant_blocked")
+        return user
+
+    async def save(self, actor, entry_id, version, changes, *, target_id=0):
+        """One serialized, version-checked write; never creates an application."""
+        await self._write(actor, True)
+        if not isinstance(changes, dict) or not set(changes) <= {
+            "name",
+            "description",
+            "city_code",
+            "contact",
+        }:
             raise DomainError("merchant_invalid")
-        setattr(proposal, field, value)
-        proposal.version += 1
-        self._audit(actor, "draft_updated", entry, proposal_id=proposal.id, field=field)
-        await self.session.commit()
-        return proposal
-
-    async def submit(self, actor, proposal_id, version, *, admin=False):
-        proposal, entry = await self.proposal(actor, proposal_id, admin=admin, lock=True)
-        if proposal.kind == "CREATE" and not admin:
-            raise DomainError("merchant_registration_closed")
-        if (
-            proposal.status != "DRAFT"
-            or proposal.version != version
-            or entry.version != proposal.base_version
-        ):
-            raise DomainError("merchant_stale")
-        if utc(proposal.expires_at) < now():
-            raise DomainError("merchant_expired")
-        settings = await self.settings()
-        if proposal.kind != "REMOVE":
-            if not admin and (not settings.enabled or not settings.registrations):
-                raise DomainError("merchant_disabled")
-            if await self.core.repo.has_scam_identity(entry.owner):
-                raise DomainError("merchant_blocked")
-            self.validate_fields(proposal.name, proposal.city_code, proposal.description)
-        proposal.status = "PENDING"
-        proposal.version += 1
-        if proposal.kind == "CREATE":
-            entry.status = "PENDING"
-        self._audit(actor, "submitted", entry, proposal_id=proposal.id, kind=proposal.kind)
-        await self.session.commit()
-        return proposal
-
-    async def cancel(self, actor, proposal_id, version):
-        proposal, entry = await self.proposal(actor, proposal_id, lock=True)
-        if proposal.status not in ("DRAFT", "PENDING") or proposal.version != version:
-            raise DomainError("merchant_stale")
-        proposal.status = "CANCELLED"
-        proposal.version += 1
-        if proposal.kind == "CREATE":
-            entry.status = "REMOVED"
-            entry.version += 1
-        self._audit(actor, "cancelled", entry, proposal_id=proposal.id)
-        await self.session.commit()
-
-    async def moderate(self, actor, proposal_id, version, approve, reason=""):
-        proposal, entry = await self.proposal(actor, proposal_id, admin=True, lock=True)
-        final = "APPROVED" if approve else "REJECTED"
-        if proposal.status == final:
-            await self.session.commit()
-            return proposal
-        if proposal.status != "PENDING" or proposal.version != version:
-            raise DomainError("merchant_stale")
-        if not approve:
-            reason = bounded(reason, 3, 600)
-        if approve:
-            if entry.owner.telegram_id is None:
-                raise DomainError("merchant_identity")
-            if entry.version != proposal.base_version:
+        if entry_id:
+            entry = await self.editable(actor, entry_id)
+            if entry.version != version or entry.status == "REMOVED":
                 raise DomainError("merchant_stale")
-            if proposal.kind == "REMOVE":
-                entry.status = "REMOVED"
-            else:
-                if await self.core.repo.has_scam_identity(entry.owner):
-                    raise DomainError("merchant_blocked")
-                name, code, description = self.validate_fields(
-                    proposal.name, proposal.city_code, proposal.description
-                )
-                entry.name = name
-                entry.name_key = normalized(name)
-                entry.city_code = code
-                entry.description = description
-                if proposal.kind == "CREATE":
-                    entry.status = "APPROVED"
-                entry.approved_at = now()
-                entry.approved_by = actor
-                entry.reason = None
-                await self.session.execute(
-                    delete(MerchantSearchGram).where(MerchantSearchGram.entry_id == entry.id)
-                )
-                self.session.add_all(
-                    [MerchantSearchGram(entry_id=entry.id, token=g) for g in grams(entry.name_key)]
-                )
-            entry.version += 1
-        elif proposal.kind == "CREATE":
-            entry.status = "REJECTED"
-            entry.version += 1
-        proposal.status = final
-        proposal.reason = reason or None
-        proposal.moderated_by = actor
-        proposal.moderated_at = now()
-        proposal.version += 1
-        self._audit(actor, final.lower(), entry, proposal_id=proposal.id, kind=proposal.kind)
+        else:
+            user = await self.creation_target(actor, target_id)
+            entry = MerchantEntry(owner_user_id=user.id, status="DRAFT", version=1)
+            self.session.add(entry)
+        values = {}
+        for field in ("name", "city_code", "description", "contact"):
+            original = getattr(entry, field, None)
+            candidate = changes.get(field, original)
+            validated = self.validate_field(field, candidate)
+            # Saving another field must not normalize or trim historical content.
+            values[field] = original if entry_id and candidate == original else validated
+        if entry.owner_user_id is None:
+            raise DomainError("merchant_identity")
+        # Identity ownership and reputation never change when editing public contacts.
+        owner = await self.core.repo.user_by_id(entry.owner_user_id)
+        if owner is None or owner.telegram_id is None:
+            raise DomainError("merchant_identity")
+        if await self.core.repo.has_scam_identity(owner):
+            raise DomainError("merchant_blocked")
+        changed = [k for k, v in values.items() if getattr(entry, k, None) != v]
+        for field, value in values.items():
+            setattr(entry, field, value)
+        entry.name_key = normalized(entry.name)
+        if entry.status in ("DRAFT", "PENDING", "REJECTED"):
+            entry.status = "APPROVED"
+            entry.approved_at = now()
+            entry.approved_by = actor
+        entry.version += 1
+        await self.session.flush()
+        await self.session.execute(
+            delete(MerchantSearchGram).where(MerchantSearchGram.entry_id == entry.id)
+        )
+        self.session.add_all(
+            [MerchantSearchGram(entry_id=entry.id, token=g) for g in grams(entry.name_key)]
+        )
+        self._audit(actor, "updated" if entry_id else "created", entry, fields=changed)
+        saved_id = entry.id
         await self.session.commit()
-        return proposal
+        return await self.repo.entry(saved_id)
 
     async def change_status(self, actor, entry_id, version, status, reason=""):
-        entry = await self._owned(actor, entry_id, admin=True)
+        entry = await self._locked_entry(actor, entry_id)
         if entry.version != version or status not in ("SUSPENDED", "APPROVED", "REMOVED"):
             raise DomainError("merchant_stale")
         if status == "APPROVED":
@@ -326,11 +210,17 @@ class MerchantService:
                 raise DomainError("merchant_blocked")
         elif status == "SUSPENDED" and entry.status != "APPROVED":
             raise DomainError("merchant_stale")
-        elif status == "REMOVED" and entry.status not in ("APPROVED", "SUSPENDED"):
+        elif status == "REMOVED" and entry.status not in (
+            "APPROVED",
+            "SUSPENDED",
+            "DRAFT",
+            "PENDING",
+            "REJECTED",
+        ):
             raise DomainError("merchant_stale")
         previous = entry.status
         entry.status = status
-        entry.reason = bounded(reason, 3, 600) if status != "APPROVED" else None
+        entry.reason = bounded(reason, 3, 600) if reason and status != "APPROVED" else None
         entry.version += 1
         self._audit(actor, "status", entry, previous=previous, status=status)
         await self.session.commit()
@@ -343,7 +233,7 @@ class MerchantService:
             raise DomainError("merchant_stale")
         if row not in self.session:
             self.session.add(row)
-        if field in ("enabled", "registrations", "publish_authors"):
+        if field in ("enabled", "publish_authors"):
             if type(value) is not bool:
                 raise DomainError("merchant_invalid")
             setattr(row, field, value)
@@ -358,48 +248,3 @@ class MerchantService:
         self._audit(actor, "settings", field=field, language=lang)
         await self.session.commit()
         return row
-
-    async def pending(self, actor, page=0):
-        await self.core.require_admin(actor)
-        total = int(
-            await self.session.scalar(
-                select(func.count())
-                .select_from(MerchantProposal)
-                .where(MerchantProposal.status == "PENDING")
-            )
-            or 0
-        )
-        page = min(max(0, page), max(0, (total - 1) // 6))
-        rows = list(
-            await self.session.scalars(
-                select(MerchantProposal)
-                .where(MerchantProposal.status == "PENDING")
-                .order_by(MerchantProposal.created_at, MerchantProposal.id)
-                .limit(6)
-                .offset(page * 6)
-            )
-        )
-        return rows, total, page
-
-    async def history(self, actor, entry_id=0, page=0):
-        await self.core.require_admin(actor)
-        conditions = [AuditEvent.action.startswith("merchant_")]
-        if entry_id:
-            conditions.append(AuditEvent.details["merchant_id"].as_integer() == entry_id)
-        total = int(
-            await self.session.scalar(
-                select(func.count()).select_from(AuditEvent).where(*conditions)
-            )
-            or 0
-        )
-        page = min(max(0, page), max(0, (total - 1) // 5))
-        rows = list(
-            await self.session.scalars(
-                select(AuditEvent)
-                .where(*conditions)
-                .order_by(AuditEvent.id.desc())
-                .limit(5)
-                .offset(page * 5)
-            )
-        )
-        return rows, total, page

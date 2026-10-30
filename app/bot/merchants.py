@@ -1,6 +1,8 @@
-"""Private merchant directory, owner forms and existing-admin catalog management."""
+"""Private directory and direct administration; no application workflows."""
 
+import secrets
 import time
+from html import escape
 
 import structlog
 from aiogram import F, Router
@@ -21,7 +23,7 @@ from app.bot.screens import clear_flow, render
 from app.bot.states import MerchantFlow
 from app.errors import DomainError
 from app.i18n import language, t
-from app.merchant_catalog import INPUT_TTL
+from app.merchant_catalog import DRAFT_TTL, INPUT_TTL
 from app.merchant_services import MerchantService
 
 
@@ -35,7 +37,7 @@ async def panel(message, state, text, markup):
     await state.update_data(merchant_panel=anchor, screen_message_id=anchor)
 
 
-async def prompt(message, state, mode, text, *, entry=0, version=0, admin=False):
+async def prompt(message, state, mode, text, *, entry=0, version=0, admin=False, markup=None):
     await state.set_state(MerchantFlow.input)
     await state.update_data(
         mc_input={
@@ -46,7 +48,7 @@ async def prompt(message, state, mode, text, *, entry=0, version=0, admin=False)
             "until": time.time() + INPUT_TTL,
         }
     )
-    await panel(message, state, text, base_kb.keyboard([[kb.back(admin)]]))
+    await panel(message, state, text, markup or base_kb.keyboard([[kb.back(admin)]]))
 
 
 async def show_list(message, state, cat, actor, limiter, *, page=0, admin=False, city=None):
@@ -70,71 +72,72 @@ async def show_list(message, state, cat, actor, limiter, *, page=0, admin=False,
     await panel(message, state, text, markup)
 
 
-async def show_draft(message, state, cat, actor, proposal_id, admin=False):
-    proposal, entry = await cat.proposal(actor, proposal_id, admin=admin)
-    await panel(message, state, view.proposal_card(proposal, entry), kb.draft(proposal, admin))
+async def show_editor(message, state):
+    editor = (await state.get_data()).get("mc_editor")
+    if not editor or time.time() > editor["until"]:
+        raise DomainError("merchant_expired")
+    await state.set_state(None)
+    await state.update_data(mc_input=None)
+    await panel(
+        message,
+        state,
+        view.editor_card(editor["values"], editor["default_contact"]),
+        kb.editor(editor),
+    )
 
 
-async def continue_draft(message, state, cat, actor, proposal_id, admin=False):
-    proposal, entry = await cat.proposal(actor, proposal_id, admin=admin)
-    if not proposal.city_code:
-        await panel(
-            message,
-            state,
-            view.heading("terms_title") + "\n\n" + t("mc.city_prompt"),
-            kb.draft_cities(proposal, admin),
-        )
-    elif not proposal.name:
-        await prompt(
-            message,
-            state,
-            "name",
-            t("mc.name_prompt"),
-            entry=proposal.id,
-            version=proposal.version,
-            admin=admin,
-        )
-    elif not proposal.description:
-        await prompt(
-            message,
-            state,
-            "description",
-            t("mc.description_prompt"),
-            entry=proposal.id,
-            version=proposal.version,
-            admin=admin,
-        )
-    else:
-        await show_draft(message, state, cat, actor, proposal.id, admin)
+async def editor_session(state, actor, entry, revision, *, allow_expired=False):
+    editor = (await state.get_data()).get("mc_editor") or {}
+    if (
+        not editor
+        or editor.get("actor") != actor
+        or editor.get("entry") != entry
+        or editor.get("revision") != revision
+    ):
+        raise DomainError("merchant_stale")
+    if not allow_expired and time.time() > editor["until"]:
+        raise DomainError("merchant_expired")
+    return editor
+
+
+async def start_editor(message, state, actor, *, entry=None, target_id=0, owner=None):
+    owner = entry.owner if entry else owner
+    contact = ("@" + owner.username if owner.username else str(owner.telegram_id)) if owner else ""
+    await state.update_data(
+        mc_editor={
+            "actor": actor,
+            "entry": entry.id if entry else 0,
+            "default_contact": contact,
+            "base_version": entry.version if entry else 0,
+            "target_id": target_id,
+            "revision": secrets.randbelow(1000000000) + 1,
+            "until": time.time() + DRAFT_TTL,
+            "values": {
+                field: getattr(entry, field, None)
+                for field in ("name", "description", "city_code", "contact")
+            },
+        }
+    )
+    await show_editor(message, state)
 
 
 async def show_mine(message, state, cat, actor):
     entry = await cat.repo.mine(actor)
     if entry is None:
         raise DomainError("merchant_missing")
-    proposal = await cat.repo.open_proposal(entry.id) or await cat.repo.latest_proposal(entry.id)
     blocked = await cat.core.repo.has_scam_identity(entry.owner)
-    text = view.private_entry(entry, proposal)
+    text = view.private_entry(entry)
     if blocked:
         text += "\n\n" + t("error.merchant_blocked")
-    await panel(message, state, text, kb.mine(entry, proposal, blocked=blocked))
+    await panel(message, state, text, kb.mine(entry, blocked=blocked))
 
 
 async def show_admin_entry(message, state, cat, actor, entry_id):
-    await cat.core.require_admin(actor)
-    entry = await cat.repo.entry(entry_id)
-    if entry is None:
-        raise DomainError("merchant_missing")
-    proposal = await cat.repo.open_proposal(entry.id) or await cat.repo.latest_proposal(entry.id)
-    text = view.private_entry(entry, proposal)
+    entry = await cat.editable(actor, entry_id)
+    text = view.private_entry(entry, admin=True)
     if await cat.core.repo.has_scam_identity(entry.owner):
         text += "\n\n" + t("error.merchant_blocked")
-    markup = kb.admin_entry(entry)
-    if proposal:
-        markup.inline_keyboard.insert(
-            0, [base_kb.inline_button(t("mc.preview"), callback_data=kb.cb("a_draft", proposal.id))]
-        )
-    await panel(message, state, text, markup)
+    await panel(message, state, text, kb.admin_entry(entry))
 
 
 def ordinary_input(message):
@@ -194,6 +197,7 @@ def register_merchant_handlers(router: Router):
             if route == "root":
                 await clear_flow(state)
                 if admin:
+                    await state.update_data(mc_context=context.get("mc_context"))
                     await panel(message, state, view.heading("admin"), kb.admin_root())
                 else:
                     settings = await cat.settings()
@@ -295,117 +299,117 @@ def register_merchant_handlers(router: Router):
                 return
             elif route == "mine" and not admin:
                 await show_mine(message, state, cat, actor)
-            elif route == "terms":
-                if not admin:
-                    raise DomainError("merchant_registration_closed")
-                await panel(
-                    message,
-                    state,
-                    view.heading("terms_title") + "\n\n" + t("mc.terms"),
-                    kb.terms(admin),
-                )
-            elif route == "target" and admin:
+            elif route == "entry" and admin:
+                await state.update_data(mc_editor=None, mc_delete=None)
+                await show_admin_entry(message, state, cat, actor, data.entry)
+            elif route == "create" and admin:
+                await state.update_data(mc_editor=None)
                 await prompt(message, state, "target", t("mc.target_prompt"), admin=True)
-            elif route == "begin" and not admin:
-                proposal = await cat.begin(actor, consent=True)
-                await continue_draft(message, state, cat, actor, proposal.id)
-            elif route == "edit":
-                entry = await (cat.repo.entry(data.entry) if admin else cat.repo.mine(actor))
-                if entry is None or entry.id != data.entry:
-                    raise DomainError("forbidden")
-                proposal = await cat.begin(
-                    actor,
-                    "EDIT",
-                    entry_id=entry.id,
-                    target_id=entry.owner.telegram_id if admin else None,
-                )
-                await show_draft(message, state, cat, actor, proposal.id, admin)
-            elif route == "draft":
-                await show_draft(message, state, cat, actor, data.entry, admin)
-            elif route in ("name", "description", "city"):
-                proposal, entry = await cat.proposal(actor, data.entry, admin=admin)
-                if proposal.version != data.version or proposal.status != "DRAFT":
+            elif route == "editor" and admin:
+                entry = await cat.editable(actor, data.entry)
+                if entry.version != data.version or entry.status == "REMOVED":
                     raise DomainError("merchant_stale")
-                if route == "city":
-                    await panel(
-                        message, state, t("mc.city_prompt"), kb.draft_cities(proposal, admin)
-                    )
-                else:
-                    await prompt(
-                        message,
-                        state,
-                        route,
-                        t("mc." + route + "_prompt"),
-                        entry=proposal.id,
-                        version=proposal.version,
-                        admin=admin,
-                    )
-            elif route == "setcity":
-                proposal = await cat.update_draft(
-                    actor, data.entry, "city_code", data.value, data.version, admin=admin
+                await start_editor(message, state, actor, entry=entry)
+            elif route in ("field", "cityvalue", "editback", "commit", "discard") and admin:
+                editor = await editor_session(
+                    state, actor, data.entry, data.version, allow_expired=route == "discard"
                 )
-                await continue_draft(message, state, cat, actor, proposal.id, admin)
-            elif route == "submit":
-                proposal = await cat.submit(actor, data.entry, data.version, admin=admin)
-                await show_draft(message, state, cat, actor, proposal.id, admin)
-            elif route == "cancel" and not admin:
-                await cat.cancel(actor, data.entry, data.version)
-                await show_mine(message, state, cat, actor)
-            elif route == "removal" and not admin:
-                entry = await cat.repo.mine(actor)
-                if entry is None or entry.id != data.entry:
-                    raise DomainError("forbidden")
+                if route == "discard":
+                    await state.update_data(mc_editor=None)
+                    if editor["entry"]:
+                        await show_admin_entry(message, state, cat, actor, editor["entry"])
+                    else:
+                        await panel(message, state, view.heading("admin"), kb.admin_root())
+                elif route == "commit":
+                    entry = await cat.save(
+                        actor,
+                        editor["entry"],
+                        editor["base_version"],
+                        editor["values"],
+                        target_id=editor["target_id"],
+                    )
+                    await state.update_data(mc_editor=None)
+                    await show_admin_entry(message, state, cat, actor, entry.id)
+                elif route == "editback":
+                    await show_editor(message, state)
+                elif route == "cityvalue":
+                    editor["values"]["city_code"] = cat.validate_field("city_code", data.value)
+                    editor["revision"] += 1
+                    await state.update_data(mc_editor=editor)
+                    await show_editor(message, state)
+                else:
+                    field = data.value
+                    if field not in ("name", "description", "city_code", "contact"):
+                        raise DomainError("merchant_invalid")
+                    text = view.field_prompt(field, editor["values"], editor["default_contact"])
+                    if field == "city_code":
+                        await panel(message, state, text, kb.editor_cities(editor))
+                    else:
+                        await prompt(
+                            message,
+                            state,
+                            "field_" + field,
+                            text,
+                            entry=editor["entry"],
+                            version=editor["revision"],
+                            admin=True,
+                            markup=base_kb.keyboard([[kb.field_back(editor)]]),
+                        )
+            elif route == "suspend" and admin:
+                await cat.change_status(actor, data.entry, data.version, "SUSPENDED")
+                await show_admin_entry(message, state, cat, actor, data.entry)
+            elif route == "restore" and admin:
+                await cat.change_status(actor, data.entry, data.version, "APPROVED")
+                await show_admin_entry(message, state, cat, actor, data.entry)
+            elif route == "remove" and admin:
+                entry = await cat.editable(actor, data.entry)
+                if entry.version != data.version or entry.status == "REMOVED":
+                    raise DomainError("merchant_stale")
+                token = secrets.token_hex(6)
+                await state.update_data(
+                    mc_delete={
+                        "entry": entry.id,
+                        "version": entry.version,
+                        "token": token,
+                        "until": time.time() + INPUT_TTL,
+                    }
+                )
                 await panel(
                     message,
                     state,
-                    t("mc.remove_confirm"),
+                    t("mc.delete_confirm", name=escape(entry.name or entry.owner.display_name)),
                     base_kb.keyboard(
                         [
-                            [kb.button("confirm", "requestremove", entry.id)],
-                            [kb.button("back_mine", "mine")],
+                            [
+                                kb.button(
+                                    "confirm",
+                                    "a_delete",
+                                    entry.id,
+                                    version=entry.version,
+                                    value=token,
+                                )
+                            ],
+                            [kb.button("cancel_edit", "a_entry", entry.id)],
                         ]
                     ),
                 )
-            elif route == "requestremove" and not admin:
-                proposal = await cat.begin(actor, "REMOVE", entry_id=data.entry)
-                await cat.submit(actor, proposal.id, proposal.version)
-                await show_mine(message, state, cat, actor)
-            elif route == "queue" and admin:
-                rows, total, page = await cat.pending(actor, data.page)
-                buttons = [
-                    [(f"#{row.id} · {t('mc.' + row.kind)}", kb.cb("a_draft", row.id))]
-                    for row in rows
-                ]
-                buttons.extend([kb.pages("a_queue", page, total, 6), [kb.back(True)]])
-                await panel(
-                    message,
-                    state,
-                    view.heading("queue") + "\n\n" + (str(total) if rows else t("mc.empty")),
-                    base_kb.keyboard(buttons),
-                )
-            elif route == "entry" and admin:
-                await show_admin_entry(message, state, cat, actor, data.entry)
-            elif route == "approve" and admin:
-                proposal = await cat.moderate(actor, data.entry, data.version, True)
-                await show_admin_entry(message, state, cat, actor, proposal.entry_id)
-            elif route in ("reject", "suspend", "remove") and admin:
-                await prompt(
-                    message,
-                    state,
-                    route,
-                    t("mc.reason_prompt"),
-                    entry=data.entry,
-                    version=data.version,
-                    admin=True,
-                )
-            elif route == "restore" and admin:
-                await cat.change_status(actor, data.entry, data.version, "APPROVED")
+            elif route == "delete" and admin:
+                confirm = context.get("mc_delete") or {}
+                if (
+                    confirm.get("entry") != data.entry
+                    or confirm.get("version") != data.version
+                    or confirm.get("token") != data.value
+                    or time.time() > confirm.get("until", 0)
+                ):
+                    raise DomainError("merchant_stale")
+                await cat.change_status(actor, data.entry, data.version, "REMOVED")
+                await state.update_data(mc_delete=None, mc_editor=None)
                 await show_admin_entry(message, state, cat, actor, data.entry)
             elif route == "settings" and admin:
                 row = await cat.settings()
                 await panel(message, state, view.settings_card(row), kb.settings(row))
             elif route == "toggle" and admin:
-                if data.value not in ("enabled", "registrations", "publish_authors"):
+                if data.value not in ("enabled", "publish_authors"):
                     raise DomainError("merchant_invalid")
                 row = await cat.settings()
                 row = await cat.configure(
@@ -422,21 +426,6 @@ def register_merchant_handlers(router: Router):
                     t("mc." + data.value + "_prompt"),
                     version=data.version,
                     admin=True,
-                )
-            elif route == "audit" and admin:
-                rows, total, page = await cat.history(actor, data.entry, data.page)
-                text = view.heading("audit")
-                for row in rows:
-                    text += f"\n\n{row.id} · {utc_date(row.created_at)}\n<code>{t('mc.audit_' + row.action.removeprefix('merchant_'))}</code> · <code>{row.actor_id}</code> · #{row.details.get('merchant_id') or '—'}"
-                if not rows:
-                    text += "\n\n" + t("mc.empty")
-                await panel(
-                    message,
-                    state,
-                    text,
-                    base_kb.keyboard(
-                        [kb.pages("a_audit", page, total, 5, entry=data.entry), [kb.back(True)]]
-                    ),
                 )
             else:
                 raise DomainError("merchant_stale")
@@ -472,6 +461,8 @@ def register_merchant_handlers(router: Router):
                 raise DomainError("merchant_expired")
             if admin:
                 await service.require_admin(actor)
+            if not admin:
+                raise DomainError("merchant_stale")
             if mode == "search":
                 if not admin:
                     raise DomainError("merchant_stale")
@@ -481,35 +472,19 @@ def register_merchant_handlers(router: Router):
                 search(query)
                 await state.update_data(mc_context={"city": "", "query": query, "admin": admin})
                 await show_list(target, state, cat, actor, limiter, admin=admin)
-            elif mode in ("name", "description"):
-                proposal = await cat.update_draft(
-                    actor, draft["entry"], mode, message.text, draft["version"], admin=admin
-                )
-                await continue_draft(target, state, cat, actor, proposal.id, admin)
+            elif mode and mode.startswith("field_") and admin:
+                editor = await editor_session(state, actor, draft["entry"], draft["version"])
+                field = mode[6:]
+                editor["values"][field] = cat.validate_field(field, message.text)
+                editor["revision"] += 1
+                await state.update_data(mc_editor=editor)
+                await show_editor(target, state)
             elif mode == "target" and admin:
                 text = message.text.strip()
-                if (
-                    not text.isascii()
-                    or not text.isdigit()
-                    or not 0 < int(text) <= 9223372036854775807
-                ):
+                if not text.isascii() or not text.isdigit():
                     raise DomainError("merchant_identity")
-                proposal = await cat.begin(actor, target_id=int(text), consent=True)
-                await continue_draft(target, state, cat, actor, proposal.id, True)
-            elif mode == "reject" and admin:
-                proposal = await cat.moderate(
-                    actor, draft["entry"], draft["version"], False, message.text
-                )
-                await show_admin_entry(target, state, cat, actor, proposal.entry_id)
-            elif mode in ("suspend", "remove") and admin:
-                await cat.change_status(
-                    actor,
-                    draft["entry"],
-                    draft["version"],
-                    "SUSPENDED" if mode == "suspend" else "REMOVED",
-                    message.text,
-                )
-                await show_admin_entry(target, state, cat, actor, draft["entry"])
+                owner = await cat.creation_target(actor, int(text))
+                await start_editor(target, state, actor, target_id=int(text), owner=owner)
             elif mode in ("copy_title", "copy_intro") and admin:
                 row = await cat.configure(
                     actor, draft["version"], mode[5:], message.text, lang=language.get()
@@ -533,20 +508,24 @@ def register_merchant_handlers(router: Router):
                 "merchant_expired",
                 "merchant_stale",
                 "forbidden",
-                "merchant_registration_closed",
             ):
                 await state.set_state(None)
                 await state.update_data(mc_input=None)
-            await panel(target, state, error_text(error), base_kb.keyboard([[kb.back(admin)]]))
+            editor = (await state.get_data()).get("mc_editor")
+            if error.code in ("merchant_expired", "forbidden"):
+                await state.update_data(mc_editor=None)
+                editor = None
+            markup = (
+                base_kb.keyboard([[kb.field_back(editor)]])
+                if editor and admin
+                else base_kb.keyboard([[kb.back(admin)]])
+            )
+            if error.code == "forbidden":
+                markup = base_kb.keyboard([[(t("mc.home"), base_kb.action("home"))]])
+            await panel(target, state, error_text(error), markup)
         except (SQLAlchemyError, RedisError) as error:
             await service.session.rollback()
             structlog.get_logger().warning(
                 "merchant_storage_unavailable", exception_type=type(error).__name__
             )
             await panel(target, state, t("p.error"), base_kb.keyboard([[kb.back(admin)]]))
-
-
-def utc_date(value):
-    from app.merchant_catalog import utc
-
-    return utc(value).strftime("%d.%m.%Y %H:%M")

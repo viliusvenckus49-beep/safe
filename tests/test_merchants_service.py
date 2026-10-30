@@ -1,6 +1,6 @@
-"""Phase C: durable proposals, atomic moderation, ownership and privacy boundaries."""
+"""Direct administrator transactions, preservation, authorization and concurrency."""
 
-from datetime import timedelta
+import asyncio
 
 import pytest
 from sqlalchemy import func, select
@@ -15,7 +15,6 @@ from app.models import (
     MerchantSettings,
     ScamRecord,
     TrustedDesignation,
-    now,
 )
 from app.services import Service
 
@@ -28,278 +27,270 @@ async def setup(session, settings):
     return MerchantService(core)
 
 
-async def submitted(cat, actor=42):
-    p = await cat.begin(900, target_id=actor, consent=True)
-    for field, value in (
-        ("city_code", "vilnius"),
-        ("name", "North Studio"),
-        ("description", "Legal professional services"),
-    ):
-        p = await cat.update_draft(900, p.id, field, value, p.version, admin=True)
-    return await cat.submit(900, p.id, p.version, admin=True)
+def fields(**changes):
+    return {
+        "name": "North Studio",
+        "city_code": "vilnius",
+        "description": "Legal professional services",
+        **changes,
+    }
 
 
-async def test_registration_persists_and_only_approval_publishes(database, settings):
+async def created(cat, target=42):
+    return await cat.save(900, 0, 0, fields(), target_id=target)
+
+
+async def test_direct_creation_is_durable_public_without_application_or_trust(database, settings):
     async with database() as s:
         cat = await setup(s, settings)
-        p = await submitted(cat)
-        pid = p.id
-        assert (await cat.listing())[1] == 0
-    async with database() as s:
-        cat = MerchantService(Service(settings, s))
-        p = await s.get(MerchantProposal, pid)
-        await cat.moderate(900, p.id, p.version, True)
-        entry = await cat.repo.mine(42)
-        assert (await cat.public(entry.id)).name == "North Studio"
+        entry = await created(cat)
+        eid = entry.id
+        assert entry.status == "APPROVED"
+        assert (await cat.listing())[1] == 1
+        assert await s.scalar(select(func.count()).select_from(MerchantProposal)) == 0
         assert await s.scalar(select(func.count()).select_from(TrustedDesignation)) == 0
-        before = await s.scalar(select(func.count()).select_from(AuditEvent))
-        await cat.moderate(900, p.id, p.version - 1, True)
-        assert await s.scalar(select(func.count()).select_from(AuditEvent)) == before
+    async with database() as s:
+        assert (await MerchantService(Service(settings, s)).public(eid)).name == "North Studio"
 
 
-async def test_proposal_owner_and_admin_permissions_are_server_checked(database, settings):
+@pytest.mark.parametrize("operation", ["create", "read", "edit", "status", "settings", "target"])
+async def test_non_admin_cannot_manage_even_own_entry(database, settings, operation):
     async with database() as s:
         cat = await setup(s, settings)
-        p = await submitted(cat)
-        pid, version = p.id, p.version
-        for op in ("read", "update", "approve"):
-            with pytest.raises(DomainError) as e:
-                if op == "read":
-                    await cat.proposal(43, pid)
-                elif op == "update":
-                    await cat.update_draft(43, pid, "name", "Hijack", version)
-                else:
-                    await cat.moderate(43, pid, version, True)
-            assert e.value.code == "forbidden"
-            await s.rollback()
-        assert (await s.get(MerchantProposal, pid)).status == "PENDING"
-
-
-async def test_edit_waits_for_approval_and_rejection_preserves_public_data(database, settings):
-    async with database() as s:
-        cat = await setup(s, settings)
-        p = await submitted(cat)
-        await cat.moderate(900, p.id, p.version, True)
-        entry = await cat.repo.mine(42)
-        p = await cat.begin(42, "EDIT", entry_id=entry.id)
-        p = await cat.update_draft(42, p.id, "name", "Changed Studio", p.version)
-        p = await cat.submit(42, p.id, p.version)
-        assert (await cat.public(entry.id)).name == "North Studio"
-        await cat.moderate(900, p.id, p.version, False, "Insufficient description")
-        assert (await cat.public(entry.id)).name == "North Studio"
-
-
-async def test_soft_remove_request_keeps_original_user_and_audit(database, settings):
-    async with database() as s:
-        cat = await setup(s, settings)
-        p = await submitted(cat)
-        await cat.moderate(900, p.id, p.version, True)
-        entry = await cat.repo.mine(42)
-        p = await cat.begin(42, "REMOVE", entry_id=entry.id)
-        p = await cat.submit(42, p.id, p.version)
-        await cat.moderate(900, p.id, p.version, True)
-        assert (await cat.repo.mine(42)).status == "REMOVED"
-        assert await cat.core.repo.user_by_telegram(42) is not None
-        assert (await cat.history(900, entry.id))[1] > 0
-        assert (await cat.listing())[1] == 0
-
-
-async def test_scam_suspension_restore_and_disabled_registration(database, settings):
-    async with database() as s:
-        cat = await setup(s, settings)
-        p = await submitted(cat)
-        await cat.moderate(900, p.id, p.version, True)
-        entry = await cat.repo.mine(42)
-        entry_id = entry.id
-        entry = await cat.change_status(900, entry.id, entry.version, "SUSPENDED", "Policy review")
-        assert (await cat.listing())[1] == 0
-        entry = await cat.change_status(900, entry.id, entry.version, "APPROVED")
-        owner = await cat.core.repo.user_by_telegram(42)
-        s.add(ScamRecord(target_id=owner.id, reason="Confirmed fraud", moderator_id=900))
-        await s.commit()
-        assert (await cat.listing())[1] == 0
-        entry = await cat.change_status(900, entry.id, entry.version, "SUSPENDED", "SCAM record")
-        with pytest.raises(DomainError, match="merchant_blocked"):
-            await cat.change_status(900, entry.id, entry.version, "APPROVED")
-        await s.rollback()
-        row = await cat.settings()
-        await cat.configure(900, row.version, "registrations", False)
-        with pytest.raises(DomainError, match="merchant_disabled"):
-            await cat.begin(42, "EDIT", entry_id=entry_id)
-
-
-async def test_stale_draft_preview_expiry_and_daily_limit(database, settings):
-    async with database() as s:
-        cat = await setup(s, settings)
-        initial = await submitted(cat)
-        await cat.moderate(900, initial.id, initial.version, True)
-        entry = await cat.repo.mine(42)
-        p = await cat.begin(42, "EDIT", entry_id=entry.id)
-        pid = p.id
-        assert (await cat.begin(42, "EDIT", entry_id=entry.id)).id == pid
-        p = await cat.update_draft(42, pid, "name", "Current Name", p.version)
-        with pytest.raises(DomainError, match="merchant_stale"):
-            await cat.submit(42, pid, p.version - 1)
-        await s.rollback()
-        p = await s.get(MerchantProposal, pid)
-        p.expires_at = now() - timedelta(seconds=1)
-        await s.commit()
-        with pytest.raises(DomainError, match="merchant_expired"):
-            await cat.update_draft(42, pid, "city_code", "vilnius", p.version)
-        await s.rollback()
-        p = await s.get(MerchantProposal, pid)
-        await cat.cancel(42, pid, p.version)
-        for _ in range(2):
-            p = await cat.begin(42, "EDIT", entry_id=entry.id)
-            await cat.cancel(42, p.id, p.version)
-        with pytest.raises(DomainError, match="merchant_rate"):
-            await cat.begin(42, "EDIT", entry_id=entry.id)
-
-
-async def test_admin_manual_add_uses_existing_numeric_identity(database, settings):
-    async with database() as s:
-        cat = await setup(s, settings)
-        with pytest.raises(DomainError, match="merchant_identity"):
-            await cat.begin(900, target_id=8888888, consent=True)
-        await s.rollback()
-        p = await cat.begin(900, target_id=43, consent=True)
-        assert (await cat.repo.mine(43)).id == p.entry_id
+        e = await created(cat)
+        eid, version = e.id, e.version
         with pytest.raises(DomainError, match="forbidden"):
-            await cat.begin(42, target_id=43, consent=True)
+            if operation == "create":
+                await cat.save(42, 0, 0, fields(), target_id=43)
+            elif operation == "read":
+                await cat.editable(42, eid)
+            elif operation == "edit":
+                await cat.save(42, eid, version, {"name": "Hijack"})
+            elif operation == "status":
+                await cat.change_status(42, eid, version, "REMOVED")
+            elif operation == "target":
+                await cat.creation_target(42, 43)
+            else:
+                await cat.configure(42, 1, "enabled", False)
+        await s.rollback()
+        assert (await cat.public(eid)).name == "North Studio"
 
 
-async def test_settings_are_authorized_versioned_and_durable(database, settings):
+async def test_single_field_edit_keeps_identity_content_and_other_listing(database, settings):
     async with database() as s:
         cat = await setup(s, settings)
-        assert not (await cat.settings()).publish_authors
-        row = await cat.configure(900, 1, "publish_authors", True)
-        await cat.configure(900, row.version, "title", "Approved directory", lang="en")
-        with pytest.raises(DomainError, match="forbidden"):
-            await cat.configure(42, 1, "enabled", False)
-        await s.rollback()
-    async with database() as s:
-        row = await s.get(MerchantSettings, 1)
-        assert row.publish_authors and row.copy["en"]["title"] == "Approved directory"
+        a = await created(cat)
+        b = await created(cat, 43)
+        bid, bversion = b.id, b.version
+        owner_id = a.owner_user_id
+        a = await cat.save(900, a.id, a.version, {"name": "Baltic Works"})
+        assert a.description == "Legal professional services" and a.city_code == "vilnius"
+        assert a.owner_user_id == owner_id and a.owner.telegram_id == 42
+        b = await cat.repo.entry(bid)
+        assert b.name == "North Studio" and b.version == bversion
+        assert await s.scalar(select(func.count()).select_from(MerchantEntry)) == 2
+        assert (await cat.listing(query="north"))[1] == 1
+        assert (await cat.listing(query="tic wor"))[1] == 1
+        assert await s.scalar(select(func.count()).select_from(MerchantProposal)) == 0
 
 
-async def test_postgres_concurrent_approval_has_one_audit_and_one_listing(
-    postgres_contract, settings
+async def test_city_contact_paragraphs_edit_do_not_reassign_identity_or_username(
+    database, settings
 ):
-    import asyncio
-
-    sessions, _ = postgres_contract
-    async with sessions() as s:
+    async with database() as s:
         cat = await setup(s, settings)
-        p = await submitted(cat)
-        pid, version = p.id, p.version
-
-    async def approve():
-        async with sessions() as s:
-            cat = MerchantService(Service(settings, s))
-            return await cat.moderate(900, pid, version, True)
-
-    await asyncio.gather(approve(), approve())
-    async with sessions() as s:
-        assert (
-            await s.scalar(
-                select(func.count())
-                .select_from(MerchantEntry)
-                .where(MerchantEntry.status == "APPROVED")
-            )
-            == 1
+        e = await created(cat)
+        text = "Pirma <eilutė> & tekstas\n\nAntra pastraipa."
+        e = await cat.save(
+            900,
+            e.id,
+            e.version,
+            {"description": text, "city_code": "kaunas", "contact": "@other_contact"},
         )
+        assert e.description == text and e.contact == "@other_contact"
+        assert e.owner.username == "seller42" and e.owner.telegram_id == 42
+        assert (await cat.listing(city_code="kaunas"))[1] == 1
+        assert (await cat.listing(city_code="vilnius"))[1] == 0
+        e = await cat.save(900, e.id, e.version, {"contact": "-"})
+        assert e.contact is None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", "x"),
+        ("description", "short"),
+        ("city_code", "invalid"),
+        ("contact", "javascript:alert(1)"),
+        ("contact", "https://host:bad/path"),
+        ("contact", "https://u:p@host/"),
+        ("owner_user_id", 2),
+    ],
+)
+async def test_invalid_field_has_no_partial_write(database, settings, field, value):
+    async with database() as s:
+        cat = await setup(s, settings)
+        e = await created(cat)
+        eid, version = e.id, e.version
+        with pytest.raises(DomainError, match="merchant_invalid"):
+            await cat.save(900, eid, version, {"name": "Changed name", field: value})
+        await s.rollback()
+        e = await cat.public(eid)
+        assert e.name == "North Studio" and e.version == version
+
+
+async def test_stale_save_and_duplicate_creation_never_add_another_entry(database, settings):
+    async with database() as s:
+        cat = await setup(s, settings)
+        e = await created(cat)
+        eid, version = e.id, e.version
+        await cat.save(900, eid, version, {"name": "Current Name"})
+        with pytest.raises(DomainError, match="merchant_stale"):
+            await cat.save(900, eid, version, {"name": "Stale Name"})
+        await s.rollback()
+        with pytest.raises(DomainError, match="merchant_duplicate"):
+            await created(cat)
+        await s.rollback()
+        assert (await cat.public(eid)).name == "Current Name"
+        assert await s.scalar(select(func.count()).select_from(MerchantEntry)) == 1
+
+
+async def test_suspend_edit_resume_remove_preserve_data_and_audit(database, settings):
+    async with database() as s:
+        cat = await setup(s, settings)
+        e = await created(cat)
+        eid, owner = e.id, e.owner_user_id
+        e = await cat.change_status(900, eid, e.version, "SUSPENDED")
+        assert (await cat.listing())[1] == 0
+        e = await cat.save(900, eid, e.version, {"name": "Changed while paused"})
+        assert e.status == "SUSPENDED" and (await cat.listing())[1] == 0
+        e = await cat.change_status(900, eid, e.version, "APPROVED")
+        assert (await cat.listing())[1] == 1
+        e = await cat.change_status(900, eid, e.version, "REMOVED")
+        assert (await cat.listing())[1] == 0 and e.name == "Changed while paused"
+        assert e.owner_user_id == owner
+        assert await cat.core.repo.user_by_telegram(42) is not None
         assert (
             await s.scalar(
                 select(func.count())
                 .select_from(AuditEvent)
-                .where(AuditEvent.action == "merchant_approved")
+                .where(AuditEvent.action == "merchant_status")
             )
-            == 1
+            == 3
         )
 
 
-async def test_username_reassignment_keeps_listing_and_rep_with_numeric_owner(database, settings):
-    from test_merchants_data import merchant
-
+async def test_scam_blocks_resume_and_creation_without_modifying_scam_or_trust(database, settings):
     async with database() as s:
-        entry, owner = await merchant(s, settings, 42, "Studio")
-        cat = MerchantService(Service(settings, s))
-        await cat.core.observe(42, "new_seller", "Owner")
-        await cat.core.observe(43, "seller42", "New username owner")
+        cat = await setup(s, settings)
+        e = await created(cat)
+        e = await cat.change_status(900, e.id, e.version, "SUSPENDED")
+        eid, version = e.id, e.version
+        s.add(ScamRecord(target_id=e.owner_user_id, reason="Confirmed fraud", moderator_id=900))
         await s.commit()
-        assert (await cat.repo.mine(42)).id == entry.id
-        assert (await cat.listing(query="seller42"))[1] == 0
-        rows, total, _ = await cat.listing(query="NEW_SELLER")
-        assert total == 1 and rows[0][1].telegram_id == 42
+        with pytest.raises(DomainError, match="merchant_blocked"):
+            await cat.change_status(900, eid, version, "APPROVED")
+        await s.rollback()
+        assert (await cat.repo.entry(eid)).status == "SUSPENDED"
+        assert await s.scalar(select(func.count()).select_from(ScamRecord)) == 1
+        assert await s.scalar(select(func.count()).select_from(TrustedDesignation)) == 0
 
 
-async def test_approval_of_edits_updates_search_index_without_changing_trust(database, settings):
+async def test_settings_durable_and_registration_setting_retired(database, settings):
     async with database() as s:
         cat = await setup(s, settings)
-        p = await submitted(cat)
-        await cat.moderate(900, p.id, p.version, True)
-        entry = await cat.repo.mine(42)
-        p = await cat.begin(42, "EDIT", entry_id=entry.id)
-        p = await cat.update_draft(42, p.id, "name", "Baltic Works", p.version)
-        p = await cat.update_draft(42, p.id, "city_code", "kaunas", p.version)
-        p = await cat.submit(42, p.id, p.version)
-        await cat.moderate(900, p.id, p.version, True)
-        assert (await cat.listing(query="north"))[1] == 0
-        assert (await cat.listing(city_code="kaunas", query="tic wor"))[1] == 1
-
-
-async def test_approved_edit_never_resumes_a_suspended_entry(database, settings):
+        row = await cat.configure(900, 1, "publish_authors", True)
+        await cat.configure(900, row.version, "title", "Custom directory", lang="en")
+        with pytest.raises(DomainError, match="merchant_invalid"):
+            await cat.configure(900, row.version, "registrations", True)
+        await s.rollback()
     async with database() as s:
-        cat = await setup(s, settings)
-        p = await submitted(cat)
-        await cat.moderate(900, p.id, p.version, True)
-        entry = await cat.repo.mine(42)
-        entry = await cat.change_status(900, entry.id, entry.version, "SUSPENDED", "Policy review")
-        p = await cat.begin(42, "EDIT", entry_id=entry.id)
-        p = await cat.update_draft(42, p.id, "name", "Reviewed New Name", p.version)
-        p = await cat.submit(42, p.id, p.version)
-        await cat.moderate(900, p.id, p.version, True)
-        assert (await cat.repo.mine(42)).status == "SUSPENDED"
-        assert (await cat.listing())[1] == 0
+        row = await s.get(MerchantSettings, 1)
+        assert row.publish_authors and row.copy["en"]["title"] == "Custom directory"
 
 
-async def test_postgres_registration_double_click_creates_one_durable_draft(
-    postgres_contract, settings
-):
-    import asyncio
-
+@pytest.mark.parametrize("operation", ["create", "edit"])
+async def test_postgres_concurrent_admin_writes_one_winner(postgres_contract, settings, operation):
     sessions, _ = postgres_contract
     async with sessions() as s:
-        await setup(s, settings)
+        cat = await setup(s, settings)
+        e = await created(cat) if operation == "edit" else None
+        eid, version = (e.id, e.version) if e else (0, 0)
 
-    async def begin():
+    async def write(label):
         async with sessions() as s:
-            return (
-                await MerchantService(Service(settings, s)).begin(900, target_id=42, consent=True)
-            ).id
+            cat = MerchantService(Service(settings, s))
+            try:
+                return (await cat.save(900, eid, version, fields(name=label), target_id=42)).id
+            except DomainError as error:
+                await s.rollback()
+                return error.code
 
-    ids = await asyncio.gather(begin(), begin())
-    assert ids[0] == ids[1]
+    outcomes = await asyncio.gather(write("First Studio"), write("Second Studio"))
+    assert sum(isinstance(x, int) for x in outcomes) == 1
+    assert ("merchant_duplicate" if operation == "create" else "merchant_stale") in outcomes
     async with sessions() as s:
-        assert await s.scalar(select(func.count()).select_from(MerchantProposal)) == 1
+        assert await s.scalar(select(func.count()).select_from(MerchantEntry)) == 1
+        assert await s.scalar(select(func.count()).select_from(MerchantProposal)) == 0
 
 
-async def test_self_registration_and_legacy_create_submission_are_closed(database, settings):
+async def test_historical_requests_survive_direct_edit_unchanged(database, settings):
+    from datetime import timedelta
+
+    from app.models import now
+
     async with database() as s:
         cat = await setup(s, settings)
-        with pytest.raises(DomainError, match="merchant_registration_closed"):
-            await cat.begin(42, consent=True)
-        assert await s.scalar(select(func.count()).select_from(MerchantEntry)) == 0
-        p = await cat.begin(900, target_id=42, consent=True)
-        pid, version = p.id, p.version
-        for op in ("update", "submit"):
-            with pytest.raises(DomainError, match="merchant_registration_closed"):
-                if op == "update":
-                    await cat.update_draft(42, pid, "name", "Self registration", version)
-                else:
-                    await cat.submit(42, pid, version)
-            await s.rollback()
-        p = await s.get(MerchantProposal, pid)
-        assert p.status == "DRAFT" and p.version == version
-        await cat.cancel(42, pid, version)
-        assert (await s.get(MerchantProposal, pid)).status == "CANCELLED"
+        e = await created(cat)
+        old = MerchantProposal(
+            entry_id=e.id,
+            actor_id=42,
+            kind="EDIT",
+            status="PENDING",
+            name="Historical pending name",
+            base_version=e.version,
+            version=3,
+            request_key="historical-request",
+            expires_at=now() + timedelta(hours=1),
+        )
+        s.add(old)
+        await s.commit()
+        pid = old.id
+        e = await cat.save(900, e.id, e.version, {"name": "Direct new name"})
+        old = await s.get(MerchantProposal, pid)
+        assert old.status == "PENDING" and old.version == 3
+        assert old.name == "Historical pending name" and e.name == "Direct new name"
+        assert not hasattr(cat, "submit") and not hasattr(cat, "moderate")
+
+
+async def test_username_changes_preserve_merchant_owner_and_reputation_identity(database, settings):
+    async with database() as s:
+        cat = await setup(s, settings)
+        e = await created(cat)
+        eid, owner_id = e.id, e.owner_user_id
+        await cat.core.observe(42, "renamed_seller", "Original owner")
+        await cat.core.observe(43, "seller42", "Another account")
+        await s.commit()
+        assert (await cat.repo.mine(42)).id == eid
+        assert (await cat.listing(query="seller42"))[1] == 0
+        rows, total, _ = await cat.listing(query="RENAMED_SELLER")
+        assert total == 1 and rows[0][0].owner_user_id == owner_id
+
+
+async def test_edit_preserves_unchanged_historical_whitespace_and_approval_metadata(
+    database, settings
+):
+    async with database() as s:
+        cat = await setup(s, settings)
+        e = await created(cat)
+        description = "  Original paragraph\n\nLietuviškas aprašymas.  \n"
+        e.description = description
+        await s.commit()
+        approved_at, approved_by = e.approved_at, e.approved_by
+        snapshot = {
+            field: getattr(e, field) for field in ("name", "city_code", "description", "contact")
+        }
+        snapshot["name"] = "Changed name only"
+        e = await cat.save(900, e.id, e.version, snapshot)
+        assert e.description == description
+        assert e.approved_at == approved_at and e.approved_by == approved_by
