@@ -125,3 +125,27 @@ def test_changed_original_aborts_before_actions(rig, tmp_path):
     paths[0].write_bytes(b"changed")
     with pytest.raises(RuntimeError, match="changed after"):
         m.activate(SimpleNamespace(), paths, data, {})
+
+
+def test_writer_guard_retries_the_real_check_but_never_bypasses_it():
+    attempts = []
+
+    def transient():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise RuntimeError("Another running container shares the production network")
+
+    m.wait_for_readers(transient, pause=lambda seconds: None)
+    assert len(attempts) == 3
+
+
+def test_writer_guard_still_rejects_a_persistent_unknown_container():
+    attempts = []
+
+    def persistent():
+        attempts.append(1)
+        raise RuntimeError("Another running container shares the production network")
+
+    with pytest.raises(RuntimeError):
+        m.wait_for_readers(persistent, pause=lambda seconds: None)
+    assert len(attempts) == 16

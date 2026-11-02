@@ -9,6 +9,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -36,6 +37,23 @@ async def main():
 try:asyncio.run(main())
 except Exception:print('Identity verification failed',file=sys.stderr);sys.exit(1)
 """
+
+
+def wait_for_readers(check, pause=time.sleep):
+    """Retry the unchanged writer guard; never admit an unknown shared container."""
+    for attempt in range(16):
+        try:
+            check()
+            return
+        except RuntimeError as error:
+            if (
+                str(error) != "Another running container shares the production network"
+                or attempt == 15
+            ):
+                raise
+            if attempt == 0:
+                print("IdentityWriterGuard=WAITING_FOR_SHARED_CONTAINER", flush=True)
+            pause(2)
 
 
 def imported(path, name):
@@ -248,6 +266,8 @@ def main():
     release = imported(args.root / "deploy/production_release.py", "identity_release").Release(
         args.root, args.sha
     )
+    original_writer_guard = release.writers
+    release.writers = lambda: wait_for_readers(original_writer_guard)
     if "0025" not in release.sql("SELECT version_num FROM alembic_version"):
         raise RuntimeError("Identity cutover must not migrate schema")
     # The installed relay scope still references this withdrawn group. It is
