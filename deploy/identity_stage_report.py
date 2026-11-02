@@ -25,8 +25,11 @@ async def main():
   me=await bot.get_me()
   assert me.id==p['bot_id'] and me.username.lower()==p['username'].lower()
   result['bot']={'id':me.id,'username':me.username}
+  updates=await bot.get_updates(limit=100,timeout=0)
+  pending=sorted({u.my_chat_member.chat.id for u in updates if u.my_chat_member and u.my_chat_member.chat.type in ('group','supergroup')})
+  result['unacknowledged_group_events']=pending
   groups=[]
-  for cid in p['groups']:
+  for cid in sorted(set(p['groups'])|set(pending)):
    try:
     member=await bot.get_chat_member(cid,me.id)
     groups.append({'chat_id':cid,'status':str(member.status),'restrict':bool(getattr(member,'can_restrict_members',False))})
@@ -201,7 +204,7 @@ def main():
                     "-d",
                     "safecheck",
                     "-Atc",
-                    "BEGIN READ ONLY; SELECT chat_id FROM managed_groups WHERE approved AND enabled ORDER BY chat_id; COMMIT;",
+                    "BEGIN READ ONLY; SELECT chat_id FROM managed_groups ORDER BY chat_id; COMMIT;",
                 ]
             )
             .decode()
