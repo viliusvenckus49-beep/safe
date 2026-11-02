@@ -40,33 +40,12 @@ jobs:
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 - --check-files-only' < deploy/prepare_identity_change.py
-      - name: Update downloaded operator helper atomically
+      - name: Read prepared identity and outstanding work
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
-          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'python3 -c '"'"'import hashlib, os, stat, sys, uuid
-          from pathlib import Path
-          data = sys.stdin.buffer.read()
-          if hashlib.sha256(data).hexdigest() != "3f1056df87dc58cad9fe7413d0cf6c8499d3b375fd1d74aeadca9fbbf454b462":
-              raise SystemExit("Helper checksum mismatch")
-          path = Path.home() / "SAFECHECK_IDENTITY.py"
-          if path.is_symlink():
-              raise SystemExit("Unexpected helper symlink")
-          if path.exists():
-              info = path.stat()
-              if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
-                  raise SystemExit("Unexpected helper ownership/type")
-          temporary = path.with_name(path.name + ".updated-" + uuid.uuid4().hex)
-          fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-          with os.fdopen(fd, "wb") as handle:
-              handle.write(data)
-              handle.flush()
-              os.fsync(handle.fileno())
-          os.replace(temporary, path)
-          print("IDENTITY_HELPER_UPDATED=" + str(path))
-          print("ACTIVE_CONFIG=UNCHANGED; CREDENTIAL_CONTENTS=UNREAD")
-          '"'"'' < deploy/prepare_identity_change.py
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/identity_stage_report.py
       - name: Remove runner key
         if: always()
         run: rm -f "$HOME/.ssh/safecheck_deploy"
