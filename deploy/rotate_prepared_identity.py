@@ -12,6 +12,15 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
+PHASE = "init"
+
+
+def checkpoint(name):
+    global PHASE
+    PHASE = name
+    print("IdentityPhase=" + name, flush=True)
+
+
 IDENTITY = r"""
 import asyncio,json,sys
 from aiogram import Bot
@@ -142,6 +151,7 @@ def verify_retention(release, baseline):
 def activate(
     release, paths, data, expected, identity_check=verify_identity, retention_check=verify_retention
 ):
+    checkpoint("validate-originals")
     originals(paths, data)
     release.ops.private_directory(release.state)
     release.ops.private_directory(release.backup_dir)
@@ -151,14 +161,22 @@ def activate(
     if shutil.disk_usage(release.root).free < 2 * 1024**3:
         raise RuntimeError("Insufficient identity release space")
     release.run(["docker", "build", "-t", release.image, str(release.root)])
+    checkpoint("online-backup-rehearsal")
     release.rehearsal(release.backup("identity-online"))
+    checkpoint("maintenance-lock")
     with release.original.lock(maintenance=True):
+        checkpoint("recheck-original-files")
         originals(paths, data)
+        checkpoint("recheck-original-container")
         if release.inspect("safecheck-bot-1")["Id"] != release.old["Id"]:
             raise RuntimeError("Original bot changed")
+        checkpoint("recheck-idle-work")
         release.idle()
+        checkpoint("recheck-writers")
         release.writers()
+        checkpoint("recheck-data-services")
         release.preserve_services()
+        checkpoint("stop-original")
         release.original.dc("stop", "--timeout", "45", "bot")
         changed = False
         starting = False
@@ -166,6 +184,7 @@ def activate(
             if release.inspect("safecheck-bot-1")["State"]["Running"]:
                 raise RuntimeError("Original bot did not stop")
             release.idle()
+            checkpoint("frozen-backup-rehearsal")
             archive = release.backup("identity-frozen")
             baseline = release.rehearsal(archive)
             changed = True
@@ -173,10 +192,12 @@ def activate(
             atomic_replace(paths[1], data["credentials.next"])
             # Paths, all data services and their credentials remain unchanged.
             # Existing release preparation reuses the prebuilt exact-source image.
+            checkpoint("prepare-candidate")
             release.prepare()
             identity_check(release, expected)
             release.candidate.readiness()
             retention_check(release, baseline)
+            checkpoint("start-candidate")
             starting = True
             release.candidate.dc("up", "-d", "--no-deps", "--wait", "--wait-timeout", "240", "bot")
             release.preserve_services()
@@ -263,8 +284,21 @@ if __name__ == "__main__":
     try:
         main()
     except BaseException as error:
+        safe = {
+            "Active configuration changed after identity preparation",
+            "Original bot changed",
+            "Unfinished or uncertain production work; reconcile first",
+            "Another running container shares the production network",
+            "Production data service is not healthy",
+            "Original production bot is not running",
+            "Original bot did not stop",
+        }
+        if type(error) is RuntimeError and str(error) in safe:
+            print("IdentitySafeReason=" + str(error), file=sys.stderr)
         print(
-            "IDENTITY_RELEASE=STOPPED; Type="
+            "IDENTITY_RELEASE=STOPPED; Phase="
+            + PHASE
+            + "; Type="
             + type(error).__name__
             + "; raw output and credentials withheld",
             file=sys.stderr,
