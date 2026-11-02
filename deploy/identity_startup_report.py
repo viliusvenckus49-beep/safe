@@ -2,6 +2,32 @@
 
 import json
 import subprocess
+from pathlib import Path
+
+STAFF = r"""
+import asyncio,json,sqlite3,tempfile
+from pathlib import Path
+from app.config import Settings
+from app.mtproto_relay import private_configuration
+from telethon import TelegramClient
+async def main():
+ cfg=Settings();result={'configured_owner':cfg.group_owner,'staff_id':cfg.group_help_staff_id,'staff_bot_pin':cfg.group_help_bot_id,'scope':sorted(cfg.group_help_scope)}
+ directory=Path(cfg.group_help_state_dir);secret=private_configuration(directory)
+ with tempfile.TemporaryDirectory(prefix='staff-review-') as temp:
+  source=sqlite3.connect((directory/'account.session').as_uri()+'?mode=ro',uri=True);target=sqlite3.connect(Path(temp)/'account.session');source.backup(target);source.close();target.close()
+  client=TelegramClient(str(Path(temp)/'account.session'),secret['api_id'],secret['api_hash'],flood_sleep_threshold=0,request_retries=0,connection_retries=1,timeout=5)
+  try:
+   await asyncio.wait_for(client.connect(),12)
+   me=await client.get_me();result['account_id']=getattr(me,'id',None)
+   staff=await client.get_entity(cfg.group_help_staff_id);result['staff_left']=bool(getattr(staff,'left',False))
+   vendor=await client.get_entity('ghStaffBot');result['vendor_id']=vendor.id;result['vendor_pin_matches']=vendor.id==cfg.group_help_bot_id
+   users=await client.get_participants(staff);result['vendor_in_staff']=any(u.id==vendor.id for u in users)
+  except Exception as error:result['staff_error']=type(error).__name__
+  finally:await client.disconnect()
+ return result
+try: print(json.dumps(asyncio.run(asyncio.wait_for(main(),40))))
+except Exception as error:print(json.dumps({'error_type':type(error).__name__}))
+"""
 
 
 def main():
@@ -37,11 +63,55 @@ def main():
         except (ValueError, TypeError):
             if line.startswith("SAFECheck startup") or line.startswith("SAFECheck configuration"):
                 print("IdentityStartupText=" + line, flush=True)
+    query = "BEGIN READ ONLY; SELECT json_build_object('chat_id',g.chat_id,'approved',g.approved,'enabled',g.enabled,'restrict',g.can_restrict_members,'owner_removed',EXISTS(SELECT 1 FROM audit_events a WHERE a.action='group_removed' AND a.details->>'chat_id'=g.chat_id::text)) FROM managed_groups g ORDER BY g.chat_id; COMMIT;"
+    data = subprocess.check_output(
+        docker
+        + [
+            "exec",
+            "safecheck-postgres-1",
+            "psql",
+            "-X",
+            "-U",
+            "safecheck",
+            "-d",
+            "safecheck",
+            "-Atc",
+            query,
+        ],
+        stderr=subprocess.DEVNULL,
+    ).decode()
+    print(
+        "IdentityRegisteredState="
+        + json.dumps([json.loads(x) for x in data.splitlines() if x.startswith("{")]),
+        flush=True,
+    )
+    labels = row["Config"]["Labels"]
+    root = Path(labels["com.docker.compose.project.working_dir"])
+    run = docker + [
+        "compose",
+        "--project-name",
+        "safecheck",
+        "--env-file",
+        "/etc/safecheck/compose.env",
+        "-f",
+        str(root / "docker-compose.production.yml"),
+        "run",
+        "--rm",
+        "-T",
+        "--no-deps",
+        "bot",
+        "python",
+        "-c",
+        STAFF,
+    ]
+    reply = subprocess.run(run, capture_output=True, text=True, timeout=70, check=False)
+    if reply.returncode == 0:
+        safe = json.loads(next(x for x in reversed(reply.stdout.splitlines()) if x.startswith("{")))
+        print("IdentityStaffReadiness=" + json.dumps(safe, sort_keys=True), flush=True)
     # File metadata only; no session/API credential contents.
     for mount in row.get("Mounts", []):
         if mount["Destination"] == "/run/mtproto":
             import stat
-            from pathlib import Path
 
             root = Path(mount["Source"])
             for file in (root, root / "api.json", root / "account.session"):
