@@ -103,11 +103,55 @@ def changed(text, key, value):
     return re.sub(pattern, lambda m: m[1] + value, text, flags=re.M)
 
 
-def read_regular(path, *, secret=False):
+def private_host_path(path):
+    """An unreadable host ancestor seals a read-only Docker secret from other users."""
+    owner = os.geteuid()
+    sealed = False
+    for parent in path.parents:
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0, owner):
+            return False
+        if info.st_mode & 0o022 and not (info.st_mode & stat.S_ISVTX):
+            return False
+        sealed = sealed or not (info.st_mode & 0o077)
+    return sealed
+
+
+def checked_file(path, *, secret=False):
     info = path.lstat()
-    if not stat.S_ISREG(info.st_mode) or (secret and info.st_mode & 0o077):
-        raise PreparationError("Nesaugus arba netinkamas konfigūracijos failas.")
+    mode = stat.S_IMODE(info.st_mode)
+    if not stat.S_ISREG(info.st_mode):
+        raise PreparationError("Konfigūracijos failas nėra įprastas failas: " + str(path))
+    if secret and mode & 0o077:
+        # Existing Compose secrets may be root-owned 0444 inside a private 0700
+        # host directory, then bind-mounted read-only for the application UID.
+        if mode != 0o444 or info.st_uid != os.geteuid() or not private_host_path(path):
+            raise PreparationError(
+                "Nepakankamai privatus konfigūracijos failas: "
+                + str(path)
+                + f" (mode={mode:04o}; uid={info.st_uid}; gid={info.st_gid})"
+            )
+    return info
+
+
+def read_regular(path, *, secret=False):
+    checked_file(path, secret=secret)
     return path.read_bytes().decode("utf-8")
+
+
+def configuration_paths(compose_env):
+    selectors = read_regular(compose_env)
+    settings = Path(scalar(selectors, "SAFECHECK_ENV_FILE"))
+    credentials = Path(scalar(selectors, "SAFECHECK_SECRETS_DIR")) / "runtime.env"
+    if not settings.is_absolute() or not credentials.is_absolute():
+        raise PreparationError("Reikia absoliučių esamų konfigūracijų kelių.")
+    return settings, credentials
+
+
+def check_input_files(compose_env):
+    settings, credentials = configuration_paths(compose_env)
+    checked_file(settings)
+    checked_file(credentials, secret=True)
 
 
 def positive_id(value):
@@ -130,11 +174,7 @@ def prepare(compose_env, state_dir, token, owner, username):
     root = Path(labels.get("com.docker.compose.project.working_dir", ""))
     if not root.is_absolute() or not (root / "docker-compose.production.yml").is_file():
         raise PreparationError("Nerastas esamas boto projektas.")
-    selectors = read_regular(compose_env)
-    settings_path = Path(scalar(selectors, "SAFECHECK_ENV_FILE"))
-    secrets_path = Path(scalar(selectors, "SAFECHECK_SECRETS_DIR")) / "runtime.env"
-    if not settings_path.is_absolute() or not secrets_path.is_absolute():
-        raise PreparationError("Reikia absoliučių esamų konfigūracijų kelių.")
+    settings_path, secrets_path = configuration_paths(compose_env)
     settings = read_regular(settings_path)
     secrets = read_regular(secrets_path, secret=True)
     admins = scalar(settings, "ADMIN_IDS")
@@ -247,9 +287,16 @@ def main():
     parser.add_argument(
         "--state-dir", type=Path, default=Path("/var/lib/safecheck/identity-change")
     )
+    parser.add_argument("--check-files-only", action="store_true")
     args = parser.parse_args()
-    if os.geteuid() != 0 or not sys.stdin.isatty():
-        raise PreparationError("Paleisk serveryje su sudo ir interaktyviu terminalu.")
+    if os.geteuid() != 0:
+        raise PreparationError("Paleisk serveryje su sudo.")
+    check_input_files(args.compose_env)
+    if args.check_files_only:
+        print("IDENTITY_FILES=PASS; ACTIVE_CONFIG=UNCHANGED; CREDENTIAL_CONTENTS=UNREAD")
+        return
+    if not sys.stdin.isatty():
+        raise PreparationError("Paleisk interaktyviame terminale.")
     username = input("Naujo boto @username: ").strip()
     owner = positive_id(input("Naujo savininko Telegram ID: ").strip())
     with warnings.catch_warnings():

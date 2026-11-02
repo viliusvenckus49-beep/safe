@@ -167,3 +167,111 @@ def test_secret_symlink_is_not_followed(tmp_path):
     link.symlink_to(actual)
     with pytest.raises(prep.PreparationError):
         prep.read_regular(link, secret=True)
+
+
+def test_readonly_secret_inside_private_host_path_is_supported_without_chmod(kit, monkeypatch):
+    # The managed cloud maps / and /tmp ownership to nobody; simulate the
+    # root-owned host ancestors observed on the actual VPS, without weakening
+    # the production ownership check or changing any real file permissions.
+    from types import SimpleNamespace
+
+    actual_lstat = Path.lstat
+
+    def host_lstat(path):
+        info = actual_lstat(path)
+        if path in (Path("/"), Path("/tmp")):
+            return SimpleNamespace(st_uid=0, st_gid=0, st_mode=info.st_mode)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", host_lstat)
+    selectors, stage, _, creds, _, _ = kit
+    creds.parent.chmod(0o700)
+    creds.chmod(0o444)
+    before = creds.read_bytes(), creds.stat().st_mode, creds.stat().st_uid, creds.stat().st_gid
+    prep.check_input_files(selectors)
+    target, report = prep.prepare(selectors, stage, TOKEN, 902, "NextSafeBot")
+    assert report["admin_ids_unchanged"]
+    assert (target / "credentials.before").read_bytes() == before[0]
+    assert (
+        creds.read_bytes(),
+        creds.stat().st_mode,
+        creds.stat().st_uid,
+        creds.stat().st_gid,
+    ) == before
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o664, 0o666, 0o440, 0o777])
+def test_private_parent_does_not_allow_arbitrary_shared_secret_modes(kit, mode):
+    selectors, _, _, creds, _, _ = kit
+    creds.parent.chmod(0o700)
+    creds.chmod(mode)
+    with pytest.raises(prep.PreparationError, match="mode="):
+        prep.check_input_files(selectors)
+
+
+def test_readonly_secret_requires_a_private_host_ancestor(monkeypatch, tmp_path):
+    creds = tmp_path / "readable"
+    creds.write_text("BOT_TOKEN=HIDDEN_VALUE")
+    creds.chmod(0o444)
+    monkeypatch.setattr(prep, "private_host_path", lambda _: False)
+    with pytest.raises(prep.PreparationError) as error:
+        prep.read_regular(creds, secret=True)
+    assert str(creds) in str(error.value) and "mode=0444" in str(error.value)
+    assert "HIDDEN_VALUE" not in str(error.value)
+
+
+def test_shared_writable_nonsticky_parent_is_rejected(tmp_path):
+    shared = tmp_path / "shared"
+    private = shared / "private"
+    private.mkdir(parents=True, mode=0o700)
+    shared.chmod(0o777)
+    creds = private / "runtime.env"
+    creds.write_text("BOT_TOKEN=HIDDEN_VALUE")
+    creds.chmod(0o444)
+    with pytest.raises(prep.PreparationError):
+        prep.read_regular(creds, secret=True)
+
+
+def test_file_preflight_happens_before_any_credential_prompt(kit, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    selectors, _, _, creds, _, _ = kit
+    creds.chmod(0o644)
+    monkeypatch.setattr(prep.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(
+        sys, "argv", ["prepare_identity_change.py", "--compose-env", str(selectors)]
+    )
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Must not ask for credentials before failing file checks")
+
+    monkeypatch.setattr("builtins.input", unexpected)
+    monkeypatch.setattr(prep.getpass, "getpass", unexpected)
+    with pytest.raises(prep.PreparationError, match="mode=0644"):
+        prep.main()
+
+
+def test_files_only_mode_is_noninteractive_and_does_not_read_credentials(kit, monkeypatch, capsys):
+    import sys
+    from types import SimpleNamespace
+
+    selectors, _, _, creds, _, calls = kit
+    real_read = Path.read_bytes
+
+    def guarded_read(path):
+        assert path != creds, "Metadata check must not open credential contents"
+        return real_read(path)
+
+    monkeypatch.setattr(prep.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(Path, "read_bytes", guarded_read)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["prepare_identity_change.py", "--compose-env", str(selectors), "--check-files-only"],
+    )
+    prep.main()
+    assert "IDENTITY_FILES=PASS" in capsys.readouterr().out
+    assert not calls

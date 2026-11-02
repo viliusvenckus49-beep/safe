@@ -78,3 +78,17 @@ probe may fail before the cutover. Stage credentials first, then perform the
 reviewed cutover with the exact tested image and unchanged data services. Never
 restore an old database, merge identity records, clear Redis globally, drop
 historic data, merge a PR or restart another bot as a shortcut.
+
+## Existing read-only Docker secret files
+
+The preparer accepts the installed root-owned 0444 runtime secret only when its
+host path contains a private owner-controlled directory and its ancestors cannot
+be replaced by another user (sticky system temporary directories are supported).
+This matches the existing /etc/safecheck (0700) and secrets (0700) deployment.
+It does not chmod/chown existing files. Ordinary shared/writable modes and symlink
+files remain rejected. Error text identifies the path and permissions without
+showing file contents. File checks now happen before username/owner/token prompts.
+
+`sudo python3 deploy/prepare_identity_change.py --check-files-only` validates only
+file metadata and the nonsecret selector file. It does not read credential-file
+contents, ask for a token, query Telegram, touch PostgreSQL or create staging files.
