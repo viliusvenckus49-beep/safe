@@ -7,7 +7,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, cutover]
+        options: [inspect, cutover, verify]
         default: inspect
       source_sha:
         default: ''
@@ -41,12 +41,19 @@ jobs:
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
       - name: Read prepared identity and outstanding work
-        if: ${{ inputs.operation != 'cutover' }}
+        if: ${{ inputs.operation == 'inspect' || inputs.operation == '' }}
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/identity_startup_report.py
+      - name: Verify live identity and the seven confirmed groups
+        if: ${{ inputs.operation == 'verify' }}
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/identity_postcheck.py
       - name: Verify completed full CI for immutable application source
         if: ${{ inputs.operation == 'cutover' }}
         env:
