@@ -233,10 +233,13 @@ def main():
             "mtproto": stage["mtproto_enabled"],
             "groups": [int(cid) for cid in group_ids if cid.startswith("-")],
         }
+        raw_result = helper.run(
+            dc + ["run", "--rm", "-T", "--no-deps", "bot", "python", "-c", PROBE],
+            data=json.dumps(data).encode(),
+        )
         result = json.loads(
-            helper.run(
-                dc + ["run", "--rm", "-T", "--no-deps", "bot", "python", "-c", PROBE],
-                data=json.dumps(data).encode(),
+            next(
+                line for line in reversed(raw_result.decode().splitlines()) if line.startswith("{")
             )
         )
         print("IdentityLiveReads=" + json.dumps(result, sort_keys=True), flush=True)
