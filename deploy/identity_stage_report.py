@@ -25,8 +25,11 @@ async def main():
   me=await bot.get_me()
   assert me.id==p['bot_id'] and me.username.lower()==p['username'].lower()
   result['bot']={'id':me.id,'username':me.username}
-  updates=await bot.get_updates(limit=100,timeout=0)
-  pending=sorted({u.my_chat_member.chat.id for u in updates if u.my_chat_member and u.my_chat_member.chat.type in ('group','supergroup')})
+  try:
+   updates=await bot.get_updates(limit=100,timeout=0)
+   pending=sorted({u.my_chat_member.chat.id for u in updates if u.my_chat_member and u.my_chat_member.chat.type in ('group','supergroup')})
+  except Exception as error:
+   pending=[];result['update_probe_error']=type(error).__name__
   result['unacknowledged_group_events']=pending
   groups=[]
   for cid in sorted(set(p['groups'])|set(pending)):
@@ -57,7 +60,7 @@ async def main():
   except Exception as error:result['relay']={'authorized':False,'error_type':type(error).__name__}
  return result
 try:print(json.dumps(asyncio.run(asyncio.wait_for(main(),55))))
-except Exception:print('IdentityRemoteProbe=FAILED');raise SystemExit(1)
+except Exception as error:print(json.dumps({'probe_error':type(error).__name__}))
 """
 
 
