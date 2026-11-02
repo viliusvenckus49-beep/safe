@@ -34,6 +34,12 @@ jobs:
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/identity_file_metadata.py
+      - name: Check revised file guard without opening credentials
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 - --check-files-only' < deploy/prepare_identity_change.py
       - name: Remove runner key
         if: always()
         run: rm -f "$HOME/.ssh/safecheck_deploy"
