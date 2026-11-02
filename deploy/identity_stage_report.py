@@ -10,6 +10,54 @@ from pathlib import Path
 HELPER_SHA = "3f1056df87dc58cad9fe7413d0cf6c8499d3b375fd1d74aeadca9fbbf454b462"
 
 
+PROBE = r"""
+import asyncio,json,sqlite3,tempfile
+from pathlib import Path
+from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest,TelegramForbiddenError
+from app.config import Settings
+from app.bot.session import telegram_session
+async def main():
+ p=json.load(__import__('sys').stdin)
+ cfg=Settings(bot_token=p['token'],group_owner_id=None,group_help_enabled=False,moderation_mtproto_enabled=False)
+ result={}
+ async with Bot(p['token'],session=telegram_session(cfg)) as bot:
+  me=await bot.get_me()
+  assert me.id==p['bot_id'] and me.username.lower()==p['username'].lower()
+  result['bot']={'id':me.id,'username':me.username}
+  groups=[]
+  for cid in p['groups']:
+   try:
+    member=await bot.get_chat_member(cid,me.id)
+    groups.append({'chat_id':cid,'status':str(member.status),'restrict':bool(getattr(member,'can_restrict_members',False))})
+   except (TelegramBadRequest,TelegramForbiddenError):groups.append({'chat_id':cid,'status':'NO_ACCESS','restrict':False})
+  result['groups']=groups
+  try:
+   owner=await bot.get_chat(p['owner'])
+   result['owner_chat_known']=owner.id==p['owner']
+  except (TelegramBadRequest,TelegramForbiddenError):result['owner_chat_known']=False
+ if p['mtproto']:
+  from app.mtproto_relay import private_configuration
+  from telethon import TelegramClient
+  try:
+   directory=Path(cfg.group_help_state_dir);secret=private_configuration(directory)
+   with tempfile.TemporaryDirectory(prefix='identity-review-') as temp:
+    copy=Path(temp)/'account.session'
+    source=sqlite3.connect((directory/'account.session').as_uri()+'?mode=ro',uri=True)
+    target=sqlite3.connect(copy);source.backup(target);target.close();source.close()
+    client=TelegramClient(str(copy),secret['api_id'],secret['api_hash'],flood_sleep_threshold=0,request_retries=0,connection_retries=1,timeout=5)
+    try:
+     await asyncio.wait_for(client.connect(),12)
+     account=await asyncio.wait_for(client.get_me(),12)
+     result['relay']={'authorized':bool(account and not getattr(account,'deleted',False)),'account_id':getattr(account,'id',None)}
+    finally:await client.disconnect()
+  except Exception as error:result['relay']={'authorized':False,'error_type':type(error).__name__}
+ return result
+try:print(json.dumps(asyncio.run(asyncio.wait_for(main(),55))))
+except Exception:print('IdentityRemoteProbe=FAILED');raise SystemExit(1)
+"""
+
+
 def private(path, directory=False):
     row = path.lstat()
     valid = stat.S_ISDIR(row.st_mode) if directory else stat.S_ISREG(row.st_mode)
@@ -116,6 +164,76 @@ def main():
     ).decode()
     counts = json.loads(next(line for line in sql.splitlines() if line.startswith("{")))
     print("IdentityWork=" + json.dumps(counts, sort_keys=True), flush=True)
+    due = (
+        helper.run(
+            docker
+            + [
+                "exec",
+                "safecheck-postgres-1",
+                "psql",
+                "-X",
+                "-U",
+                "safecheck",
+                "-d",
+                "safecheck",
+                "-Atc",
+                "BEGIN READ ONLY; SELECT count(*) FROM ban_actions WHERE status IN ('PENDING','PROCESSING'); COMMIT;",
+            ]
+        )
+        .decode()
+        .splitlines()
+    )
+    print("IdentityBanOutbox=" + json.dumps([x for x in due if x.isdigit()]), flush=True)
+    if len(stages) == 1:
+        stage = stages[0]
+        token = helper.scalar((Path(stage["path"]) / "credentials.next").read_text(), "BOT_TOKEN")
+        manifest = json.loads((Path(stage["path"]) / "manifest.json").read_text())
+        group_ids = (
+            helper.run(
+                docker
+                + [
+                    "exec",
+                    "safecheck-postgres-1",
+                    "psql",
+                    "-X",
+                    "-U",
+                    "safecheck",
+                    "-d",
+                    "safecheck",
+                    "-Atc",
+                    "BEGIN READ ONLY; SELECT chat_id FROM managed_groups WHERE approved AND enabled ORDER BY chat_id; COMMIT;",
+                ]
+            )
+            .decode()
+            .splitlines()
+        )
+        print("IdentityOldOwner=" + json.dumps(manifest.get("old_owner")), flush=True)
+        root = Path(manifest["current_root"])
+        selectors = Path("/etc/safecheck/compose.env")
+        dc = docker + [
+            "compose",
+            "--project-name",
+            "safecheck",
+            "--env-file",
+            str(selectors),
+            "-f",
+            str(root / "docker-compose.production.yml"),
+        ]
+        data = {
+            "token": token,
+            "bot_id": stage["identity"]["bot_id"],
+            "username": stage["identity"]["username"],
+            "owner": stage["new_owner"],
+            "mtproto": stage["mtproto_enabled"],
+            "groups": [int(cid) for cid in group_ids if cid.startswith("-")],
+        }
+        result = json.loads(
+            helper.run(
+                dc + ["run", "--rm", "-T", "--no-deps", "bot", "python", "-c", PROBE],
+                data=json.dumps(data).encode(),
+            )
+        )
+        print("IdentityLiveReads=" + json.dumps(result, sort_keys=True), flush=True)
 
 
 if __name__ == "__main__":
