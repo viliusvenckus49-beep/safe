@@ -316,3 +316,25 @@ async def test_native_aiogram_polling_children_are_joined(monkeypatch):
     monkeypatch.setattr(main, "telegram_session", main.telegram_session)
     monkeypatch.setenv("HEALTH_PATH", "/tmp/unused-stage35-health.json")
     await smoke()
+
+
+async def test_startup_initializes_independent_owner_without_changing_admin_ids(
+    database, settings, monkeypatch, tmp_path
+):
+    await prepared(database, settings, monkeypatch, tmp_path)
+    settings.group_owner_id = 902
+    original = settings.admin_ids
+    initialized = []
+
+    async def commands(bot, actor, language, *, admin=False):
+        initialized.append((actor, admin))
+
+    async def finished(*args, **kwargs):
+        return
+
+    monkeypatch.setattr(main, "user_commands", commands)
+    monkeypatch.setattr(main, "ads_worker", finished)
+    with pytest.raises(RuntimeError, match="Required task stopped"):
+        await asyncio.wait_for(main.serve(settings), 2)
+    assert set(initialized) == {(900, True), (902, True)}
+    assert settings.admin_ids == original

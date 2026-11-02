@@ -110,7 +110,7 @@ async def serve(settings: Settings, *, check_only: bool = False) -> None:
         for lang in sorted(LANGUAGES):
             await bot.set_my_commands(commands(lang), language_code=lang)
         await group_commands(bot)
-        for admin_id in settings.admins:
+        for admin_id in settings.bootstrap_staff:
             async with sessions() as locale_session:
                 selected_language = await Repository(locale_session).language(admin_id)
             await user_commands(bot, admin_id, selected_language or "lt", admin=True)
