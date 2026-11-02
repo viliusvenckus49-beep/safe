@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v4
       - name: Prepare pinned SSH access
         env:
           DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -27,23 +28,12 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
           ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
           printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
-      - name: Inspect existing deployment without changing it
+      - name: Inspect identity file metadata without credential contents
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
-          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'bash -se' <<'REMOTE'
-          set -eu
-          sudo -n docker inspect safecheck-bot-1 --format 'Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker inspect safecheck-bot-1 --format 'Root={{index .Config.Labels "com.docker.compose.project.working_dir"}}'
-          sudo -n docker inspect safecheck-bot-1 --format 'Compose={{index .Config.Labels "com.docker.compose.project.config_files"}}'
-          sudo -n test -f /etc/safecheck/compose.env && echo ComposeEnvironment=present
-          sudo -n docker inspect safecheck-postgres-1 --format 'PostgresHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker inspect safecheck-redis-1 --format 'RedisHealth={{if .State.Health}}{{.State.Health.Status}}{{end}}'
-          sudo -n docker inspect safecheck-postgres-1 --format '{{range .Mounts}}PostgresMount={{.Type}} {{.Destination}}{{println}}{{end}}'
-          sudo -n docker exec safecheck-bot-1 python -c 'import app; print("SAFECheckVersion=" + app.__version__)'
-          df -h /home/ubuntu
-          REMOTE
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/identity_file_metadata.py
       - name: Remove runner key
         if: always()
         run: rm -f "$HOME/.ssh/safecheck_deploy"
