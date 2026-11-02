@@ -78,8 +78,6 @@ class Settings(BaseSettings):
             or not self.ads_group_messages_per_minute
         ):
             raise ValueError("Production requires PostgreSQL, REDIS_URL and ADMIN_IDS")
-        if self.group_owner_id is not None and self.group_owner_id not in self.admins:
-            raise ValueError("GROUP_OWNER_ID must be one of ADMIN_IDS")
         if self.group_help_enabled and (
             self.group_help_staff_id >= 0
             or self.group_help_bot_id <= 0
@@ -118,3 +116,9 @@ class Settings(BaseSettings):
     @property
     def admins(self) -> frozenset[int]:
         return frozenset(int(x.strip()) for x in self.admin_ids.split(",") if x.strip())
+
+    @property
+    def bootstrap_staff(self) -> frozenset[int]:
+        """Configured administrators plus the independent owner, without changing ADMIN_IDS."""
+        owner = self.group_owner
+        return self.admins | {owner} if owner is not None else self.admins

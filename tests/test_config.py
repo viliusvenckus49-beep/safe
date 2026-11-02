@@ -32,8 +32,8 @@ def test_group_owner_single_admin_fallback_and_multi_admin_fail_closed(settings)
     assert settings.group_owner == 900
 
 
-@pytest.mark.parametrize("owner", [0, -1, 901, "@username"])
-def test_group_owner_must_be_positive_configured_admin(owner):
+@pytest.mark.parametrize("owner", [0, -1, 9223372036854775808, "@username"])
+def test_group_owner_must_be_positive_numeric_database_id(owner):
     with pytest.raises(ValidationError):
         Settings(bot_token="123:TEST_ONLY", admin_ids="900", group_owner_id=owner, _env_file=None)
 
@@ -42,3 +42,12 @@ def test_group_owner_must_be_positive_configured_admin(owner):
 def test_admin_config_ids_are_ascii_and_fit_database(admin_ids):
     with pytest.raises(ValidationError):
         Settings(bot_token="123:TEST_ONLY", admin_ids=admin_ids, _env_file=None)
+
+
+def test_explicit_owner_is_independent_of_unchanged_administrator_ids():
+    cfg = Settings(
+        bot_token="123:TEST_ONLY", admin_ids="900,901", group_owner_id=902, _env_file=None
+    )
+    assert cfg.admin_ids == "900,901" and cfg.admins == frozenset({900, 901})
+    assert cfg.group_owner == 902
+    assert cfg.bootstrap_staff == frozenset({900, 901, 902})

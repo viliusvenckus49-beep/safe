@@ -51,7 +51,7 @@ class AdminService:
     async def admins(self, actor: int, page: int = 0) -> tuple[list[tuple[int, User | None]], int]:
         self.require_owner(actor)
         rows = {row.telegram_id: row.active for row in await self.repo.administrator_rows()}
-        candidates = self.settings.admins | frozenset(rows)
+        candidates = self.settings.bootstrap_staff | frozenset(rows)
         ids = sorted(
             i for i in candidates if self.is_owner(i) or rows.get(i, i in self.settings.admins)
         )

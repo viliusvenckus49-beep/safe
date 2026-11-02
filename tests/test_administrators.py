@@ -280,3 +280,34 @@ async def test_administrator_pagination_and_constraints(database, settings):
         with pytest.raises(IntegrityError):
             await session.commit()
         await session.rollback()
+
+
+async def test_owner_replacement_keeps_admin_ids_and_historical_identity(database, settings):
+    settings.admin_ids = "900,901"
+    settings.group_owner_id = 900
+    async with database() as session:
+        core = Service(settings, session)
+        old = await core.observe(900, "old_owner", "Original")
+        original_id = old.id
+        settings.group_owner_id = 902
+        access = AdminService(settings, session)
+        assert not access.is_owner(900) and access.is_owner(902)
+        assert await access.is_admin(902) and await access.is_admin(900)
+        assert settings.admin_ids == "900,901"
+        with pytest.raises(DomainError, match="forbidden"):
+            await access.change(900, "42", True, "e" * 32)
+        await access.change(902, "42", True, "f" * 32)
+        rows, total = await access.admins(902)
+        assert {row[0] for row in rows} == {42, 900, 901, 902}
+        assert total == 4
+        assert (await core.repo.user_by_telegram(900)).id == original_id
+        assert (await core.repo.user_by_telegram(900)).username == "old_owner"
+
+
+async def test_independent_owner_cannot_be_revoked_as_an_administrator(database, settings):
+    settings.group_owner_id = 902
+    async with database() as session:
+        access = AdminService(settings, session)
+        with pytest.raises(DomainError, match="admin_owner_immutable"):
+            await access.change(902, "902", False, "a" * 32)
+        assert await access.is_admin(902)
