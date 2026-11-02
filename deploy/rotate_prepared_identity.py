@@ -143,6 +143,8 @@ def activate(
     release, paths, data, expected, identity_check=verify_identity, retention_check=verify_retention
 ):
     originals(paths, data)
+    release.ops.private_directory(release.state)
+    release.ops.private_directory(release.backup_dir)
     release.idle()
     release.writers()
     release.preserve_services()

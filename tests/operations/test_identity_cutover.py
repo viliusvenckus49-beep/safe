@@ -78,8 +78,12 @@ def test_cutover_success_or_failure_keeps_data_and_config_modes(rig, tmp_path, f
         old={"Id": "original", "Config": {"Image": "old"}},
         original=original,
         candidate=SimpleNamespace(dc=dc, readiness=lambda: step("readiness")),
-        ops=SimpleNamespace(private_write=lambda *a: step("record")),
+        ops=SimpleNamespace(
+            private_write=lambda *a: step("record"),
+            private_directory=lambda p: step("private-directory"),
+        ),
         state=tmp_path,
+        backup_dir=tmp_path / "backups",
         sha="a" * 40,
         image="new",
         idle=lambda: step("idle"),
