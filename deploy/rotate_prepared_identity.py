@@ -229,6 +229,33 @@ def main():
     )
     if "0025" not in release.sql("SELECT version_num FROM alembic_version"):
         raise RuntimeError("Identity cutover must not migrate schema")
+    # The installed relay scope still references this withdrawn group. It is
+    # independently confirmed unavailable to the new bot and disabled in DB.
+    stale = -1003802477695
+    helper = imported(args.root / "deploy/prepare_identity_change.py", "identity_scope_reader")
+    next_settings = data["settings.next"].decode()
+    value = helper.scalar(next_settings, "GROUP_HELP_SCOPE_IDS", optional=True)
+    if value:
+        scope = {int(x.strip()) for x in value.split(",") if x.strip()}
+        if stale in scope:
+            state = release.sql("SELECT enabled FROM managed_groups WHERE chat_id=" + str(stale))
+            if "f" not in state:
+                raise RuntimeError("Stale relay group state changed; review scope")
+            scope.remove(stale)
+            if not scope:
+                raise RuntimeError("Relay scope must remain nonempty")
+            replacement = ",".join(str(x) for x in sorted(scope))
+            expression = r"^([ \t]*(?:export[ \t]+)?GROUP_HELP_SCOPE_IDS[ \t]*=)[^\r\n]*"
+            next_settings, count = re.subn(
+                expression, lambda m: m[1] + replacement, next_settings, flags=re.M
+            )
+            if count != 1:
+                raise RuntimeError("Ambiguous relay scope setting")
+            data["settings.next"] = next_settings.encode()
+            print(
+                "RelayScopeReconciled=REMOVED_DISABLED_GROUP; Remaining=" + str(len(scope)),
+                flush=True,
+            )
     activate(release, paths, data, expected)
 
 
