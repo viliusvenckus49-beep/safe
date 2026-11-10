@@ -51,3 +51,12 @@ def test_explicit_owner_is_independent_of_unchanged_administrator_ids():
     assert cfg.admin_ids == "900,901" and cfg.admins == frozenset({900, 901})
     assert cfg.group_owner == 902
     assert cfg.bootstrap_staff == frozenset({900, 901, 902})
+
+
+@pytest.mark.parametrize(
+    "staff,identity", [(False, False), (False, True), (True, False), (True, True)]
+)
+def test_username_discovery_can_be_enabled_without_staff_sending(settings, staff, identity):
+    settings.group_help_enabled = staff
+    settings.moderation_mtproto_enabled = identity
+    assert settings.username_lookup_enabled is (staff or identity)

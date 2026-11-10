@@ -92,3 +92,16 @@ showing file contents. File checks now happen before username/owner/token prompt
 `sudo python3 deploy/prepare_identity_change.py --check-files-only` validates only
 file metadata and the nonsecret selector file. It does not read credential-file
 contents, ask for a token, query Telegram, touch PostgreSQL or create staging files.
+
+## Keep identity lookup without staff commands
+
+Use `GROUP_HELP_ENABLED=false` with `MODERATION_MTPROTO_ENABLED=true` to retain
+the authenticated account only for username-to-user-ID lookup. The existing
+username-only client rejects message-send requests before they reach Telegram.
+This mode supports public `/ask`, profile and target lookup as well as native
+group moderation. Existing unknown identity rows are completed in place so REP,
+TRUSTED and SCAM history stays attached to the same stable identity.
+
+Changing either flag requires recreating only the main bot through the existing
+Compose deployment. Keep session files, the bot token, owner/admin IDs and data
+services unchanged. Do not enable staff transport to repair an identity lookup.

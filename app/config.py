@@ -104,6 +104,11 @@ class Settings(BaseSettings):
         return value
 
     @property
+    def username_lookup_enabled(self) -> bool:
+        """Identity discovery does not require permission to send staff commands."""
+        return self.group_help_enabled or self.moderation_mtproto_enabled
+
+    @property
     def group_help_scope(self) -> frozenset[int]:
         return frozenset(int(x.strip()) for x in self.group_help_scope_ids.split(",") if x.strip())
 

@@ -9,7 +9,7 @@ from app.bot.callbacks import Action
 from app.errors import DomainError
 from app.group_services import GroupService
 from app.models import BanAction, User
-from app.mtproto_relay import GroupHelpRelay, set_relay
+from app.mtproto_relay import GroupHelpRelay, _UsernameOnlyClient, set_relay
 from app.services import Service
 
 journey = telegram_journey
@@ -22,17 +22,27 @@ def clear_lookup_relay():
     set_relay(None)
 
 
-def connect(database, client=None):
+def connect(database, client=None, *, lookup_only=False):
     settings = relay_settings()
     client = client or Client()
-    relay = GroupHelpRelay(settings, database, client, SimpleNamespace(id=555))
+    if lookup_only:
+        settings = settings.model_copy(
+            update={"group_help_enabled": False, "moderation_mtproto_enabled": True}
+        )
+    relay = GroupHelpRelay(
+        settings,
+        database,
+        _UsernameOnlyClient(client) if lookup_only else client,
+        None if lookup_only else SimpleNamespace(id=555),
+    )
     set_relay(relay)
     return settings, client, relay
 
 
 @pytest.mark.asyncio
-async def test_public_lookup_discovers_unseen_user_without_registering_scam(database):
-    settings, client, _ = connect(database)
+@pytest.mark.parametrize("lookup_only", [False, True])
+async def test_public_lookup_discovers_unseen_user_without_registering_scam(database, lookup_only):
+    settings, client, _ = connect(database, lookup_only=lookup_only)
     async with database() as session:
         profile = await Service(settings, session).profile("@ScAmMeR")
         assert profile["user"].telegram_id == 22
@@ -44,9 +54,14 @@ async def test_public_lookup_discovers_unseen_user_without_registering_scam(data
 
 
 @pytest.mark.asyncio
-async def test_first_id_resolution_preserves_unknown_row_reputation_and_trusted(database):
-    settings, _, _ = connect(database)
-    legacy = settings.model_copy(update={"group_help_enabled": False})
+@pytest.mark.parametrize("lookup_only", [False, True])
+async def test_first_id_resolution_preserves_unknown_row_reputation_and_trusted(
+    database, lookup_only
+):
+    settings, _, _ = connect(database, lookup_only=lookup_only)
+    legacy = settings.model_copy(
+        update={"group_help_enabled": False, "moderation_mtproto_enabled": False}
+    )
     async with database() as session:
         core = Service(legacy, session)
         unknown = await core.resolve("@scammer")
@@ -60,9 +75,12 @@ async def test_first_id_resolution_preserves_unknown_row_reputation_and_trusted(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lookup_only", [False, True])
 @pytest.mark.parametrize("operation", ["rep", "report", "trusted", "adjust", "top", "scam"])
-async def test_every_public_target_flow_uses_verified_automatic_identity(database, operation):
-    settings, client, _ = connect(database)
+async def test_every_public_target_flow_uses_verified_automatic_identity(
+    database, operation, lookup_only
+):
+    settings, client, _ = connect(database, lookup_only=lookup_only)
     async with database() as session:
         core = Service(settings, session)
         if operation == "rep":
@@ -88,19 +106,24 @@ async def test_every_public_target_flow_uses_verified_automatic_identity(databas
 
 
 @pytest.mark.asyncio
-async def test_unknown_pinned_callback_completes_same_identity(database):
-    settings, _, _ = connect(database)
+@pytest.mark.parametrize("lookup_only", [False, True])
+async def test_unknown_pinned_callback_completes_same_identity(database, lookup_only):
+    settings, _, _ = connect(database, lookup_only=lookup_only)
     async with database() as session:
         old = await Service(
-            settings.model_copy(update={"group_help_enabled": False}), session
+            settings.model_copy(
+                update={"group_help_enabled": False, "moderation_mtproto_enabled": False}
+            ),
+            session,
         ).resolve("@scammer")
         result = await Service(settings, session).resolve(f"u:{old.id}")
         assert result.id == old.id and result.telegram_id == 22
 
 
 @pytest.mark.asyncio
-async def test_current_username_lookup_does_not_move_existing_numeric_scam(database):
-    settings, _, _ = connect(database)
+@pytest.mark.parametrize("lookup_only", [False, True])
+async def test_current_username_lookup_does_not_move_existing_numeric_scam(database, lookup_only):
+    settings, _, _ = connect(database, lookup_only=lookup_only)
     async with database() as session:
         core = Service(settings, session)
         old = await core.observe(23, "scammer", "Previous owner")
@@ -194,13 +217,17 @@ async def test_verified_username_resolution_keeps_self_abuse_guards(database, op
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("lookup_only", [False, True])
 @pytest.mark.parametrize("command", ["ask", "rep", "profile", "report"])
-async def test_commands_discover_new_public_target_id(journey, database, settings, command):
+async def test_commands_discover_new_public_target_id(
+    journey, database, settings, command, lookup_only
+):
     enabled = relay_settings()
-    settings.group_help_enabled = True
+    settings.group_help_enabled = not lookup_only
+    settings.moderation_mtproto_enabled = lookup_only
     settings.group_help_bot_id = enabled.group_help_bot_id
     settings.group_help_scope_ids = enabled.group_help_scope_ids
-    _, client, _ = connect(database)
+    _, client, _ = connect(database, lookup_only=lookup_only)
     await journey.send(f"/{command} @scammer")
     if command != "report":
         assert "<code>22</code>" in journey.text()

@@ -76,7 +76,7 @@ class Service:
         username = username.lower().lstrip("@") if username else None
         await self.repo.lock_identity_metadata()
         user = await self.repo.user_by_telegram(tg_id)
-        if user is None and username and self.settings.group_help_enabled:
+        if user is None and username and self.settings.username_lookup_enabled:
             # Complete the existing unknown row instead of orphaning its REP,
             # TRUSTED or report history when its verified numeric ID is first seen.
             user = await self.session.scalar(
@@ -110,7 +110,7 @@ class Service:
         record = await self.repo.active_scam(user.id)
         pending_record_id = None
         if (
-            self.settings.group_help_enabled
+            self.settings.username_lookup_enabled
             and self.settings.group_owner is not None
             and (username and record is None)
         ):
@@ -165,10 +165,10 @@ class Service:
     ) -> User | None:
         from app.mtproto_relay import active_relay
 
-        relay = active_relay() if self.settings.group_help_enabled else None
+        relay = active_relay() if self.settings.username_lookup_enabled else None
         if relay is None:
             self.identity_lookup = IdentityLookup(
-                code="disconnected" if self.settings.group_help_enabled else "disabled"
+                code="disconnected" if self.settings.username_lookup_enabled else "disabled"
             )
             return None
         try:
@@ -249,7 +249,7 @@ class Service:
                     return await self.resolve(identifier, _retried=True)
         await self.session.commit()
         if (
-            self.settings.group_help_enabled
+            self.settings.username_lookup_enabled
             and identifier.startswith("u:")
             and user.telegram_id is None
             and user.username
