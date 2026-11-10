@@ -1,0 +1,76 @@
+name: SAFECheck lookup repair release
+on:
+  pull_request:
+    types: [opened, reopened]
+    branches: [ops/identity-file-metadata-20261102]
+    paths: ['.github/workflows/lookup-repair-release.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: safecheck-vps
+  cancel-in-progress: false
+jobs:
+  release:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'ops/id-lookup-repair-20261110' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: 5c0fe59a4788ae78ec28c26d03464c66951adacc
+      VALIDATED_RUN_ID: '42867674365'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 5c0fe59a4788ae78ec28c26d03464c66951adacc
+          path: candidate
+          persist-credentials: false
+      - name: Verify completed full CI for the exact application source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN_ID" > "$RUNNER_TEMP/lookup-ci.json"
+          python3 candidate/deploy/verified_ci.py "$RUNNER_TEMP/lookup-ci.json" "$GITHUB_REPOSITORY" fix/identity-lookup-without-staff-20261110 "$SOURCE_SHA"
+      - name: Prepare existing pinned VPS access
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          test -n "$DEPLOY_KEY" && test -n "$HOST" && test -n "$REMOTE_USER"
+          install -d -m 700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/safecheck_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/safecheck_deploy" > /dev/null
+          printf '%s ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHcTVs4rkhSsS2iJypGBA5QFEaFYW/7YuHKRreksNaSb\n' "$HOST" > "$HOME/.ssh/known_hosts"
+          git -C candidate archive --format=tar.gz HEAD > "$RUNNER_TEMP/lookup-source.tar.gz"
+      - name: Deploy the verified application with the existing backup-first release
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -eu
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "mkdir -p \"\$HOME/safecheck-releases/$SOURCE_SHA\""
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/lookup-source.tar.gz" "$REMOTE_USER@$HOST:safecheck-releases/$SOURCE_SHA/source.tar.gz"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "bash -se -- $SOURCE_SHA" <<'REMOTE'
+          set -eu
+          release="$HOME/safecheck-releases/$1"
+          tar -xzf "$release/source.tar.gz" -C "$release"
+          sudo -n python3 "$release/deploy/production_release.py" "$1" </dev/null
+          sudo -n docker inspect safecheck-bot-1 safecheck-postgres-1 safecheck-redis-1 --format 'LookupReleasedService={{.Name}} Image={{.Config.Image}} Health={{if .State.Health}}{{.State.Health.Status}}{{end}}'
+          REMOTE
+      - name: Verify the public ID lookup and blocked account sends on the VPS
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/verify_lookup_only.py
+      - name: Remove runner SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/safecheck_deploy"
