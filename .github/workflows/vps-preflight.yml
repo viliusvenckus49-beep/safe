@@ -61,7 +61,7 @@ jobs:
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/disable_staff_transport.py
-      - name: Verify completed full CI for immutable application source
+      - name: Verify public ID lookup without staff messages
         if: ${{ inputs.operation == 'verify-lookup' }}
         env:
           HOST: ${{ secrets.VPS_HOST }}
