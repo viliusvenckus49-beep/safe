@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 PROBE = r"""
@@ -87,6 +88,15 @@ def main():
             ),
             flush=True,
         )
+    environment = dict(item.split("=", 1) for item in rows[0]["Config"]["Env"] if "=" in item)
+    flags = {
+        key: environment.get(key, "")
+        for key in ("GROUP_HELP_ENABLED", "MODERATION_MTPROTO_ENABLED")
+    }
+    print("LookupRuntimeFlags=" + json.dumps(flags, sort_keys=True), flush=True)
+    assert flags == {"GROUP_HELP_ENABLED": "false", "MODERATION_MTPROTO_ENABLED": "true"}
+    if sys.argv[1:] == ["--config-only"]:
+        return
     assert rows[0]["Config"]["Image"] == "safecheck:2.15.4-5c0fe59a4788"
     root = Path(rows[0]["Config"]["Labels"]["com.docker.compose.project.working_dir"])
     command = docker + [
