@@ -30,7 +30,8 @@ async def main():
     assert AdminService(cfg,session).is_owner(cfg.group_owner)
     management=UnifiedAds(cfg,session)
     groups=await management.eligible(cfg.group_owner)
-    non_owner_actors=set(cfg.admins)|set(await session.scalars(select(Administrator.telegram_id).where(Administrator.active.is_(True))))
+    group_ids=[g.chat_id for g in groups]
+    non_owner_actors=set(cfg.admins)|set(await session.scalars(select(Administrator.telegram_id).where(Administrator.active.is_(True))))|set(await session.scalars(select(AdSchedule.authorized_by).distinct()))
     audience=[tuple(r) for r in (await session.execute(select(AdSchedule.id,AdSchedule.campaign_id,AdSchedule.chat_id,AdSchedule.excluded).order_by(AdSchedule.id))).all()]
     candidate=await session.scalar(select(AdSchedule.campaign_id).where(AdSchedule.authorized_by==cfg.group_owner,AdSchedule.excluded.is_(False)).order_by(AdSchedule.id.desc()).limit(1))
     await session.commit()
@@ -49,11 +50,11 @@ async def main():
     await session.rollback()
     denied=False
     for actor in sorted(non_owner_actors-{cfg.group_owner}):
-     for group in groups:
-      try:member=await bot.get_chat_member(group.chat_id,actor)
+     for chat_id in group_ids:
+      try:member=await bot.get_chat_member(chat_id,actor)
       except Exception:continue
       if member.status in ('creator','administrator'):continue
-      try:await publication_rights(bot,group.chat_id,actor,owner_id=cfg.group_owner)
+      try:await publication_rights(bot,chat_id,actor,owner_id=cfg.group_owner)
       except DomainError as error:
        assert error.code=='ap_rights';denied=True;break
       else:raise RuntimeError('A non-owner bypassed group rights')
