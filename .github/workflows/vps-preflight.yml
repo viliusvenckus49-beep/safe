@@ -7,7 +7,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release, ads-verify, ads-content]
+        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release, ads-verify, ads-content, release-preflight]
         default: inspect
       source_sha:
         default: ''
@@ -118,6 +118,16 @@ jobs:
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/auto_ads_content_audit.py
+      - name: Read release guards without changing production state
+        if: ${{ inputs.operation == 'release-preflight' }}
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -eu
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" "sudo -n python3 - $SOURCE_SHA" < deploy/release_preflight_report.py
       - name: Release the verified AUTO ADS owner authorization fix
         if: ${{ inputs.operation == 'ads-release' }}
         env:
