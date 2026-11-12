@@ -208,7 +208,7 @@ class UnifiedAds:
         for chat in targets:
             await self.pub.group(chat)
             await self.session.commit()
-            await publication_rights(bot, chat, actor)
+            await publication_rights(bot, chat, actor, owner_id=self.settings.group_owner)
         return targets
 
     async def groups(self, actor, cid, expected, chats, bot, *, all_groups=False):

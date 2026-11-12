@@ -265,7 +265,7 @@ class GlobalAdsService:
         await PublicationService(self.settings, self.session).group(chat)
         cid = op.campaign_id
         await self.session.commit()
-        await publication_rights(bot, chat, actor)
+        await publication_rights(bot, chat, actor, owner_id=self.settings.group_owner)
         async with ads_transaction(self.session, cid, policy=True):
             op = await self.operation(actor, oid)
             policy = await self.policy(actor, cid)
@@ -403,7 +403,11 @@ class GlobalAdsService:
             async with semaphore:
                 try:
                     await publication_rights(
-                        bot, chat, actor, require_bot=action not in {"PAUSE", "STOP", "REMOVE"}
+                        bot,
+                        chat,
+                        actor,
+                        require_bot=action not in {"PAUSE", "STOP", "REMOVE"},
+                        owner_id=self.settings.group_owner,
                     )
                     return (*target, None)
                 except Exception as error:
@@ -633,7 +637,9 @@ class GlobalAdsService:
                 bot,
             )
             return
-        await publication_rights(bot, chat, actor, require_bot=action != "REMOVE")
+        await publication_rights(
+            bot, chat, actor, require_bot=action != "REMOVE", owner_id=self.settings.group_owner
+        )
         if action == "ASSIGN":
             # Assignment creation is an atomic membership + item-result transaction.
             async with ads_transaction(self.session, cid, policy=True):

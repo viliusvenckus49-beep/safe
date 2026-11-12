@@ -80,6 +80,38 @@ async def test_creation_name_to_persisted_editor_and_draft(journey, database, se
     assert t("ua.saved_draft") in last_screen(journey).text
 
 
+async def test_owner_all_groups_uses_bot_rights_without_personal_group_admin(
+    journey, database, settings, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from test_auto_ads_unified import groups
+
+    from app.ads_unified import UnifiedAds
+
+    cid = await create(database, settings)
+    await groups(database)
+    reads = []
+
+    async def member(chat_id, user_id):
+        reads.append((chat_id, user_id))
+        return SimpleNamespace(
+            user=SimpleNamespace(id=user_id),
+            status="administrator" if user_id == journey.bot.id else "member",
+        )
+
+    monkeypatch.setattr(journey.bot, "get_chat_member", member)
+    await journey.click(cb("all_groups", cid), actor=900)
+    data = await journey.data(900)
+    assert set(data["ua_selected"]) == {-100, -200}
+    await journey.click(cb("apply_groups", cid, data["ua_group_version"], "all"), actor=900)
+    async with database() as session:
+        rows = await UnifiedAds(settings, session).schedules(cid)
+        assert {row.chat_id for row in rows} == {-100, -200}
+        assert all(row.status == "DRAFT" for row in rows)
+    assert reads and all(identity == journey.bot.id for _, identity in reads)
+
+
 async def test_search_pagination_filters_use_real_data(journey, database, settings):
     for index in range(6):
         await create(database, settings, f"AD {index}", f"create-{index}")

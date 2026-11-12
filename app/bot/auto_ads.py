@@ -838,7 +838,12 @@ def register_auto_ads_handlers(router: Router):
                 selected = []
                 for group in groups:
                     try:
-                        await publication_rights(message.bot, group.chat_id, actor)
+                        await publication_rights(
+                            message.bot,
+                            group.chat_id,
+                            actor,
+                            owner_id=management.settings.group_owner,
+                        )
                         selected.append(group.chat_id)
                     except TelegramForbiddenError:
                         continue

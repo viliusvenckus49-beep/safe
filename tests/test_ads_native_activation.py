@@ -165,6 +165,8 @@ async def test_native_activation_retains_validity_and_rights_checks(
     database, settings, clock, monkeypatch, failure
 ):
     monkeypatch.setattr(unified_module, "now", lambda: clock[0])
+    if failure == "admin_rights":
+        settings.group_owner_id = 999
     cid, _, _ = await native_save(database, settings)
     await groups(database)
     bot = Bot()

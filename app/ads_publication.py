@@ -39,10 +39,27 @@ MAX_TRIES = 4
 
 
 async def publication_rights(
-    bot: Any, chat_id: int, actor: int | None = None, *, require_bot: bool = True
+    bot: Any,
+    chat_id: int,
+    actor: int | None = None,
+    *,
+    require_bot: bool = True,
+    owner_id: int | None = None,
 ) -> None:
+    """Check Telegram roles after callers enforce the app ACL and approved audience.
+
+    Only the configured bot owner may publish without personal group membership.
+    Pass owner_id only from server settings; the bot's own role is still checked.
+    Group approval/revocation remains fenced by the existing SQL transitions.
+    """
     numeric_id(chat_id, chat=True)
-    identities = ([actor] if actor is not None else []) + ([bot.id] if require_bot else [])
+    if actor is not None:
+        numeric_id(actor)
+    if owner_id is not None:
+        numeric_id(owner_id)
+    identities = ([actor] if actor is not None and actor != owner_id else []) + (
+        [bot.id] if require_bot else []
+    )
     for identity in identities:
         member = await asyncio.wait_for(bot.get_chat_member(chat_id, identity), 5)
         if getattr(getattr(member, "user", None), "id", None) != identity or member.status not in {
@@ -312,7 +329,9 @@ class PublicationService:
             await self.group(chat)
         await self.session.commit()
         if chat is not None:
-            await publication_rights(bot, chat, actor)
+            await publication_rights(
+                bot, chat, actor, owner_id=self.ads.access.settings.group_owner
+            )
         payload = hashlib.sha256(json.dumps([field, value], default=str).encode()).hexdigest()
         async with self.write(actor, cid):
             await self.ads.get(actor, cid)
@@ -391,7 +410,7 @@ class PublicationService:
         chat = row.chat_id
         assert chat is not None
         await self.session.commit()
-        await publication_rights(bot, chat, actor)
+        await publication_rights(bot, chat, actor, owner_id=self.ads.access.settings.group_owner)
         async with self.write(actor, cid):
             row, content = await self.validate(actor, cid)
             if row.chat_id != chat or content.revision != revision:
@@ -437,7 +456,9 @@ class PublicationService:
         chat = previous.chat_id if previous else None
         await self.session.commit()
         if chat is not None:
-            await publication_rights(bot, chat, actor, require_bot=False)
+            await publication_rights(
+                bot, chat, actor, require_bot=False, owner_id=self.ads.access.settings.group_owner
+            )
         async with self.write(actor, cid):
             row = await self.one(actor, cid)
             if row is None:

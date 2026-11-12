@@ -372,7 +372,7 @@ async def test_content_edit_keeps_schedule_and_pinned_attempt_version(database, 
 
 @pytest.mark.parametrize("lost", ["global", "actor", "bot", "group", "expiry", "archived"])
 async def test_authority_and_expiration_are_checked_after_claim(database, settings, clock, lost):
-    if lost == "global":
+    if lost in {"global", "actor"}:
         settings.admin_ids = "900,999"
         settings.group_owner_id = 999
     cid, sid, bot, _, _ = await configured(database, settings, clock)
@@ -575,6 +575,7 @@ async def test_disabled_group_is_detached_after_restart_without_error_spam(
 
 
 async def test_global_admin_cannot_bypass_actual_group_rights(database, settings, clock):
+    settings.group_owner_id = 999
     cid, sid, bot, _, _ = await configured(database, settings, clock)
     bot.roles[900] = "member"
     async with database() as session:
