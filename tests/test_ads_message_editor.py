@@ -504,3 +504,82 @@ async def test_postgres_received_save_serializes_duplicate_and_competing_admins(
     assert await apply(901, second_id) == "ads_conflict"
     async with sessions() as session:
         assert (await session.get(AdCampaign, cid)).version == 3
+
+
+@pytest.mark.parametrize("customer", [False, True])
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+async def test_long_premium_text_saves_once_without_changing_other_fields_or_schedule(
+    journey, database, settings, customer, lang
+):
+    from aiogram.types import MessageEntity
+    from test_ads_content import rich_emoji_text
+
+    from app.models import AdSchedule, ManagedGroup, now
+
+    cid, actor = await setup_editor(journey, database, settings, customer=customer)
+    instant = now()
+    async with database() as session:
+        await Service(settings, session).set_language(actor, lang)
+        before = deepcopy((await AdsService(settings, session).current(900, cid))[1].content)
+        session.add(ManagedGroup(chat_id=-100, title="Test"))
+        await session.flush()
+        schedule = AdSchedule(
+            campaign_id=cid,
+            chat_id=-100,
+            status="ACTIVE",
+            authorized_by=900,
+            interval_seconds=1800,
+            start_at=instant,
+            next_run_at=instant + timedelta(minutes=30),
+        )
+        session.add(schedule)
+        await session.commit()
+        sid = schedule.id
+    await click(journey, "qe", cid, "TEXT.2", actor=actor, customer=customer)
+    text, entities = rich_emoji_text(3000)
+    await journey.send(
+        text, actor=actor, entities=[MessageEntity.model_validate(e) for e in entities]
+    )
+    assert t("ads.message_set", lang) in journey.text()
+    assert (await data(journey, actor))["q_kind"] == "SET"
+    async with database() as session:
+        campaign, version = await AdsService(settings, session).current(900, cid)
+        assert campaign.version == 3 and version.actor_id == actor
+        assert version.content == {**before, "text": text, "entities": entities}
+        schedule = await session.get(AdSchedule, sid)
+        assert schedule.status == "ACTIVE" and schedule.next_run_at.replace(
+            tzinfo=instant.tzinfo
+        ) == instant + timedelta(minutes=30)
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(AdContentVersion)
+                .where(AdContentVersion.campaign_id == cid)
+            )
+            == 3
+        )
+    # The only outbound text is the receipt, never the ad itself or a group send.
+    assert not any(
+        isinstance(call, SendMessage) and (call.text == text or call.chat_id == -100)
+        for call in journey.transport.calls
+    )
+
+
+@pytest.mark.parametrize("customer", [False, True])
+async def test_media_caption_error_reports_actual_count_and_preserves_saved_version(
+    journey, database, settings, customer
+):
+    cid, actor = await setup_editor(journey, database, settings, customer=customer)
+    async with database() as session:
+        ads = AdsService(settings, session)
+        draft = await ads.stage(
+            900, cid, 2, "MEDIA", [{"kind": "photo", "file_id": "existing"}], "existing-media"
+        )
+        await ads.save_received(900, draft.id)
+        before = deepcopy((await ads.current(900, cid))[1].content)
+    await click(journey, "qe", cid, "TEXT.3", actor=actor, customer=customer)
+    await journey.send("😀" * 1025, actor=actor)
+    assert t("ads.caption_length", count=1025, limit=1024) in journey.text()
+    async with database() as session:
+        campaign, version = await AdsService(settings, session).current(900, cid)
+        assert campaign.version == 3 and version.content == before
