@@ -7,7 +7,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights]
+        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release]
         default: inspect
       source_sha:
         default: ''
@@ -24,9 +24,35 @@ concurrency:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Wait for completed exact-source AUTO ADS quality checks
+        if: ${{ inputs.operation == 'ads-release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RUN_ID: ${{ inputs.validated_run_id }}
+        run: |
+          set -eu
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]]
+          for attempt in $(seq 1 180); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > "$RUNNER_TEMP/ads-ci.json"
+            status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/ads-ci.json")
+            if [ "$status" = completed ]; then
+              python3 deploy/verified_ci.py "$RUNNER_TEMP/ads-ci.json" "$GITHUB_REPOSITORY" fix/auto-ads-owner-rights-20261112 "$SOURCE_SHA"
+              break
+            fi
+            test "$attempt" -lt 180
+            sleep 10
+          done
+      - uses: actions/checkout@v4
+        if: ${{ inputs.operation == 'ads-release' }}
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: candidate
+          persist-credentials: false
       - name: Prepare pinned SSH access
         env:
           DEPLOY_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -82,6 +108,32 @@ jobs:
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/auto_ads_rights_audit.py
+      - name: Release the verified AUTO ADS owner authorization fix
+        if: ${{ inputs.operation == 'ads-release' }}
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -eu
+          git -C candidate archive --format=tar.gz HEAD > "$RUNNER_TEMP/ads-owner-source.tar.gz"
+          SSH_OPTIONS=(-i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20)
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "mkdir -p \"\$HOME/safecheck-releases/$SOURCE_SHA\""
+          scp "${SSH_OPTIONS[@]}" "$RUNNER_TEMP/ads-owner-source.tar.gz" "$REMOTE_USER@$HOST:safecheck-releases/$SOURCE_SHA/source.tar.gz"
+          ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$HOST" "bash -se -- $SOURCE_SHA" <<'REMOTE'
+          set -eu
+          release="$HOME/safecheck-releases/$1"
+          tar -xzf "$release/source.tar.gz" -C "$release"
+          sudo -n python3 "$release/deploy/production_release.py" "$1" </dev/null
+          REMOTE
+      - name: Verify owner access with real bot rights and unchanged audiences
+        if: ${{ inputs.operation == 'ads-release' }}
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" "sudo -n python3 - $SOURCE_SHA" < deploy/verify_ads_owner.py
       - name: Verify completed full CI for immutable application source
         if: ${{ inputs.operation == 'cutover' }}
         env:
