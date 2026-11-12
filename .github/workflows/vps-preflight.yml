@@ -7,10 +7,12 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release, ads-verify]
+        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release, ads-verify, ads-content]
         default: inspect
       source_sha:
         default: ''
+      source_branch:
+        default: 'fix/auto-ads-owner-rights-20261112'
       validated_run_id:
         default: ''
       stage_id:
@@ -33,6 +35,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           RUN_ID: ${{ inputs.validated_run_id }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
         run: |
           set -eu
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
@@ -41,7 +44,7 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > "$RUNNER_TEMP/ads-ci.json"
             status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/ads-ci.json")
             if [ "$status" = completed ]; then
-              python3 deploy/verified_ci.py "$RUNNER_TEMP/ads-ci.json" "$GITHUB_REPOSITORY" fix/auto-ads-owner-rights-20261112 "$SOURCE_SHA"
+              python3 deploy/verified_ci.py "$RUNNER_TEMP/ads-ci.json" "$GITHUB_REPOSITORY" "$SOURCE_BRANCH" "$SOURCE_SHA"
               break
             fi
             test "$attempt" -lt 180
@@ -108,6 +111,13 @@ jobs:
           REMOTE_USER: ${{ secrets.VPS_USER }}
         run: |
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/auto_ads_rights_audit.py
+      - name: Inspect AUTO ADS content counts without text or tokens
+        if: ${{ inputs.operation == 'ads-content' }}
+        env:
+          HOST: ${{ secrets.VPS_HOST }}
+          REMOTE_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" 'sudo -n python3 -' < deploy/auto_ads_content_audit.py
       - name: Release the verified AUTO ADS owner authorization fix
         if: ${{ inputs.operation == 'ads-release' }}
         env:
