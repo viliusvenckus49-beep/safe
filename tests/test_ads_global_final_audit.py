@@ -413,7 +413,7 @@ async def test_revocation_during_album_keeps_known_ids_without_sending_companion
     database, settings, clock, revocation
 ):
     cid, sid, bot, _, _ = await configured(database, settings, clock, album=True)
-    settings.group_owner_id = 900
+    settings.group_owner_id = 900 if revocation == "managed_group" else 999
 
     async def revoke(kind, args):
         if kind == "album":

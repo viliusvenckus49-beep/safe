@@ -49,9 +49,13 @@ entities, not displayed as tag text.
 * New recipients stay drafts until explicit activation. Clearing a selected
   audience stops and excludes that ad's schedules without deleting their history.
   Activation/resumption chooses a future slot; it never backfills missed sends.
-* Rights reads happen outside SQL locks; current local authority, approvals and
-  optimistic versions are checked again under the mutation lock. Existing
-  conservative actor/bot group-administrator requirements remain unchanged.
+* Rights reads happen outside SQL locks; application access, group approvals and
+  optimistic versions are checked again under the mutation lock. The configured
+  bot owner may manage AUTO ADS in approved groups without personal group
+  membership. Every publication still requires the bot's current administrator
+  rights. Other administrators must also retain their own group administrator
+  role. The owner identity comes only from server settings, never callback data.
+  This exception does not apply to GROUP HELP moderation or customer editing.
 * Pause/delete cannot recall a native Telegram request already in flight. Unknown
   writes remain uncertain and are not blindly retried. The UI does not promise
   exactly-once network delivery after an ambiguous Telegram response.
@@ -59,7 +63,8 @@ entities, not displayed as tag text.
 ## Audience snapshot
 
 **All groups** means the currently approved, enabled, eligible groups whose
-actor/bot rights were verified, shown for explicit confirmation. It does not mean
+bot rights and the applicable owner/administrator authorization were verified,
+shown for explicit confirmation. It does not mean
 future automatic enrolment. Adding another managed group never changes an
 existing ad's audience. `FUTURE` and `FUTURE_ON` can no longer be selected. The
 legacy reconciler hook intentionally does not expand audiences. Cached GLOBAL

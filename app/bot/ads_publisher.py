@@ -136,7 +136,7 @@ class AdsPublisher:
                 schedule = await session.get(AdSchedule, row.schedule_id)
                 chat, actor = row.chat_id, schedule.authorized_by
             try:
-                await publication_rights(self.bot, chat, actor)
+                await publication_rights(self.bot, chat, actor, owner_id=self.settings.group_owner)
             except Exception as error:
                 delay = (
                     error.retry_after
