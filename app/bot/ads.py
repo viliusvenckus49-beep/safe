@@ -21,6 +21,7 @@ from aiogram.types import (
 )
 
 from app.ads_content import (
+    ContentLimitError,
     media_from_message,
     parse_buttons,
     text_from_message,
@@ -66,13 +67,15 @@ def navigation(campaign: int = 0, *, customer: bool = False) -> InlineKeyboardMa
 
 
 def failure(error: Exception) -> str:
+    if isinstance(error, ContentLimitError):
+        return t(error.code.replace("ads_", "ads.", 1), count=error.actual, limit=error.limit)
     if isinstance(error, DomainError):
         if error.code.startswith("ac_"):
             return t("ac." + error.code[3:])
         key = {
             "forbidden": "permission",
             "group_moderation_invalid_id": "stale",
-            "ads_text": "content",
+            "ads_text": "text_missing",
             "ads_media": "media_error",
             "ads_buttons": "buttons_error",
         }.get(error.code, error.code.removeprefix("ads_"))
@@ -84,6 +87,7 @@ def failure(error: Exception) -> str:
                 "stale",
                 "name",
                 "content",
+                "text_missing",
                 "entity",
                 "entity_count",
                 "emoji_count",

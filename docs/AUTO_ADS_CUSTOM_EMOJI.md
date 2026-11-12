@@ -1,55 +1,47 @@
-# AUTO ADS: Custom Emoji text validation
+# AUTO ADS: text length and Custom Emoji validation
 
-The old validator rejected any message with more than 100 total entities. This
-incorrectly combined native custom emoji, user formatting and automatic links or
-mentions. For example, 100 valid custom emoji plus one bold entity failed before
-preview with the misleading generic “Invalid formatting or Custom Emoji metadata”.
-A single emoji could still be imported successfully.
+The validator measures the parsed text in Unicode code points: 4096 for a text
+message and 1024 for a media caption. UTF-16 units remain necessary for Telegram
+entity offsets and lengths, but are not the text-length budget. Mathematical
+Unicode letters and emoji outside the BMP previously consumed two units and
+could incorrectly fail the local validator. HTML tags are parsed before length
+validation; the visible text and native entity metadata are preserved.
 
-The validator now tracks separate budgets: 100 custom emoji and 100 explicit
-formatting entities. Automatic URL/mention/hashtag and similar native entities do
-not consume the formatting budget. All native UTF-16 offsets, IDs, text and entity
-order are preserved, including directly sent and forwarded text/captions. No emoji
-is silently removed or converted into an invented ID or plain-text replacement.
-The existing 4096-unit text and 1024-unit media-caption bounds remain unchanged.
-An explicit 4096-entry validation-work ceiling and a non-quadratic nesting check
-bound processing of untrusted entity arrays. Invalid offsets, surrogate slices,
-URLs, IDs and crossing spans still fail validation.
+Ordinary bot messages have no separate local 100-Custom-Emoji cap. The validator
+retains the 100 explicit formatting-entity limit, excluding Custom Emoji and
+automatic URLs/mentions. All incoming emoji IDs and entity order are preserved.
+An 8192-entry work ceiling permits 4096 custom emoji plus formatting while
+bounding untrusted input. UTF-16 boundaries are computed once, avoiding repeated
+prefix decoding. Invalid offsets, surrogate slices, URLs, IDs and crossing spans
+still fail validation. No emoji or content is silently removed.
 
-Known count errors have distinct LT/EN/RU messages (`ads_emoji_count`,
-`ads_format_count`, `ads_entity_count`), separate from malformed metadata. Exceeding
-a count leaves saved content untouched. Existing ACL/grants, immutable content
-versions and publication timing are unchanged. Legacy drafts retain their preview
-requirement; the subsequent native immediate editor follows the user's explicit
-request to save received input without an extra Preview/Save step. No migration
-is needed beyond the already reviewed AUTO ADS schema 0020.
+Length failures have distinct LT/EN/RU messages with actual/allowed counts for
+text, media captions and albums. A generic invalid-content error no longer
+misdiagnoses every failure as a length violation. A media-caption failure states
+that the saved ad has media; editing text never silently clears that media.
 
-## Verification sources and delivery limits
+Native administrator/client input saves immediately as an immutable content
+version for the next scheduled send. Rejection leaves the saved version intact.
+Content edits do not activate, reschedule or immediately publish an ad. Existing
+ACL/grants, other ads, buttons and media are preserved. No database migration is
+required; schema remains 0025.
 
-Reviewed official references on 2026-10-21:
+## Verification sources (reviewed 2026-11-12)
 
+* [TDLib MessageContent.cpp](https://github.com/tdlib/td/blob/master/td/telegram/MessageContent.cpp):
+  bot message text and captions use `utf8_length` with the respective maximum.
 * [TDLib MessageEntity.cpp](https://github.com/tdlib/td/blob/master/td/telegram/MessageEntity.cpp):
-  `get_input_message_entities` excludes CustomEmoji from its 100 user-entity
-  counter. This is a verification source; its implementation was not copied.
-* [Telegram client configuration](https://core.telegram.org/api/config#message-animated-emoji-max):
-  `message_animated_emoji_max` is the custom-emoji count limit; the published
-  configuration currently shows 100. The conservative application cap follows it.
-* [Bot API formatting](https://core.telegram.org/bots/api#formatting-options) and
-  [Bot API 9.4 changelog](https://core.telegram.org/bots/api-changelog): Telegram
-  separately controls whether a bot may send custom emoji. For direct private,
-  group and supergroup messages an owner Premium subscription can permit this;
-  the Fragment additional-username route is also documented. The editor does not
-  infer BotFather ownership or subscription state from the current administrator.
+  `get_input_message_entities` excludes `CustomEmoji` from its 100 explicit-entity
+  counter. Its separate secret-chat emoji limit is not an ordinary bot-message
+  limit. `message_animated_emoji_max` concerns animation and must not be used to
+  impose an ordinary-message send cap.
+* [Bot API formatting](https://core.telegram.org/bots/api#formatting-options):
+  outgoing Custom Emoji still require Telegram permission for the bot. Correct
+  metadata preservation does not itself establish permission or rendering.
 
-Preserving incoming metadata is not proof of Telegram accepting an outgoing
-message. The existing real preview remains the delivery check. Synthetic emoji
-IDs and Bot API doubles in tests establish validation, routing and request
-preservation only. They do not establish actual emoji rendering or permission.
-
-## Regression evidence
-
-New tests cover 100 emoji plus nested formatting, automatic mentions, forwarded
-text and captions, separate count errors in LT/EN/RU, invalid entity boundaries,
-randomized crossing/nesting equivalence, administrator and authorized-client
-preview/save, and one scheduled publication with unchanged next-run time and no
-duplicate slot. No user advertisement content or real credentials are needed.
+Tests use simulated Telegram transport and synthetic IDs. They cover 4096
+astral characters, 1024-character media captions, HTML parsing, more than 100
+custom emoji, surrogate boundaries, localized precise errors, and administrator
+and client immediate-save journeys without extra publication or schedule changes.
+A real preview is still the way to confirm Telegram rendering for a particular
+bot. No production advertisement text or token is included in this document.

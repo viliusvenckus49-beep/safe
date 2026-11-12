@@ -11,11 +11,10 @@ from app.ads_html import has_html, parse_html
 from app.errors import DomainError
 
 EMPTY = {"text": "", "entities": [], "media": [], "buttons": []}
-# Telegram counts custom emoji separately from user-authored formatting. The
-# custom emoji limit follows the published message_animated_emoji_max value.
-MAX_CUSTOM_EMOJIS = 100
+# Telegram's ordinary-message entity conversion excludes custom emoji from
+# the 100 user-authored formatting limit. Animation limits are not send limits.
 MAX_FORMAT_ENTITIES = 100
-MAX_ENTITY_ENTRIES = 4096  # Bounded validation work, including automatic entities.
+MAX_ENTITY_ENTRIES = 8192  # Allows 4096 custom emoji plus formatting; bounds validation work.
 AUTOMATIC_ENTITIES = {
     "url",
     "mention",
@@ -52,6 +51,21 @@ def units(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+class ContentLimitError(DomainError):
+    def __init__(self, code: str, actual: int, limit: int):
+        self.actual, self.limit = actual, limit
+        super().__init__(code)
+
+
+def check_text_length(text: str, *, caption: bool = False) -> None:
+    # TDLib checks utf8_length (Unicode code points). UTF-16 is only for offsets.
+    limit = 1024 if caption else 4096
+    if len(text) > limit:
+        raise ContentLimitError(
+            "ads_caption_length" if caption else "ads_text_length", len(text), limit
+        )
+
+
 def url(value: str) -> str:
     if not isinstance(value, str) or len(value) > 2048 or re.search(r"[\s\x00-\x1f\x7f]", value):
         raise DomainError("ads_url")
@@ -86,11 +100,19 @@ def emoji_id(value: str) -> str:
 
 
 def entities_for(text: str, values: list[dict]) -> list[dict]:
-    raw = text.encode("utf-16-le")
+    try:
+        total_units = units(text)
+    except UnicodeError as error:
+        raise DomainError("ads_entity") from error
+    boundaries = {0}
+    position = 0
+    for character in text:
+        position += 2 if ord(character) > 0xFFFF else 1
+        boundaries.add(position)
     result = []
     if len(values) > MAX_ENTITY_ENTRIES:
         raise DomainError("ads_entity_count")
-    custom_count = format_count = 0
+    format_count = 0
     for value in values:
         try:
             item = MessageEntity.model_validate(value)
@@ -98,20 +120,17 @@ def entities_for(text: str, values: list[dict]) -> list[dict]:
                 item.type not in ENTITY_TYPES
                 or item.offset < 0
                 or item.length < 1
-                or item.offset + item.length > len(raw) // 2
+                or item.offset + item.length > total_units
+                or item.offset not in boundaries
+                or item.offset + item.length not in boundaries
             ):
                 raise ValueError()
-            raw[: item.offset * 2].decode("utf-16-le")
-            raw[item.offset * 2 : (item.offset + item.length) * 2].decode("utf-16-le")
             if item.type == "text_link":
                 url(item.url or "")
             if item.type == "custom_emoji":
                 emoji_id(item.custom_emoji_id or "")
-                custom_count += 1
             elif item.type not in AUTOMATIC_ENTITIES:
                 format_count += 1
-            if custom_count > MAX_CUSTOM_EMOJIS:
-                raise DomainError("ads_emoji_count")
             if format_count > MAX_FORMAT_ENTITIES:
                 raise DomainError("ads_format_count")
             if item.type == "text_mention" and (not item.user or item.user.id <= 0):
@@ -140,15 +159,17 @@ def entities_for(text: str, values: list[dict]) -> list[dict]:
 
 def text_from_message(message: Message) -> dict:
     text = message.text if message.text is not None else message.caption
-    if text is None or units(text) > 4096:
+    if text is None:
         raise DomainError("ads_text")
     values = message.entities if message.text is not None else message.caption_entities
     if not values or (has_html(text) and all(v.type in AUTOMATIC_ENTITIES for v in values)):
         parsed = parse_html(text)
+        check_text_length(parsed["text"])
         return {
             "text": parsed["text"],
             "entities": entities_for(parsed["text"], parsed["entities"]),
         }
+    check_text_length(text)
     return {
         "text": text,
         "entities": entities_for(
@@ -237,7 +258,10 @@ def validate_content(content: dict) -> dict:
             or not isinstance(buttons, list)
         ):
             raise ValueError()
-        if units(text) > (1024 if media else 4096) or len(media) > 10 or len(buttons) > 10:
+        check_text_length(text, caption=bool(media))
+        if len(media) > 10:
+            raise ContentLimitError("ads_album_length", len(media), 10)
+        if len(buttons) > 10:
             raise ValueError()
         for item in media:
             if (

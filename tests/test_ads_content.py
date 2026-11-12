@@ -234,16 +234,12 @@ def test_native_and_forwarded_emoji_text_or_caption_preserve_all_entities(captio
     assert text_from_message(message) == {"text": text, "entities": entities}
 
 
-@pytest.mark.parametrize(
-    "kind,expected", [("custom_emoji", "ads_emoji_count"), ("bold", "ads_format_count")]
-)
-def test_known_count_limits_are_not_reported_as_malformed_metadata(kind, expected):
-    text, entities = rich_emoji_text(101)
-    if kind == "bold":
-        entities = [{"type": "bold", "offset": index * 2, "length": 2} for index in range(101)]
+def test_format_limit_is_not_reported_as_malformed_metadata():
+    text, _ = rich_emoji_text(101)
+    entities = [{"type": "bold", "offset": index * 2, "length": 2} for index in range(101)]
     with pytest.raises(DomainError) as caught:
         entities_for(text, entities)
-    assert caught.value.code == expected
+    assert caught.value.code == "ads_format_count"
 
 
 def test_automatic_mentions_do_not_consume_format_or_emoji_budget():
@@ -292,5 +288,77 @@ def test_entity_count_diagnostics_are_localized_and_distinct_from_invalid_metada
         value = failure(DomainError(code))
         assert value == t(code.replace("ads_", "ads."))
         assert value != t("ads.entity") and value != t("ads.error")
+    finally:
+        language.reset(token)
+
+
+@pytest.mark.parametrize("caption,limit", [(False, 4096), (True, 1024)])
+def test_message_length_counts_characters_but_entities_use_utf16(caption, limit):
+    from app.ads_content import ContentLimitError
+
+    text = "😀" * limit
+    content = {
+        **deepcopy(EMPTY),
+        "text": text,
+        "entities": [{"type": "bold", "offset": 0, "length": units(text)}],
+    }
+    if caption:
+        content["media"] = [{"kind": "photo", "file_id": "abc"}]
+    assert validate_content(content) == content
+    with pytest.raises(ContentLimitError) as caught:
+        validate_content({**content, "text": text + "😀"})
+    assert caught.value.code == ("ads_caption_length" if caption else "ads_text_length")
+    assert (caught.value.actual, caught.value.limit) == (limit + 1, limit)
+
+
+@pytest.mark.parametrize("count", [101, 1024, 4096])
+def test_custom_emoji_above_100_are_preserved_with_native_offsets(count):
+    text, entities = rich_emoji_text(count)
+    entities.append({"type": "bold", "offset": 0, "length": units(text)})
+    checked = validate_content({**deepcopy(EMPTY), "text": text, "entities": entities})
+    assert checked["text"] == text and checked["entities"] == entities
+
+
+def test_html_length_is_measured_after_parsing_tags():
+    from datetime import UTC, datetime
+
+    from aiogram.types import Chat, Message
+
+    from app.ads_content import text_from_message
+
+    text = "𝑨" * 4096
+    message = Message(
+        message_id=1,
+        date=datetime.now(UTC),
+        chat=Chat(id=900, type="private"),
+        text="<b>" + text + "</b>",
+    )
+    assert text_from_message(message) == {
+        "text": text,
+        "entities": [{"type": "bold", "offset": 0, "length": 8192}],
+    }
+
+
+@pytest.mark.parametrize("lang", ["lt", "en", "ru"])
+@pytest.mark.parametrize(
+    "code,count,limit",
+    [
+        ("ads_text_length", 4097, 4096),
+        ("ads_caption_length", 1025, 1024),
+        ("ads_album_length", 11, 10),
+    ],
+)
+def test_precise_limit_errors_are_localized(lang, code, count, limit):
+    from app.ads_content import ContentLimitError
+    from app.bot.ads import failure
+    from app.i18n import language, t
+
+    token = language.set(lang)
+    try:
+        result = failure(ContentLimitError(code, count, limit))
+        assert result == t(code.replace("ads_", "ads.", 1), count=count, limit=limit)
+        assert str(count) in result and str(limit) in result
+        assert result != t("ads.content") and "UTF-16" not in result
+        assert "{" not in result
     finally:
         language.reset(token)

@@ -362,7 +362,7 @@ async def test_rich_custom_emoji_import_preview_and_save_keep_native_metadata(
 
 
 @pytest.mark.parametrize("lang", ["lt", "en", "ru"])
-async def test_oversized_custom_emoji_list_keeps_saved_content_and_shows_count_error(
+async def test_oversized_format_list_keeps_saved_content_and_shows_count_error(
     journey, database, settings, lang
 ):
     from test_ads_content import rich_emoji_text
@@ -373,9 +373,10 @@ async def test_oversized_custom_emoji_list_keeps_saved_content_and_shows_count_e
     async with database() as session:
         before = (await AdsService(settings, session).current(900, cid))[1].content
     await journey.click(cb("edit", cid, "TEXT"), actor=900)
-    text, entities = rich_emoji_text(101)
+    text, _ = rich_emoji_text(101)
+    entities = [{"type": "bold", "offset": index * 2, "length": 2} for index in range(101)]
     await journey.send(text, actor=900, entities=entities)
-    assert t("ads.emoji_count", lang) in journey.text()
+    assert t("ads.format_count", lang) in journey.text()
     assert t("ads.entity", lang) not in journey.text()
     async with database() as session:
         assert (await AdsService(settings, session).current(900, cid))[1].content == before
