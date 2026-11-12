@@ -7,7 +7,7 @@ on:
     inputs:
       operation:
         type: choice
-        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release]
+        options: [inspect, cutover, verify, lookup-only, verify-lookup, lookup-config, ads-rights, ads-release, ads-verify]
         default: inspect
       source_sha:
         default: ''
@@ -127,12 +127,13 @@ jobs:
           sudo -n python3 "$release/deploy/production_release.py" "$1" </dev/null
           REMOTE
       - name: Verify owner access with real bot rights and unchanged audiences
-        if: ${{ inputs.operation == 'ads-release' }}
+        if: ${{ inputs.operation == 'ads-release' || inputs.operation == 'ads-verify' }}
         env:
           HOST: ${{ secrets.VPS_HOST }}
           REMOTE_USER: ${{ secrets.VPS_USER }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           ssh -i "$HOME/.ssh/safecheck_deploy" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "$REMOTE_USER@$HOST" "sudo -n python3 - $SOURCE_SHA" < deploy/verify_ads_owner.py
       - name: Verify completed full CI for immutable application source
         if: ${{ inputs.operation == 'cutover' }}
